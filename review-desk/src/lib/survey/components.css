@@ -1,0 +1,228 @@
+/* Copied from cairn-themes/survey-theme/core/components.css at commit dea983976f4d7951d3e2a7395938859a978d4bd8. Do not edit. */
+/* Survey components: the alert override and the site- signature details.
+   Every rule sits in a sublayer of utilities. daisyUI's component rules live in that layer
+   too, so a later sublayer beats them, while a Tailwind utility on the element still wins. */
+
+:root {
+  /* Contour brown follows the scheme because it reads the theme's secondary role. */
+  --site-contour: var(--color-secondary);
+  --site-contour-opacity: 0.25;
+  --site-rule-color: color-mix(in oklab, var(--site-contour) 55%, transparent);
+}
+
+@layer utilities {
+  @layer site {
+    /* Alert: daisyUI fills the whole box with the status color; the look is a 4px status rule on
+       a base-200 field, which --alert-color alone cannot give, so the rule is a ::before. */
+    .alert {
+      --alert-border-color: transparent;
+      position: relative;
+      background-color: var(--color-base-200);
+      color: var(--color-base-content);
+      padding-block: var(--spacing-6px);
+      padding-inline: var(--spacing-9px);
+      font-size: var(--text-step-8);
+      line-height: 1.5;
+      gap: var(--spacing-8px);
+    }
+
+    .alert::before {
+      content: "";
+      position: absolute;
+      inset-block: calc(-1 * var(--border));
+      inset-inline-start: calc(-1 * var(--border));
+      width: var(--spacing-4px);
+      background-color: var(--alert-color, var(--color-base-300));
+      border-start-start-radius: var(--radius-box);
+      border-end-start-radius: var(--radius-box);
+    }
+
+    .alert-info {
+      --site-alert-ink: var(--cairn-info-ink);
+    }
+
+    .alert-success {
+      --site-alert-ink: var(--cairn-success-ink);
+    }
+
+    .alert-warning {
+      --site-alert-ink: var(--cairn-warning-ink);
+    }
+
+    .alert-error {
+      --site-alert-ink: var(--cairn-error-ink);
+    }
+
+    .alert strong {
+      font-weight: 600;
+      color: var(--site-alert-ink, inherit);
+    }
+
+    /* Contour rule: a dashed divider under a section or list group; a consumer sets
+       --site-rule-color on the element for a full-strength line. */
+    .site-contour-rule {
+      border-bottom: var(--border) dashed var(--site-rule-color);
+    }
+
+    /* Benchmark triangle: a decorative mark beside a wordmark or a tool page's title. */
+    .site-benchmark {
+      display: inline-block;
+      width: 0;
+      height: 0;
+      border-inline: var(--spacing-5px) solid transparent;
+      border-bottom: var(--spacing-9px) solid var(--site-contour);
+      margin-inline-end: var(--spacing-6px);
+      transform: translateY(calc(-1 * var(--spacing-1px)));
+    }
+
+    /* Contour texture: an inline SVG that fills a header (relative isolate), under its content. */
+    .site-contour-texture {
+      position: absolute;
+      inset: auto 0 0;
+      z-index: -1;
+      width: 100%;
+      height: 100%;
+      /* A wrapped header grows tall; the cap keeps the stretched curves a faint band at its foot. */
+      max-height: calc(3 * var(--spacing-20px));
+      pointer-events: none;
+      fill: none;
+      stroke: var(--site-contour);
+      opacity: var(--site-contour-opacity);
+    }
+
+    /* Margin collar: a footer strip like a quad sheet's margin. Its two fields come from markup,
+       and an empty field still holds its place so the other keeps its side. It is not built on
+       daisyUI's footer because that component is a grid of link columns (grid-auto-flow, gap,
+       place-items, and a grid child rule), so every property the collar needs would be an override. */
+    .site-collar {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      gap: var(--spacing-10px);
+      min-block-size: calc(2 * var(--spacing-9px) + var(--border) + 1lh);
+      padding-block: var(--spacing-9px);
+      padding-inline: var(--spacing-20px);
+      border-top: var(--border) solid var(--color-base-300);
+      background-color: var(--color-base-200);
+      color: var(--color-muted);
+      font-size: var(--text-step-2);
+    }
+
+    /* Borders: daisyUI 5 draws these component borders in base-200 or a base-content mix;
+       Survey's border role is base-300. Focus and error keep the stock border color. */
+    .card-border {
+      border-color: var(--color-base-300);
+    }
+
+    /* Field edge: a control boundary needs 3:1 (WCAG 1.4.11), which base-300 cannot give. */
+    .input:not(:focus, :focus-within, .input-error),
+    .select:not(:focus, :focus-within, .select-error) {
+      --input-color: var(--site-field-border);
+    }
+
+    /* Checkbox and radio: the stock ring is a 20% mix of ink, under 3:1. The :not guards leave
+       every color modifier (checkbox-primary, radio-primary) to daisyUI. Radio sets --input-color,
+       which also colors its dot; a checkbox sets border-color because --input-color fills it. */
+    .checkbox:not([class*="checkbox-"]) {
+      border-color: var(--site-field-border);
+    }
+
+    .radio:not([class*="radio-"]) {
+      --input-color: var(--site-field-border);
+    }
+
+    /* The list divider also runs edge to edge: the stock inset is the box radius. */
+    .list > :not(:last-child).list-row::after,
+    .list > :not(:last-child) .list-row::after {
+      border-color: var(--color-base-300);
+      inset-inline: 0;
+    }
+
+    /* Field: input and select sit on their own ground, which daisyUI has no theme variable for,
+       so the background reads --site-field-bg. The box is 7px by 9px; the line height of 1.2
+       keeps it near 33px, where daisyUI's inherited 1.5 makes it 37.6px. */
+    .input,
+    .select {
+      background-color: var(--site-field-bg);
+      height: auto;
+      line-height: 1.2;
+      padding-block: var(--spacing-7px);
+      padding-inline: var(--spacing-9px);
+    }
+
+    .select {
+      padding-inline-end: 1.75rem;
+    }
+
+    /* Tailwind's preflight mixes the placeholder to 50% of ink, which is under 4.5:1 on a white ground. */
+    .input::placeholder {
+      color: var(--color-muted);
+    }
+
+    /* Link: the browser's default focus ring is replaced to match buttons and the rail. */
+    a:focus-visible {
+      outline: 2px solid var(--color-primary);
+      outline-offset: 2px;
+    }
+
+    /* Button: the focus ring is primary where daisyUI uses the button color or ink, and the
+       line height of 1.2 keeps the padded box near 33px where the inherited 1.5 gives 36.6px. */
+    .btn {
+      line-height: 1.2;
+    }
+
+    .btn:focus-visible {
+      outline-color: var(--color-primary);
+    }
+
+    /* Index rail: an alphabet thumb-index, the theme's one custom component since daisyUI ships
+       none. Each row is a 24px target; a letter with no section is a plain span. */
+    .site-index-rail {
+      /* Content-box so the 24px children fit beside the 1px start border. */
+      box-sizing: content-box;
+      inline-size: var(--spacing-24px);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding-block: var(--spacing-6px);
+      background-color: var(--color-base-200);
+      border-inline-start: var(--border) solid var(--color-base-300);
+      color: var(--color-muted);
+      font-size: var(--text-step-1);
+      line-height: 1;
+    }
+
+    .site-index-rail > * {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      inline-size: 100%;
+      min-block-size: var(--spacing-24px);
+      /* The transparent border keeps the target 24px wide while the current letter paints 17px. */
+      border: var(--spacing-3px) solid transparent;
+      border-inline-width: calc((var(--spacing-24px) - 17px) / 2);
+      border-radius: var(--radius-field);
+      background-clip: padding-box;
+    }
+
+    .site-index-rail a {
+      color: var(--color-base-content);
+      font-weight: 600;
+    }
+
+    .site-index-rail a:hover {
+      color: var(--color-primary);
+    }
+
+    .site-index-rail a:focus-visible {
+      outline: 2px solid var(--color-primary);
+      outline-offset: calc(-1 * var(--spacing-2px));
+    }
+
+    .site-index-rail [aria-current] {
+      background-color: var(--color-primary);
+      color: var(--color-primary-content);
+      font-weight: 700;
+    }
+  }
+}
