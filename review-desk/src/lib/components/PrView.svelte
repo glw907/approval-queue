@@ -183,7 +183,10 @@ a failing check, a blocking verdict, and the diff signs; each also says so in wo
 										{:else if file.status === 'deleted'}
 											<span class="badge badge-xs badge-outline desk-del shrink-0">deleted</span>
 										{/if}
-										<span class="ml-auto shrink-0 text-[0.8rem] tabular-nums">+{file.adds} −{file.dels}</span>
+										<span class="ml-auto flex shrink-0 items-center gap-3 text-[0.8rem] tabular-nums">
+											<span class="desk-add">+{file.adds}</span>
+											<span class="desk-del">−{file.dels}</span>
+										</span>
 									</summary>
 									<div class="collapse-content">
 										<table class="desk-diff" aria-label="Diff of {file.path}">
