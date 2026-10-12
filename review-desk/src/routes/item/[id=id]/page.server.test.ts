@@ -107,6 +107,44 @@ describe('actions', () => {
 	});
 });
 
+describe('next', () => {
+	const SECOND = '20261011T100100-2';
+	const THIRD = '20261011T100200-3';
+	const seedAt = (id: string, created: string) =>
+		seed(id, { kind: 'pr', head: 'abc', created }, { 'body.md': 'hello', 'diff.patch': '+a' });
+
+	it('returns the item after the current one in queue order', async () => {
+		await seedAt(ID, '2026-10-11T10:00:00Z');
+		await seedAt(SECOND, '2026-10-11T10:01:00Z');
+		expect(await call('approve')).toEqual({ next: `/item/${SECOND}` });
+	});
+
+	it('wraps to the oldest other item when the current one is last', async () => {
+		await seedAt(ID, '2026-10-11T10:00:00Z');
+		await seedAt(SECOND, '2026-10-11T10:01:00Z');
+		expect(await call('approve', [], SECOND)).toEqual({ next: `/item/${ID}` });
+	});
+
+	it('is null when nothing else waits', async () => {
+		await seedPr();
+		expect(await call('approve')).toEqual({ next: null });
+	});
+
+	it('skips an item whose item.json was removed', async () => {
+		await seedAt(ID, '2026-10-11T10:00:00Z');
+		await seedAt(SECOND, '2026-10-11T10:01:00Z');
+		await seedAt(THIRD, '2026-10-11T10:02:00Z');
+		await rm(join(state.root, 'items', SECOND, 'item.json'));
+		expect(await call('approve')).toEqual({ next: `/item/${THIRD}` });
+	});
+
+	it('comes back from reject and submit too', async () => {
+		await seedPr();
+		await seedAt(SECOND, '2026-10-11T10:01:00Z');
+		expect(await call('reject', [['note', 'x']])).toEqual({ next: `/item/${SECOND}` });
+	});
+});
+
 describe('load', () => {
 	it('returns the decided state for a decided item', async () => {
 		await seedPr();

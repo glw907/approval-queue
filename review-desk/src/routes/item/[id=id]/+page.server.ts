@@ -3,7 +3,15 @@ import { error, fail } from '@sveltejs/kit';
 import { beforeMerge } from '#lib/before-merge.ts';
 import { classifyDiff } from '#lib/diff.ts';
 import { render } from '#lib/markdown.ts';
-import { readItem, writeDecision, type Disposition, type TriageRow } from '#lib/server/items.ts';
+import { nextItem } from '#lib/queue.ts';
+import {
+	listWaiting,
+	readItem,
+	writeDecision,
+	type Decision,
+	type Disposition,
+	type TriageRow
+} from '#lib/server/items.ts';
 import type { Actions, PageServerLoad } from './$types';
 
 const DISPOSITIONS: readonly string[] = ['now', 'defer', 'drop'];
@@ -13,6 +21,16 @@ async function readWaiting(id: string) {
 	const item = await readItem(REVIEW_DESK_STATE, id);
 	if (!item || item.decided) error(404, 'Not found');
 	return item;
+}
+
+/**
+ * Writes the decision and names the item to open next. The next item is picked here, before the
+ * write, because the page's own queue can be stale.
+ */
+async function decide(id: string, decision: Decision) {
+	const next = nextItem(await listWaiting(REVIEW_DESK_STATE), id);
+	await writeDecision(REVIEW_DESK_STATE, id, decision);
+	return { next: next ? `/item/${next.id}` : null };
 }
 
 export const load: PageServerLoad = async ({ params }) => {
@@ -33,23 +51,21 @@ export const load: PageServerLoad = async ({ params }) => {
 	if (content.kind === 'design') {
 		return { meta, decided, kind: 'design' as const, docHtml: render(content.doc) };
 	}
-	return { meta, decided, kind: 'triage' as const, rows: content.rows };
+	const rows = content.rows.map((row) => ({ ...row, proposed: row.disposition }));
+	return { meta, decided, kind: 'triage' as const, rows };
 };
 
 export const actions: Actions = {
 	approve: async ({ params }) => {
 		const item = await readWaiting(params.id);
 		if (item.content.kind === 'triage') return fail(400, { message: 'Nothing to approve' });
-		await writeDecision(REVIEW_DESK_STATE, params.id, { decision: 'approve' });
+		return decide(params.id, { decision: 'approve' });
 	},
 	reject: async ({ params, request }) => {
 		const item = await readWaiting(params.id);
 		if (item.content.kind === 'triage') return fail(400, { message: 'Nothing to reject' });
 		const note = (await request.formData()).get('note');
-		await writeDecision(REVIEW_DESK_STATE, params.id, {
-			decision: 'reject',
-			note: typeof note === 'string' ? note : ''
-		});
+		return decide(params.id, { decision: 'reject', note: typeof note === 'string' ? note : '' });
 	},
 	submit: async ({ params, request }) => {
 		const item = await readWaiting(params.id);
@@ -70,6 +86,6 @@ export const actions: Actions = {
 			}
 			rows.push({ item: row.item, disposition: disposition as Disposition, reason });
 		}
-		await writeDecision(REVIEW_DESK_STATE, params.id, { decision: 'submit', rows });
+		return decide(params.id, { decision: 'submit', rows });
 	}
 };
