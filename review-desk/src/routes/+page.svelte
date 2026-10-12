@@ -2,12 +2,15 @@
 The empty state, shown when `/` finds nothing waiting. It counts 30 seconds with Keep focused,
 then calls `window.close()`, which works only while the tab holds one history entry; every
 navigation in the desk replaces its entry for that reason. The saved `desk.autoClose` setting
-turns the count off.
+turns the count off. An item that arrives while the page is open replaces it.
 -->
 <script lang="ts">
+	import { goto } from '$app/navigation';
 	import { onMount, tick } from 'svelte';
 	import { desk } from '#lib/desk.svelte.ts';
 	import { startHold } from '#lib/hold.ts';
+
+	let { data } = $props();
 
 	const SECONDS = 30;
 
@@ -53,6 +56,11 @@ turns the count off.
 		if (autoClose) start();
 		else phase = 'off';
 		return () => hold?.cancel();
+	});
+
+	$effect(() => {
+		const [oldest] = data.queue;
+		if (oldest) goto(`/item/${oldest.id}`, { replace: true });
 	});
 
 	function saveAutoClose() {
@@ -112,6 +120,6 @@ turns the count off.
 				Close when empty
 			</label>
 		</div>
-		<p class="desk-muted mt-8 text-sm">New items open in their own tab.</p>
+		<p class="desk-muted mt-8 text-sm">New items open in this tab.</p>
 	</div>
 </main>

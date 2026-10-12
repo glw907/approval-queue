@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -39,7 +39,21 @@ describe('/', () => {
 describe('layout', () => {
 	it('loads the waiting queue and what was decided since the app started', async () => {
 		await seed('a', '2026-10-11T10:00:00Z');
-		const data = await layoutLoad({} as never);
+		const data = await layoutLoad({ depends() {}, isDataRequest: false } as never);
 		expect(data).toMatchObject({ queue: [{ id: 'a' }], decided: [] });
+	});
+
+	it('depends on desk:queue, so the open tab can poll it', async () => {
+		const keys: string[] = [];
+		await layoutLoad({ depends: (key: string) => keys.push(key), isDataRequest: false } as never);
+		expect(keys).toEqual(['desk:queue']);
+	});
+
+	it('touches tab.seen on a poll from a running page, never on a server render', async () => {
+		const seen = join(state.root, 'tab.seen');
+		await layoutLoad({ depends() {}, isDataRequest: false } as never);
+		await expect(access(seen)).rejects.toThrow();
+		await layoutLoad({ depends() {}, isDataRequest: true } as never);
+		await expect(access(seen)).resolves.toBeUndefined();
 	});
 });

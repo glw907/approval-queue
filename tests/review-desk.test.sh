@@ -55,7 +55,7 @@ wait_for() {
 # run_kind <kind> <source> <content files>
 run_kind() {
   local kind=$1 source=$2 files=$3 dir id f want i
-  rm -rf "$state/items" "$root/firefox.record"
+  rm -rf "$state/items" "$state/tab.seen" "$root/firefox.record"
   bash "$SCRIPT" "$kind" owner/repo "A title" "$source" >"$root/out" 2>"$root/err" &
   bgpid=$!
   wait_for "$state/items/*/item.json" || return
@@ -79,6 +79,7 @@ run_kind() {
   fi
   wait_for "$root/firefox.record" || return
   assert_eq "$(cat "$root/firefox.record")" "--new-tab http://127.0.0.1:7907/item/$id" "$kind: firefox args"
+  [ -e "$state/tab.seen" ] || { echo "FAIL: $kind: opening a tab did not stamp tab.seen"; fail=1; }
   printf '{"decision":"approve"}\n' >"$dir/decision.json.tmp"
   mv "$dir/decision.json.tmp" "$dir/decision.json"
   # The command polls once a second, so allow up to five.
@@ -97,8 +98,47 @@ run_kind pr 42 "body.md diff.patch pr.json"
 run_kind design "$root/design.md" "doc.md"
 run_kind triage "$root/triage.json" "triage.json"
 
+# hand_over <label>: runs a design handover with tab.seen as the caller left it, decides it once
+# item.json lands, and prints how many tabs the command opened.
+hand_over() {
+  rm -rf "$state/items" "$root/firefox.record"
+  bash "$SCRIPT" design owner/repo T "$root/design.md" >/dev/null 2>&1 &
+  bgpid=$!
+  wait_for "$state/items/*/item.json" || return
+  local dir
+  dir=$(dirname "$(ls "$state"/items/*/item.json | head -1)")
+  # Long enough for the command to act on tab.seen before the decision lets it exit.
+  sleep 1
+  printf '{"decision":"approve"}\n' >"$dir/decision.json"
+  wait "$bgpid"; bgpid=""
+  if [ -e "$root/firefox.record" ]; then wc -l <"$root/firefox.record"; else echo 0; fi
+}
+
+# A live tab, polling every half second here, takes the item: no new tab.
+mkdir -p "$state"; touch "$state/tab.seen"
+( while :; do touch "$state/tab.seen"; sleep 0.5; done ) &
+poller=$!
+assert_eq "$(hand_over)" "0" "live tab: tabs opened"
+kill "$poller"; wait "$poller" 2>/dev/null
+
+# A tab.seen older than 5 seconds is a closed tab: the command opens one.
+touch -d '-1 minute' "$state/tab.seen"
+assert_eq "$(hand_over)" "1" "stale tab.seen: tabs opened"
+
+# Two handovers at once with no tab open: the first opens one, the second hands its item to it.
+rm -rf "$state/items" "$state/tab.seen" "$root/firefox.record"
+bash "$SCRIPT" design owner/repo T1 "$root/design.md" >/dev/null 2>&1 &
+p1=$!
+bash "$SCRIPT" design owner/repo T2 "$root/design.md" >/dev/null 2>&1 &
+p2=$!
+for _ in $(seq 50); do [ "$(ls "$state"/items/*/item.json 2>/dev/null | wc -l)" = 2 ] && break; sleep 0.1; done
+sleep 1
+for d in "$state"/items/*/; do printf '{"decision":"approve"}\n' >"$d/decision.json"; done
+wait "$p1" "$p2"
+assert_eq "$(wc -l <"$root/firefox.record" 2>/dev/null)" "1" "concurrent: tabs opened"
+
 # TERM to a waiting command: exit 143, no item.json.
-rm -rf "$state/items" "$root/firefox.record"
+rm -rf "$state/items" "$state/tab.seen" "$root/firefox.record"
 bash "$SCRIPT" design owner/repo T "$root/design.md" >/dev/null 2>&1 &
 bgpid=$!
 if wait_for "$root/firefox.record"; then

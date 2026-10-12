@@ -62,14 +62,29 @@ if ! curl -sf "$base/" >/dev/null 2>&1; then
   done
   if [ -z "$up" ]; then echo "review-desk: the app did not answer in 10 seconds; see $log" >&2; exit 1; fi
 fi
-exec 9>&-
 
 if ! curl -sf "$base/item/$id" >/dev/null 2>&1; then
   echo "review-desk: an app on 7907 does not serve this state root; stop it with pkill -f 'review-desk/[b]uild'" >&2
   exit 1
 fi
 
-setsid -f firefox --new-tab "$base/item/$id" >>"$log" 2>&1
+# One tab serves the whole queue. An open tab polls every 2 seconds and each poll touches tab.seen,
+# so a tab.seen under 5 seconds old marks a live tab, and a poll after item.json proves it holds
+# this item. With no such poll, the command opens a tab and stamps tab.seen itself, so a command
+# waiting on the lock hands its item to that tab instead of opening another.
+seen="$root/tab.seen"
+shown=""
+if [ -n "$(find "$seen" -newermt '-5 seconds' 2>/dev/null)" ]; then
+  for _ in $(seq 50); do
+    if [ "$seen" -nt "$item/item.json" ]; then shown=1; break; fi
+    sleep 0.1
+  done
+fi
+if [ -z "$shown" ]; then
+  setsid -f firefox --new-tab "$base/item/$id" >>"$log" 2>&1
+  touch "$seen"
+fi
+exec 9>&-
 
 while [ ! -e "$item/decision.json" ]; do sleep 1; done
 if [ "$kind" = pr ]; then

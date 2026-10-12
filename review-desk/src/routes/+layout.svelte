@@ -6,7 +6,7 @@ the rest through `desk.handlers`.
 -->
 <script lang="ts">
 	import '../app.css';
-	import { afterNavigate } from '$app/navigation';
+	import { afterNavigate, invalidate } from '$app/navigation';
 	import { page } from '$app/state';
 	import { onMount, tick } from 'svelte';
 	import { desk } from '#lib/desk.svelte.ts';
@@ -23,11 +23,13 @@ the rest through `desk.handlers`.
 	const currentId = $derived(page.params.id);
 
 	onMount(() => {
+		const poll = setInterval(() => invalidate('desk:queue'), 2000);
 		try {
 			desk.singleKeys = localStorage.getItem('desk.singleKeys') !== 'off';
 		} catch {
 			// The page works without storage; the switch just stays on.
 		}
+		return () => clearInterval(poll);
 	});
 
 	$effect(() => {
