@@ -1,5 +1,6 @@
 import { REVIEW_DESK_STATE } from '$app/env/private';
 import { error, fail } from '@sveltejs/kit';
+import { beforeMerge } from '#lib/before-merge.ts';
 import { classifyDiff } from '#lib/diff.ts';
 import { render } from '#lib/markdown.ts';
 import { readItem, writeDecision, type Disposition, type TriageRow } from '#lib/server/items.ts';
@@ -19,7 +20,15 @@ export const load: PageServerLoad = async ({ params }) => {
 	if (!item) error(404, 'Not found');
 	const { meta, decided, content } = item;
 	if (content.kind === 'pr') {
-		return { meta, decided, kind: 'pr' as const, bodyHtml: render(content.body), diff: classifyDiff(content.diff) };
+		const section = beforeMerge(content.body);
+		return {
+			meta,
+			decided,
+			kind: 'pr' as const,
+			bodyHtml: render(content.body),
+			beforeMergeHtml: section === null ? null : render(section),
+			diff: classifyDiff(content.diff)
+		};
 	}
 	if (content.kind === 'design') {
 		return { meta, decided, kind: 'design' as const, docHtml: render(content.doc) };

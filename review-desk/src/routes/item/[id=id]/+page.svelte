@@ -52,6 +52,12 @@ row per entry; a decided item shows "Decided" in place of the form.
 			<button class="btn btn-primary">Submit</button>
 		</form>
 	{:else}
+		{#if data.kind === 'pr' && data.beforeMergeHtml !== null}
+			<div role="alert" class="alert alert-warning alert-vertical mt-4 items-start">
+				<strong>Before merge</strong>
+				<div class="md">{@html data.beforeMergeHtml}</div>
+			</div>
+		{/if}
 		<form method="post" class="mt-4 space-y-3">
 			{#if rejecting}
 				<textarea name="note" class="textarea w-full" rows="3" placeholder="Note (optional)"></textarea>

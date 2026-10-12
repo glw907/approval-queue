@@ -119,7 +119,15 @@ describe('load', () => {
 		expect(await load({ params: { id: ID } } as never)).toMatchObject({
 			decided: false,
 			bodyHtml: '<p>hello</p>\n',
+			beforeMergeHtml: null,
 			diff: [{ kind: 'added', text: '+a' }]
+		});
+	});
+
+	it('renders a Before merge section for a PR that has one', async () => {
+		await seed(ID, { kind: 'pr', head: 'abc' }, { 'body.md': 'x\n\n## Before merge\n\nRun `stow -R bin`.', 'diff.patch': '+a' });
+		expect(await load({ params: { id: ID } } as never)).toMatchObject({
+			beforeMergeHtml: '<p>Run <code>stow -R bin</code>.</p>\n'
 		});
 	});
 
