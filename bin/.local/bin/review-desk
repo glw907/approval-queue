@@ -44,7 +44,10 @@ exec 9>"$root/start.lock"
 flock 9
 if ! curl -sf "$base/" >/dev/null 2>&1; then
   if [ ! -e "$app/build/index.js" ]; then
-    (cd "$app" && npm ci && npm run build) >>"$log" 2>&1
+    if ! (cd "$app" && npm ci && npm run build) >>"$log" 2>&1; then
+      echo "review-desk: the first build failed; see $log" >&2
+      exit 1
+    fi
   fi
   HOST=127.0.0.1 PORT=7907 REVIEW_DESK_STATE="$root" setsid -f node "$app/build" 9>&- >>"$log" 2>&1
   up=""
