@@ -1,7 +1,7 @@
 export type Disposition = 'now' | 'defer' | 'drop';
 
 export interface Row {
-	/** The item's number as the list prints it. */
+	/** The item's text; its number is its position in the list. */
 	item: string;
 	disposition: Disposition;
 	/** What the review proposed; a row counts as changed when it differs. */
@@ -14,13 +14,10 @@ export function moveRow<T extends Row>(rows: readonly T[], index: number, dispos
 	return rows.map((row, i) => (i === index ? { ...row, disposition } : row));
 }
 
-/** The view: each section's rows in item-number order. */
-export function groupRows<T extends Row>(rows: readonly T[]): Record<Disposition, T[]> {
-	const groups: Record<Disposition, T[]> = { now: [], defer: [], drop: [] };
-	for (const row of rows) groups[row.disposition].push(row);
-	for (const list of Object.values(groups)) {
-		list.sort((a, b) => a.item.localeCompare(b.item, undefined, { numeric: true }));
-	}
+/** The view: each section's rows with their position in the list, which is the item number minus one. */
+export function groupRows<T extends Row>(rows: readonly T[]): Record<Disposition, { row: T; index: number }[]> {
+	const groups: Record<Disposition, { row: T; index: number }[]> = { now: [], defer: [], drop: [] };
+	rows.forEach((row, index) => groups[row.disposition].push({ row, index }));
 	return groups;
 }
 

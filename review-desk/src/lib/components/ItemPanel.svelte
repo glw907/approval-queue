@@ -41,6 +41,7 @@ entry so the tab stays script-closable.
 		desk.page = data.kind;
 		if (!data.decided) {
 			desk.handlers = {
+				...desk.handlers,
 				approve: () => form?.requestSubmit(approveButton),
 				'open-note': openNote,
 				'close-note': closeNote,
@@ -86,7 +87,7 @@ entry so the tab stays script-closable.
 		rejectButton?.focus();
 	}
 
-	/** "owner/repo" with the number when the item has one, or the title for a design. */
+	/** The repo's name with the item's number when it has one; a design reads as its title. */
 	function subject() {
 		const name = data.meta.repo.split('/').pop();
 		if (data.kind === 'design') return `the design ${data.meta.title}`;
@@ -174,14 +175,27 @@ entry so the tab stays script-closable.
 			<path d="M160 38c40-18 70-6 110-20s80-22 130-6" />
 		</svg>
 		<p class="desk-muted flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
-			<span class="badge badge-outline badge-sm">{data.meta.kind}</span>
-			<span>{data.meta.repo}</span>
+			{#if data.kind === 'pr'}
+				<span>{subject()}</span>
+				{#if data.link}
+					<span>{data.link.branches}</span>
+					<a class="link" href={data.link.url} target="_blank" rel="noopener noreferrer">GitHub</a>
+				{/if}
+			{:else if data.kind === 'design'}
+				<span>{data.meta.repo.split('/').pop()}</span>
+				{#if data.meta.file}<span>{data.meta.file}</span>{/if}
+				<span>{data.minutes} min read</span>
+			{:else}
+				<span class="badge badge-sm badge-outline">Triage</span>
+				<span>{subject()}</span>
+				<span>{rows.length} items, each with a proposed disposition</span>
+			{/if}
 		</p>
 		<h1 class="desk-title mt-1 text-[1.6rem] leading-tight"><i class="site-benchmark"></i>{data.meta.title}</h1>
 	</header>
 
 	{#if data.kind === 'pr'}
-		<PrView bodyHtml={data.bodyHtml} diff={data.diff} />
+		<PrView {data} />
 	{:else if data.kind === 'design'}
 		<DesignView docHtml={data.docHtml} />
 	{:else}

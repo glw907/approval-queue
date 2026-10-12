@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { bodySections, checksSummary, reviewVerdict, riskClass } from './pr-summary.ts';
+import { bodySections, checksSummary, reviewSection, reviewVerdict, riskClass } from './pr-summary.ts';
 
 describe('riskClass', () => {
 	it('reads both real phrasings', () => {
@@ -27,6 +27,15 @@ describe('bodySections', () => {
 
 	it('gives an empty lead when the body opens with a heading', () => {
 		expect(bodySections('## A\n\nx\n\n## B\n\ny').lead).toBe('');
+	});
+});
+
+describe('reviewSection', () => {
+	it('returns the markdown under "## Review" up to the next heading', () => {
+		expect(reviewSection('lead\n\n## Review\n\nFirst: `fix`.\n\n## Score\n\n6 h')).toBe('First: `fix`.');
+	});
+	it('is null with no Review section', () => {
+		expect(reviewSection('lead\n\n## Score\n\n6 h')).toBeNull();
 	});
 });
 

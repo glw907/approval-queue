@@ -34,8 +34,8 @@ export function bodySections(body: string): { lead: string; sections: { title: s
 	};
 }
 
-/** The last backticked verdict in the "## Review" section; bare words are prose. */
-export function reviewVerdict(body: string): Verdict | null {
+/** The markdown under "## Review" up to the next heading of level 1 or 2, or null. */
+export function reviewSection(body: string): string | null {
 	const lines = body.split('\n');
 	const start = lines.findIndex((line) => /^##\s+review\s*#*\s*$/i.test(line));
 	if (start === -1) return null;
@@ -44,7 +44,12 @@ export function reviewVerdict(body: string): Verdict | null {
 		if (/^#{1,2}\s/.test(line)) break;
 		section.push(line);
 	}
-	const tokens = [...section.join('\n').matchAll(/`(accept|fix|escalate)`/g)];
+	return section.join('\n').trim() || null;
+}
+
+/** The last backticked verdict in the "## Review" section; bare words are prose. */
+export function reviewVerdict(body: string): Verdict | null {
+	const tokens = [...(reviewSection(body) ?? '').matchAll(/`(accept|fix|escalate)`/g)];
 	return tokens.length ? (tokens[tokens.length - 1][1] as Verdict) : null;
 }
 

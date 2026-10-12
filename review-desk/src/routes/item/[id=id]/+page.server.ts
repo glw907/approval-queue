@@ -1,8 +1,9 @@
 import { REVIEW_DESK_STATE } from '$app/env/private';
 import { error, fail } from '@sveltejs/kit';
 import { beforeMerge } from '#lib/before-merge.ts';
-import { classifyDiff } from '#lib/diff.ts';
+import { fileGroups } from '#lib/diff.ts';
 import { render } from '#lib/markdown.ts';
+import { bodySections, checksSummary, reviewSection, reviewVerdict, riskClass } from '#lib/pr-summary.ts';
 import { nextItem } from '#lib/queue.ts';
 import {
 	listWaiting,
@@ -38,18 +39,36 @@ export const load: PageServerLoad = async ({ params }) => {
 	if (!item) error(404, 'Not found');
 	const { meta, decided, content } = item;
 	if (content.kind === 'pr') {
-		const section = beforeMerge(content.body);
+		const merge = beforeMerge(content.body);
+		const review = reviewSection(content.body);
+		const { lead, sections } = bodySections(content.body);
+		const groups = fileGroups(content.diff);
+		const files = groups.flatMap((g) => g.files);
 		return {
 			meta,
 			decided,
 			kind: 'pr' as const,
-			bodyHtml: render(content.body),
-			beforeMergeHtml: section === null ? null : render(section),
-			diff: classifyDiff(content.diff)
+			risk: riskClass(content.body),
+			verdict: reviewVerdict(content.body),
+			checks: checksSummary(content.pr?.statusCheckRollup),
+			link: content.pr
+				? { url: content.pr.url, branches: `${content.pr.headRefName} into ${content.pr.baseRefName}` }
+				: null,
+			leadHtml: render(lead),
+			sections: sections.map((s) => ({ title: s.title, html: render(s.body) })),
+			reviewHtml: review === null ? null : render(review),
+			beforeMergeHtml: merge === null ? null : render(merge),
+			groups,
+			totals: {
+				files: files.length,
+				adds: files.reduce((n, f) => n + f.adds, 0),
+				dels: files.reduce((n, f) => n + f.dels, 0)
+			}
 		};
 	}
 	if (content.kind === 'design') {
-		return { meta, decided, kind: 'design' as const, docHtml: render(content.doc) };
+		const words = content.doc.split(/\s+/).filter(Boolean).length;
+		return { meta, decided, kind: 'design' as const, docHtml: render(content.doc), minutes: Math.ceil(words / 230) };
 	}
 	const rows = content.rows.map((row) => ({ ...row, proposed: row.disposition }));
 	return { meta, decided, kind: 'triage' as const, rows };

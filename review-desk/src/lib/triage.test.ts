@@ -20,10 +20,16 @@ describe('moveRow', () => {
 });
 
 describe('groupRows', () => {
-	it('keeps item-number order inside a section', () => {
-		const g = groupRows(moveRow(rows, 3, 'now'));
-		expect(g.now.map((r) => r.item)).toEqual(['1', '3', '10']);
-		expect(g.defer.map((r) => r.item)).toEqual(['2']);
+	it('keeps item-number order, the position in the list, inside a section', () => {
+		const text = [
+			{ item: 'zebra stripes', disposition: 'now', proposed: 'now', reason: '' },
+			{ item: 'apple', disposition: 'defer', proposed: 'defer', reason: '' },
+			{ item: 'mango', disposition: 'drop', proposed: 'drop', reason: '' }
+		] satisfies Row[];
+		const g = groupRows(moveRow(text, 2, 'now'));
+		expect(g.now.map((r) => r.index)).toEqual([0, 2]);
+		expect(g.now.map((r) => r.row.item)).toEqual(['zebra stripes', 'mango']);
+		expect(g.defer.map((r) => r.index)).toEqual([1]);
 		expect(g.drop).toEqual([]);
 	});
 });
