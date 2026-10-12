@@ -20,22 +20,27 @@ mkdir -p "$item"
 trap '[ -e "$item/decision.json" ] || rm -f "$item/item.json" "$item/item.json.tmp"' EXIT
 trap 'exit 143' TERM HUP INT
 
-head=""
+head="" number="" file=""
 case "$kind" in
   pr)
-    view=$(gh pr view "$source" -R "$repo" --json body,headRefOid)
+    view=$(gh pr view "$source" -R "$repo" --json body,headRefOid,number,url,headRefName,baseRefName,statusCheckRollup)
     jq -r '.body' <<<"$view" >"$item/body.md"
+    jq 'del(.body, .headRefOid)' <<<"$view" >"$item/pr.json"
     head=$(jq -r '.headRefOid' <<<"$view")
+    number=$(jq -r '.number' <<<"$view")
     gh pr diff "$source" -R "$repo" >"$item/diff.patch"
     ;;
-  design) cp "$source" "$item/doc.md" ;;
+  design) cp "$source" "$item/doc.md"; file=$(basename "$source") ;;
   triage) cp "$source" "$item/triage.json" ;;
 esac
 
 jq -n --arg id "$id" --arg kind "$kind" --arg repo "$repo" --arg title "$title" \
   --arg created "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg head "$head" \
+  --arg number "$number" --arg file "$file" \
   '{id: $id, kind: $kind, repo: $repo, title: $title, created: $created}
-   + (if $head == "" then {} else {head: $head} end)' >"$item/item.json.tmp"
+   + (if $head == "" then {} else {head: $head} end)
+   + (if $number == "" then {} else {number: ($number | tonumber)} end)
+   + (if $file == "" then {} else {file: $file} end)' >"$item/item.json.tmp"
 mv "$item/item.json.tmp" "$item/item.json"
 
 app=$(realpath "$(dirname "$(realpath "$0")")/../../../review-desk")

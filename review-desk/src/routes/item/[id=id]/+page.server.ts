@@ -1,9 +1,18 @@
 import { REVIEW_DESK_STATE } from '$app/env/private';
 import { error, fail } from '@sveltejs/kit';
 import { beforeMerge } from '#lib/before-merge.ts';
-import { classifyDiff } from '#lib/diff.ts';
+import { fileGroups } from '#lib/diff.ts';
 import { render } from '#lib/markdown.ts';
-import { readItem, writeDecision, type Disposition, type TriageRow } from '#lib/server/items.ts';
+import { bodySections, checksSummary, reviewSection, reviewVerdict, riskClass } from '#lib/pr-summary.ts';
+import { nextItem } from '#lib/queue.ts';
+import {
+	listWaiting,
+	readItem,
+	writeDecision,
+	type Decision,
+	type Disposition,
+	type TriageRow
+} from '#lib/server/items.ts';
 import type { Actions, PageServerLoad } from './$types';
 
 const DISPOSITIONS: readonly string[] = ['now', 'defer', 'drop'];
@@ -15,41 +24,67 @@ async function readWaiting(id: string) {
 	return item;
 }
 
+/**
+ * Writes the decision and names the item to open next. The next item is picked here, before the
+ * write, because the page's own queue can be stale.
+ */
+async function decide(id: string, decision: Decision) {
+	const next = nextItem(await listWaiting(REVIEW_DESK_STATE), id);
+	await writeDecision(REVIEW_DESK_STATE, id, decision);
+	return { next: next ? `/item/${next.id}` : null };
+}
+
 export const load: PageServerLoad = async ({ params }) => {
 	const item = await readItem(REVIEW_DESK_STATE, params.id);
 	if (!item) error(404, 'Not found');
 	const { meta, decided, content } = item;
 	if (content.kind === 'pr') {
-		const section = beforeMerge(content.body);
+		const merge = beforeMerge(content.body);
+		const review = reviewSection(content.body);
+		const { lead, sections } = bodySections(content.body);
+		const groups = fileGroups(content.diff);
+		const files = groups.flatMap((g) => g.files);
 		return {
 			meta,
 			decided,
 			kind: 'pr' as const,
-			bodyHtml: render(content.body),
-			beforeMergeHtml: section === null ? null : render(section),
-			diff: classifyDiff(content.diff)
+			risk: riskClass(content.body),
+			verdict: reviewVerdict(content.body),
+			checks: checksSummary(content.pr?.statusCheckRollup),
+			link: content.pr
+				? { url: content.pr.url, branches: `${content.pr.headRefName} into ${content.pr.baseRefName}` }
+				: null,
+			leadHtml: render(lead),
+			sections: sections.map((s) => ({ title: s.title, html: render(s.body) })),
+			reviewHtml: review === null ? null : render(review),
+			beforeMergeHtml: merge === null ? null : render(merge),
+			groups,
+			totals: {
+				files: files.length,
+				adds: files.reduce((n, f) => n + f.adds, 0),
+				dels: files.reduce((n, f) => n + f.dels, 0)
+			}
 		};
 	}
 	if (content.kind === 'design') {
-		return { meta, decided, kind: 'design' as const, docHtml: render(content.doc) };
+		const words = content.doc.split(/\s+/).filter(Boolean).length;
+		return { meta, decided, kind: 'design' as const, docHtml: render(content.doc), minutes: Math.ceil(words / 230) };
 	}
-	return { meta, decided, kind: 'triage' as const, rows: content.rows };
+	const rows = content.rows.map((row) => ({ ...row, proposed: row.disposition }));
+	return { meta, decided, kind: 'triage' as const, rows };
 };
 
 export const actions: Actions = {
 	approve: async ({ params }) => {
 		const item = await readWaiting(params.id);
 		if (item.content.kind === 'triage') return fail(400, { message: 'Nothing to approve' });
-		await writeDecision(REVIEW_DESK_STATE, params.id, { decision: 'approve' });
+		return decide(params.id, { decision: 'approve' });
 	},
 	reject: async ({ params, request }) => {
 		const item = await readWaiting(params.id);
 		if (item.content.kind === 'triage') return fail(400, { message: 'Nothing to reject' });
 		const note = (await request.formData()).get('note');
-		await writeDecision(REVIEW_DESK_STATE, params.id, {
-			decision: 'reject',
-			note: typeof note === 'string' ? note : ''
-		});
+		return decide(params.id, { decision: 'reject', note: typeof note === 'string' ? note : '' });
 	},
 	submit: async ({ params, request }) => {
 		const item = await readWaiting(params.id);
@@ -70,6 +105,6 @@ export const actions: Actions = {
 			}
 			rows.push({ item: row.item, disposition: disposition as Disposition, reason });
 		}
-		await writeDecision(REVIEW_DESK_STATE, params.id, { decision: 'submit', rows });
+		return decide(params.id, { decision: 'submit', rows });
 	}
 };

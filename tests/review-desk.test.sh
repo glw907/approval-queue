@@ -32,7 +32,7 @@ STUB
 cat >"$stubs/gh" <<'STUB'
 #!/usr/bin/env bash
 case "$2" in
-  view) echo '{"body":"the body","headRefOid":"abc123"}' ;;
+  view) echo '{"body":"the body","headRefOid":"abc123","number":42,"url":"https://github.com/owner/repo/pull/42","headRefName":"feat","baseRefName":"main","statusCheckRollup":[{"name":"make check","workflowName":"tool","status":"COMPLETED","conclusion":"SUCCESS"}]}' ;;
   diff) echo 'diff --git a/x b/x' ;;
 esac
 STUB
@@ -69,8 +69,13 @@ run_kind() {
   if [ "$kind" = pr ]; then
     assert_eq "$(jq -r .head "$dir/item.json")" "abc123" "pr: head"
     assert_eq "$(cat "$dir/body.md")" "the body" "pr: body"
+    assert_eq "$(jq -r .number "$dir/item.json")" "42" "pr: number"
+    assert_eq "$(jq -c 'keys' "$dir/pr.json")" '["baseRefName","headRefName","number","statusCheckRollup","url"]' "pr: pr.json keys"
+    assert_eq "$(jq -r .url "$dir/pr.json")" "https://github.com/owner/repo/pull/42" "pr: pr.json url"
+    assert_eq "$(jq -r '.statusCheckRollup[0].conclusion' "$dir/pr.json")" "SUCCESS" "pr: pr.json checks"
   else
     assert_eq "$(jq 'has("head")' "$dir/item.json")" "false" "$kind: no head"
+    [ "$kind" != design ] || assert_eq "$(jq -r .file "$dir/item.json")" "design.md" "design: file"
   fi
   wait_for "$root/firefox.record" || return
   assert_eq "$(cat "$root/firefox.record")" "--new-tab http://127.0.0.1:7907/item/$id" "$kind: firefox args"
@@ -88,7 +93,7 @@ run_kind() {
   assert_eq "$(cat "$root/out")" "$want" "$kind: stdout"
 }
 
-run_kind pr 42 "body.md diff.patch"
+run_kind pr 42 "body.md diff.patch pr.json"
 run_kind design "$root/design.md" "doc.md"
 run_kind triage "$root/triage.json" "triage.json"
 
