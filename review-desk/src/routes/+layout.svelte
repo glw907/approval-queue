@@ -98,6 +98,7 @@ the rest through `desk.handlers`.
 	}
 
 	function onKeydown(e: KeyboardEvent) {
+		if (e.defaultPrevented) return;
 		if (e.key === 'Escape' && drawerOpen) {
 			setDrawer(false);
 			return;
@@ -285,7 +286,10 @@ the rest through `desk.handlers`.
 							</td>
 							<td>Send the rejection</td>
 						</tr>
-						<tr><td><kbd class="kbd kbd-xs desk-kbd desk-sk">/</kbd></td><td>Filter files by path</td></tr>
+						<tr>
+							<td><kbd class="kbd kbd-xs desk-kbd desk-sk">/</kbd></td>
+							<td>Filter files by path (PR only)</td>
+						</tr>
 					</tbody>
 				</table>
 			</section>
@@ -330,7 +334,9 @@ the rest through `desk.handlers`.
 
 {#if desk.toast !== null}
 	<div class="toast toast-center bottom-24 z-40">
-		<div class="alert alert-info border border-base-300 text-sm">
+		<div
+			class={['alert border border-base-300 text-sm', desk.toastError ? 'alert-error' : 'alert-info']}
+		>
 			<span>{desk.toast}</span>
 			{#if desk.counting}
 				<button type="button" class="btn btn-sm" id="undo" onclick={() => desk.undo?.()}>

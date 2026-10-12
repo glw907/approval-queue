@@ -129,6 +129,8 @@ that order, and a moved row shows "was X" until it returns to the proposal.
 		const items = [...(e.currentTarget as HTMLElement).querySelectorAll<HTMLElement>('[role=menuitemradio]')];
 		const at = items.indexOf(document.activeElement as HTMLElement);
 		const pick = { '1': 'now', '2': 'defer', '3': 'drop' }[e.key] as Disposition | undefined;
+		// The row handler on the document would otherwise step focus out of the open menu.
+		if (['Escape', 'Tab', 'ArrowDown', 'ArrowUp', 'Home', 'End'].includes(e.key)) e.stopPropagation();
 		if (e.key === 'Escape' || e.key === 'Tab') {
 			e.preventDefault();
 			closeMenu(index, true);
@@ -245,6 +247,7 @@ that order, and a moved row shows "was X" until it returns to the proposal.
 										type="button"
 										role="menuitemradio"
 										aria-checked={row.disposition === target.key}
+										disabled={desk.held}
 										class={{ 'menu-active': row.disposition === target.key }}
 										onclick={() => pickItem(index, target.key)}
 									>

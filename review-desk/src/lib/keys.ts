@@ -64,7 +64,7 @@ export function keyAction(key: string, mods: KeyMods, context: KeyContext): KeyA
 	if (key === 'k') return 'queue-prev';
 	if (key === 'z') return held ? 'undo' : null;
 	if (held) return null;
-	if (page !== 'triage' && key === 'a') return 'approve';
+	if (page !== 'triage' && key === 'a') return noteOpen ? null : 'approve';
 	if (page !== 'triage' && key === 'r') return 'open-note';
 	if (page === 'pr' && key === '/') return 'focus-filter';
 	if (page === 'triage' && key in MOVES) return MOVES[key];

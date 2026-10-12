@@ -8,6 +8,8 @@ mounted while `load` swaps the data.
 	let { data } = $props();
 </script>
 
+<svelte:head><title>{data.meta.title} · Review desk</title></svelte:head>
+
 {#key data.meta.id}
 	<ItemPanel {data} />
 {/key}

@@ -43,6 +43,7 @@ a failing check, a blocking verdict, and the diff signs; each also says so in wo
 
 	function onFilterKey(e: KeyboardEvent) {
 		if (e.key !== 'Escape') return;
+		e.stopPropagation();
 		term = '';
 		filter?.blur();
 	}
@@ -112,7 +113,7 @@ a failing check, a blocking verdict, and the diff signs; each also says so in wo
 	<h2 id="desc-h" class="text-base font-semibold">Description</h2>
 	<div class="desk-md mt-1">{@html data.leadHtml}</div>
 	<div class="desk-plain-list mt-3">
-		{#each data.sections as section (section.title)}
+		{#each data.sections as section, i (i)}
 			<details
 				class="collapse collapse-arrow desk-collapse rounded-none border-t border-base-300"
 				open={section.title.toLowerCase() === 'what landed'}
@@ -220,6 +221,7 @@ a failing check, a blocking verdict, and the diff signs; each also says so in wo
 		overflow: visible;
 	}
 	.desk-glance .stat {
+		width: auto;
 		border: 0;
 		padding: 0 44px 0 0;
 		row-gap: 2px;

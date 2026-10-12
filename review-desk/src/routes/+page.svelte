@@ -5,7 +5,7 @@ navigation in the desk replaces its entry for that reason. The saved `desk.autoC
 turns the count off.
 -->
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, tick } from 'svelte';
 	import { desk } from '#lib/desk.svelte.ts';
 	import { startHold } from '#lib/hold.ts';
 
@@ -17,11 +17,14 @@ turns the count off.
 	let keep = $state<HTMLButtonElement>();
 	let hold: { cancel: () => void } | null = null;
 
-	function stop(message: string, next: 'kept' | 'off') {
+	async function stop(message: string, next: 'kept' | 'off') {
 		hold?.cancel();
 		hold = null;
 		phase = next;
 		desk.announce(message);
+		// Keep unmounts as the count ends, so focus would otherwise fall to the body.
+		await tick();
+		if (document.activeElement === document.body) document.getElementById('main')?.focus();
 	}
 
 	function start() {
@@ -37,7 +40,8 @@ turns the count off.
 				window.close();
 			}
 		});
-		keep?.focus();
+		// A script focus draws no ring when the last focus was not a keyboard focus, and the ring is the cue.
+		keep?.focus({ focusVisible: true });
 	}
 
 	onMount(() => {
@@ -65,6 +69,7 @@ turns the count off.
 	}
 </script>
 
+<svelte:head><title>Nothing waiting · Review desk</title></svelte:head>
 <svelte:document onkeydown={onKeydown} />
 
 <main id="main" tabindex="-1" class="relative isolate flex flex-1 items-start px-5 pt-16 lg:px-8">

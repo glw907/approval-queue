@@ -42,7 +42,7 @@ entry so the tab stays script-closable.
 		if (!data.decided) {
 			desk.handlers = {
 				...desk.handlers,
-				approve: () => form?.requestSubmit(approveButton),
+				approve: () => approveButton && form?.requestSubmit(approveButton),
 				'open-note': openNote,
 				'close-note': closeNote,
 				'send-rejection': () => form?.requestSubmit(sendButton),
@@ -119,6 +119,7 @@ entry so the tab stays script-closable.
 		returnTo = submitter;
 		desk.held = true;
 		desk.counting = true;
+		desk.toastError = false;
 		desk.toast = `${text} ${where} in 5 s.`;
 		desk.announce(`${text} ${where} in 5 seconds. Press z or the Undo button to undo.`);
 		await tick();
@@ -142,6 +143,8 @@ entry so the tab stays script-closable.
 		}
 
 		const done = `${text} ${where}.`;
+		// The Undo button holds focus and is about to unmount, so focus moves first.
+		document.getElementById('main')?.focus();
 		desk.counting = false;
 		desk.undo = null;
 		desk.toast = done;
@@ -162,6 +165,7 @@ entry so the tab stays script-closable.
 			const reason =
 				result.type === 'error' ? result.error.message : result.type === 'failure' ? result.data?.message : 'unknown';
 			const failed = `Not sent: ${reason}`;
+			desk.toastError = true;
 			await unlock(failed, returnTo, failed);
 		};
 	};

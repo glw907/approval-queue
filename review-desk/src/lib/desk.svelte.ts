@@ -14,6 +14,8 @@ class Desk {
 	page = $state<'pr' | 'design' | 'triage'>('design');
 	/** The toast's text; null hides it. */
 	toast = $state<string | null>(null);
+	/** The toast reports a post that failed. */
+	toastError = $state(false);
 	/** The toast offers Undo. */
 	counting = $state(false);
 	/** The live region's text. */

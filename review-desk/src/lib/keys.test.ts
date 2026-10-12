@@ -68,6 +68,11 @@ describe('keyAction', () => {
 		expect(keyAction('Enter', { ...none, ctrl: true }, t)).toBe('send-rejection');
 	});
 
+	it('does not approve while the note is open, since Approve is not on the page', () => {
+		expect(keyAction('a', none, ctx({ page: 'pr', noteOpen: true }))).toBeNull();
+		expect(keyAction('a', none, ctx({ page: 'pr', noteOpen: false }))).toBe('approve');
+	});
+
 	it('sends a rejection only with the note open', () => {
 		expect(keyAction('Enter', { ...none, ctrl: true }, base)).toBeNull();
 	});
