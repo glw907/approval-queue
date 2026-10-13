@@ -32,7 +32,7 @@ STUB
 cat >"$stubs/gh" <<'STUB'
 #!/usr/bin/env bash
 case "$2" in
-  view) echo '{"body":"the body","headRefOid":"abc123","number":42,"url":"https://github.com/owner/repo/pull/42","headRefName":"feat","baseRefName":"main","statusCheckRollup":[{"name":"make check","workflowName":"tool","status":"COMPLETED","conclusion":"SUCCESS"}]}' ;;
+  view) jq -n --rawfile body "$STUB_DIR/body.md" '{"body":$body,"headRefOid":"abc123","number":42,"url":"https://github.com/owner/repo/pull/42","headRefName":"feat","baseRefName":"main","statusCheckRollup":[{"name":"make check","workflowName":"tool","status":"COMPLETED","conclusion":"SUCCESS"}]}' ;;
   diff) echo 'diff --git a/x b/x' ;;
 esac
 STUB
@@ -40,8 +40,25 @@ chmod +x "$stubs"/*
 
 export STUB_DIR="$root" XDG_STATE_HOME="$root/state" PATH="$stubs:$PATH"
 state="$XDG_STATE_HOME/approval-queue"
-printf '# design\n' >"$root/design.md"
-printf '[{"item":"a","disposition":"now","reason":"r"}]\n' >"$root/triage.json"
+cat >"$root/body.md" <<'BRIEF'
+## Brief
+
+The queue now refuses an item with no brief.
+
+A session that skips the brief gets a message naming the fix, so every item arrives readable.
+
+### What changes
+
+- The command checks the brief before it queues anything.
+
+### If you approve
+
+1. The PR merges.
+BRIEF
+{ printf '# design\n\n'; cat "$root/body.md"; } >"$root/design.md"
+cat >"$root/triage.json" <<'TRIAGE'
+{"headline":"One call needs you.","lede":"The session proposes one now.","rows":[{"action":"a","why":"r","proposed":"now"}]}
+TRIAGE
 
 # wait_for <glob>: up to 5 seconds; on a timeout, fails the test and kills the background job.
 wait_for() {
@@ -65,10 +82,13 @@ run_kind() {
   jq -e '.created | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$")' "$dir/item.json" >/dev/null \
     || { echo "FAIL: $kind: created"; fail=1; }
   assert_eq "$(jq -r '.kind + "|" + .repo + "|" + .title' "$dir/item.json")" "$kind|owner/repo|A title" "$kind: item fields"
+  want_headline="The queue now refuses an item with no brief."
+  [ "$kind" != triage ] || want_headline="One call needs you."
+  assert_eq "$(jq -r .headline "$dir/item.json")" "$want_headline" "$kind: headline"
   for f in $files; do [ -e "$dir/$f" ] || { echo "FAIL: $kind: missing $f"; fail=1; }; done
   if [ "$kind" = pr ]; then
     assert_eq "$(jq -r .head "$dir/item.json")" "abc123" "pr: head"
-    assert_eq "$(cat "$dir/body.md")" "the body" "pr: body"
+    assert_eq "$(cat "$dir/body.md")" "$(cat "$root/body.md")" "pr: body"
     assert_eq "$(jq -r .number "$dir/item.json")" "42" "pr: number"
     assert_eq "$(jq -c 'keys' "$dir/pr.json")" '["baseRefName","headRefName","number","statusCheckRollup","url"]' "pr: pr.json keys"
     assert_eq "$(jq -r .url "$dir/pr.json")" "https://github.com/owner/repo/pull/42" "pr: pr.json url"
@@ -158,6 +178,41 @@ rm -rf "$state/items"
 STUB_ITEM_FAILS=1 bash "$SCRIPT" design owner/repo T "$root/design.md" >/dev/null 2>"$root/err"
 assert_eq "$?" "1" "item not served: exit code"
 grep -q 'does not serve this state root' "$root/err" || { echo "FAIL: item not served: message"; fail=1; }
+
+# A brief defect refuses before queuing: exit 2, the message, the register path, no item directory.
+refuse() {
+  local label=$1 want=$2
+  shift 2
+  rm -rf "$state/items"
+  "$@" >/dev/null 2>"$root/err"
+  assert_eq "$?" "2" "$label: exit code"
+  grep -q -- "$want" "$root/err" || { echo "FAIL: $label: message lacks '$want': $(cat "$root/err")"; fail=1; }
+  grep -q 'approval-brief.md' "$root/err" || { echo "FAIL: $label: no register path"; fail=1; }
+  ! compgen -G "$state/items/*" >/dev/null || { echo "FAIL: $label: left an item directory"; fail=1; }
+}
+cp "$root/body.md" "$root/body-good.md"
+printf 'no brief here\n' >"$root/body.md"
+refuse "pr without a brief" '## Brief' bash "$SCRIPT" pr owner/repo T 42
+cp "$root/body-good.md" "$root/body.md"
+grep -v -e '^### If you approve' -e '^1\. The PR merges' "$root/design.md" >"$root/design-bad.md"
+refuse "design missing If you approve" 'If you approve' bash "$SCRIPT" design owner/repo T "$root/design-bad.md"
+printf '[{"item":"a","disposition":"now","reason":"r"}]\n' >"$root/triage-old.json"
+refuse "old triage shape" 'old triage shape' bash "$SCRIPT" triage owner/repo T "$root/triage-old.json"
+
+# Every exemplar in the register passes the check, run with no approval-queue/node_modules in play.
+register="claude/.claude/docs/voice/approval-brief.md"
+n=0
+while IFS=$'\t' read -r fence file; do
+  n=$((n + 1))
+  kind=design
+  [ "$fence" != brief-triage ] || kind=triage
+  node approval-queue/src/check-brief.ts "$kind" "$file" >/dev/null 2>"$root/err" \
+    || { echo "FAIL: register exemplar $n ($fence) fails the check: $(cat "$root/err")"; fail=1; }
+done < <(awk -v dir="$root" '
+  /^```brief(-triage)?$/ { fence = substr($0, 4); n++; out = dir "/ex" n; inblock = 1; next }
+  inblock && /^```$/ { inblock = 0; close(out); print fence "\t" out; next }
+  inblock { print > out }' "$register")
+[ "$n" -ge 3 ] || { echo "FAIL: found only $n register exemplars"; fail=1; }
 
 bash "$SCRIPT" bogus owner/repo T "$root/design.md" >/dev/null 2>&1
 assert_eq "$?" "2" "bad kind: exit code"
