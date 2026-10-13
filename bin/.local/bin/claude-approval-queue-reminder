@@ -19,9 +19,10 @@ CONTEXT = (
     '`approval-queue pr {repo} "<the PR title>" {number}` as a background Bash command and wait for '
     "the decision it prints as JSON. On an approve, merge with `gh pr merge {number} --repo {repo} "
     "--merge --match-head-commit <head>`, taking <head> from the decision, run as its own Bash "
-    "command. Skip the approval queue only where pass-core's Close says the PR is not yours to hand over: an "
-    "executor whose launch prompt gives the hand-over to the conductor, or an ordinary-class pass "
-    "that merges its own PR."
+    "command. The PR body must open with a `## Brief` written to ~/.claude/docs/voice/approval-brief.md; "
+    "the command refuses a PR without one. Skip the approval queue only where pass-core's Close says the PR "
+    "is not yours to hand over: an executor whose launch prompt gives the hand-over to the conductor, or an "
+    "ordinary-class pass that merges its own PR."
 )
 
 
