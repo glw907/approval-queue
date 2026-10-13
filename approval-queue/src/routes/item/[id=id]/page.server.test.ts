@@ -13,11 +13,15 @@ vi.mock('$app/env/private', () => ({
 import { actions, load } from './+page.server.ts';
 
 const ID = '20261011T100000-1';
-const ROWS = [
-	{ item: 'one', disposition: 'now', reason: 'a' },
-	{ item: 'two', disposition: 'defer', reason: 'b' },
-	{ item: 'three', disposition: 'drop', reason: 'c' }
-];
+const TRIAGE = {
+	headline: 'Three calls.',
+	lede: 'One now, one later, one dropped.',
+	rows: [
+		{ action: 'one', why: 'a', detail: 'tech', proposed: 'now' },
+		{ action: 'two', why: 'b', proposed: 'defer' },
+		{ action: 'three', why: 'c', proposed: 'drop' }
+	]
+};
 
 async function seed(id: string, meta: object, files: Record<string, string>) {
 	const dir = join(state.root, 'items', id);
@@ -27,7 +31,7 @@ async function seed(id: string, meta: object, files: Record<string, string>) {
 }
 
 const seedPr = () => seed(ID, { kind: 'pr', head: 'abc' }, { 'body.md': 'hello', 'diff.patch': '+a' });
-const seedTriage = () => seed(ID, { kind: 'triage' }, { 'triage.json': JSON.stringify(ROWS) });
+const seedTriage = () => seed(ID, { kind: 'triage' }, { 'triage.json': JSON.stringify(TRIAGE) });
 
 function call(name: keyof typeof actions, fields: [string, string][] = [], id = ID) {
 	const body = new URLSearchParams(fields);
@@ -55,20 +59,24 @@ describe('actions', () => {
 		expect(await decision()).toEqual({ decision: 'reject', note: 'no good' });
 	});
 
-	it('submit writes every row with the file item text', async () => {
+	it('submit writes each row with the file action, the changed disposition, and the note', async () => {
 		await seedTriage();
 		await call('submit', [
-			['item', 'forged'],
+			['action', 'forged'],
 			['disposition', 'drop'],
-			['reason', 'a'],
+			['note', 'not now, the run is waiting'],
 			['disposition', 'defer'],
-			['reason', 'b'],
+			['note', ''],
 			['disposition', 'drop'],
-			['reason', 'c']
+			['note', '']
 		]);
 		expect(await decision()).toEqual({
 			decision: 'submit',
-			rows: [{ ...ROWS[0], disposition: 'drop' }, ROWS[1], ROWS[2]]
+			rows: [
+				{ action: 'one', disposition: 'drop', note: 'not now, the run is waiting' },
+				{ action: 'two', disposition: 'defer', note: '' },
+				{ action: 'three', disposition: 'drop', note: '' }
+			]
 		});
 	});
 
@@ -76,9 +84,9 @@ describe('actions', () => {
 		await seedTriage();
 		const result = await call('submit', [
 			['disposition', 'now'],
-			['reason', 'a'],
+			['note', 'a'],
 			['disposition', 'now'],
-			['reason', 'b']
+			['note', 'b']
 		]);
 		expect(result).toMatchObject({ status: 400 });
 	});
@@ -87,11 +95,11 @@ describe('actions', () => {
 		await seedTriage();
 		const result = await call('submit', [
 			['disposition', 'later'],
-			['reason', 'a'],
+			['note', 'a'],
 			['disposition', 'now'],
-			['reason', 'b'],
+			['note', 'b'],
 			['disposition', 'now'],
-			['reason', 'c']
+			['note', 'c']
 		]);
 		expect(result).toMatchObject({ status: 400 });
 	});
@@ -236,6 +244,20 @@ describe('load', () => {
 		await seed(ID, { kind: 'pr', head: 'abc' }, { 'body.md': 'x\n\n## Before merge\n\nRun `stow -R bin`.', 'diff.patch': '+a' });
 		expect(await load({ params: { id: ID } } as never)).toMatchObject({
 			beforeMergeHtml: '<p>Run <code>stow -R bin</code>.</p>\n'
+		});
+	});
+
+	it('returns a triage with its headline, lede, and rows at their proposals', async () => {
+		await seedTriage();
+		expect(await load({ params: { id: ID } } as never)).toMatchObject({
+			kind: 'triage',
+			headline: 'Three calls.',
+			lede: 'One now, one later, one dropped.',
+			rows: [
+				{ action: 'one', why: 'a', detail: 'tech', proposed: 'now', disposition: 'now', note: '' },
+				{ action: 'two', proposed: 'defer', disposition: 'defer', note: '' },
+				{ action: 'three', proposed: 'drop', disposition: 'drop', note: '' }
+			]
 		});
 	});
 

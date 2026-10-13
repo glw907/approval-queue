@@ -1,6 +1,6 @@
 <!-- @component
 A triage item: Now, Defer, and Drop sections whose rows move by key (`1`, `2`, `3`) or by a "Move to"
-menu, with focus following the moved row. A reason edits in place. The rows are bound to
+menu, with focus following the moved row. A note edits in place. The rows are bound to
 `ItemPanel`, which submits them; nothing here posts.
 
 The rows' order never changes, so an item number is its position. A section lists its rows in
@@ -71,10 +71,10 @@ that order, and a moved row shows "was X" until it returns to the proposal.
 	}
 
 	async function startEdit(index: number) {
-		original = rows[index].reason;
+		original = rows[index].note;
 		editing = index;
 		await tick();
-		const input = document.querySelector<HTMLInputElement>(`[data-reason-input="${index}"]`);
+		const input = document.querySelector<HTMLInputElement>(`[data-note-input="${index}"]`);
 		input?.focus();
 		input?.select();
 	}
@@ -88,7 +88,7 @@ that order, and a moved row shows "was X" until it returns to the proposal.
 		document.querySelector<HTMLElement>(`[data-edit="${index}"]`)?.focus();
 	}
 
-	function onReasonKey(e: KeyboardEvent, index: number) {
+	function onNoteKey(e: KeyboardEvent, index: number) {
 		if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
 			endEdit(index, false);
 		} else if (e.key === 'Enter') {
@@ -96,7 +96,7 @@ that order, and a moved row shows "was X" until it returns to the proposal.
 			endEdit(index, true);
 		} else if (e.key === 'Escape') {
 			e.stopPropagation();
-			rows[index].reason = original;
+			rows[index].note = original;
 			endEdit(index, true);
 		}
 	}
@@ -189,30 +189,30 @@ that order, and a moved row shows "was X" until it returns to the proposal.
 					>
 						<span class="tb-n" aria-hidden="true">{index + 1}</span>
 						<div class="min-w-0">
-							<p class="tb-text" id="item-{index}">{row.item}</p>
+							<p class="tb-text" id="item-{index}">{row.action}</p>
 							<div class="tb-reason">
 								{#if editing === index}
 									<input
 										class="input input-sm w-full max-w-[80ch]"
-										data-reason-input={index}
-										placeholder="Why this disposition"
-										aria-label="Reason for item {index + 1}"
-										bind:value={rows[index].reason}
+										data-note-input={index}
+										placeholder="Your note on this item"
+										aria-label="Note for item {index + 1}"
+										bind:value={rows[index].note}
 										disabled={desk.held}
-										onkeydown={(e) => onReasonKey(e, index)}
+										onkeydown={(e) => onNoteKey(e, index)}
 										onblur={() => endEdit(index, false)}
 									/>
 								{:else}
-									<span>{#if row.reason}{row.reason}{:else}<span class="italic">No reason given.</span>{/if}</span>
+									<span>{row.why}{#if row.note} <span class="italic">Your note: {row.note}</span>{/if}</span>
 									<button
 										type="button"
 										class="link link-hover min-h-6 text-[0.8rem]"
 										data-edit={index}
-										aria-label="{row.reason ? 'Edit reason' : 'Add a reason'} for item {index + 1}"
+										aria-label="{row.note ? 'Edit note' : 'Add a note'} for item {index + 1}"
 										disabled={desk.held}
 										onclick={() => startEdit(index)}
 									>
-										{row.reason ? 'Edit reason' : 'Add a reason'}
+										{row.note ? 'Edit note' : 'Add a note'}
 									</button>
 									<button
 										type="button"

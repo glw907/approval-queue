@@ -221,7 +221,7 @@ entry so the tab stays script-closable.
 		>
 			{#each rows as row, i (i)}
 				<input type="hidden" name="disposition" value={row.disposition} />
-				<input type="hidden" name="reason" value={row.reason} />
+				<input type="hidden" name="note" value={row.note} />
 			{/each}
 			<p class="mr-auto text-sm" role="status">
 				{rows.length} items, {changed === 0 ? 'none' : changed} changed from proposed

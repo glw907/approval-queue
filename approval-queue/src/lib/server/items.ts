@@ -1,12 +1,14 @@
 import { readFile, readdir, rename, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import type { Proposed, Triage } from '#lib/brief.ts';
 
-export type Disposition = 'now' | 'defer' | 'drop';
+export type Disposition = Proposed;
 
-export interface TriageRow {
-	item: string;
+/** One row of a submitted triage: the session's action, Geoff's call, and his own note. */
+export interface SubmittedRow {
+	action: string;
 	disposition: Disposition;
-	reason: string;
+	note: string;
 }
 
 export interface ItemMeta {
@@ -14,6 +16,8 @@ export interface ItemMeta {
 	kind: 'pr' | 'design' | 'triage';
 	repo: string;
 	title: string;
+	/** The brief's headline, written by the command; absent on an item it wrote before briefs. */
+	headline?: string;
 	/** ISO 8601 UTC, so a string sort is a time sort. */
 	created: string;
 	/** The PR head commit the item was fetched at. */
@@ -36,12 +40,12 @@ export interface PrMeta {
 export type ItemContent =
 	| { kind: 'pr'; body: string; diff: string; pr?: PrMeta }
 	| { kind: 'design'; doc: string }
-	| { kind: 'triage'; rows: TriageRow[] };
+	| ({ kind: 'triage' } & Triage);
 
 export type Decision =
-	| { decision: 'approve' }
+	| { decision: 'approve'; choices?: Array<{ title: string; choice: string }> }
 	| { decision: 'reject'; note: string }
-	| { decision: 'submit'; rows: TriageRow[] };
+	| { decision: 'submit'; rows: SubmittedRow[] };
 
 export interface Item {
 	meta: ItemMeta;
@@ -114,7 +118,9 @@ export async function readItem(root: string, id: string): Promise<Item | undefin
 	} else if (meta.kind === 'design') {
 		content = { kind: 'design', doc: await readFile(join(dir, 'doc.md'), 'utf8') };
 	} else {
-		content = { kind: 'triage', rows: (await readJson<TriageRow[]>(join(dir, 'triage.json'))) ?? [] };
+		const triage = await readJson<Triage>(join(dir, 'triage.json'));
+		// The command validates the file before writing it; a missing or old-shape file renders as empty.
+		content = { kind: 'triage', headline: '', lede: '', rows: [], ...(triage && !Array.isArray(triage) && triage) };
 	}
 	return { meta, content, decided };
 }
