@@ -13,7 +13,7 @@ name and first sentence, and opens to the rest. Renders nothing when the brief h
 {#if details.length}
 	<section class="mt-10" aria-labelledby="details-h">
 		<h2 id="details-h" class="mb-1 text-[0.7rem] font-semibold tracking-[0.08em] text-(--color-muted) uppercase">Details</h2>
-		{#each details as detail (detail.label)}
+		{#each details as detail, i (i)}
 			<Disclosure name={detail.label} summaryHtml={detail.summaryHtml}>
 				<div class="desk-code">{@html detail.bodyHtml}</div>
 			</Disclosure>

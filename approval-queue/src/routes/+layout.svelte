@@ -1,5 +1,5 @@
 <!-- @component
-The desk's page skeleton: the queue in a drawer, the open item or the empty state beside it, the
+The page skeleton: the queue in a drawer, the open item or the empty state beside it, the
 shortcut sheet, the live region, and the undo toast. One `keydown` listener on the document turns
 every key into a `keyAction`; the queue and the sheet act on it here, and the open item acts on
 the rest through `desk.handlers`.

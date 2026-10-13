@@ -18,6 +18,40 @@ function refusal(markdown: string): string {
 	return result.messages.join('\n');
 }
 
+describe('detail sections and the one-block sections', () => {
+	const brief = (extra: string) =>
+		`## Brief\n\nHeadline here. A lede follows.\n\n### What changes\n\n- a\n\n### If you approve\n\n1. b\n${extra}\n`;
+
+	it('keeps a detail section’s list, code block, and second paragraph', () => {
+		const result = parseBrief(
+			brief('\n### Commands\n\nRun these in order. They are quick.\n\n```sh\nstow -R bin\n```\n\n- first\n- second\n\nA closing paragraph.')
+		);
+		expect(result.ok).toBe(true);
+		if (!result.ok) return;
+		const [commands] = result.brief.details;
+		expect(commands.summary).toBe('Run these in order.');
+		expect(commands.body.startsWith('Run these in order. They are quick.')).toBe(true);
+		expect(commands.body).toContain('```sh\nstow -R bin\n```');
+		expect(commands.body).toContain('- first\n- second');
+		expect(commands.body).toContain('A closing paragraph.');
+	});
+
+	it('refuses text after the one list or paragraph, since the page would drop it', () => {
+		for (const extra of [
+			'\n### Worth knowing\n\nOne.\n\nTwo.',
+			'\n### Decide: x\n\nQ\n\n- a\n- b'
+		]) {
+			const result = parseBrief(brief(extra));
+			expect(result.ok).toBe(extra.includes('Decide'));
+		}
+		const result = parseBrief(
+			`## Brief\n\nHeadline here. A lede follows.\n\n### What changes\n\n- a\n\nStray paragraph.\n\n### If you approve\n\n1. b\n`
+		);
+		expect(result.ok).toBe(false);
+		if (!result.ok) expect(result.messages.join(' ')).toContain('holds only its list');
+	});
+});
+
 describe('parseBrief fixtures', () => {
 	it('parses the PR #40 brief', () => {
 		const result = parseBrief(fixture('pr-40-brief.md'));

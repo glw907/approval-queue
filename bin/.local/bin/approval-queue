@@ -17,19 +17,22 @@ mkdir -p "$root"
 : >>"$log"
 
 # A command that leaves without a decision takes its item off the index.
-trap '[ -e "$item/decision.json" ] || rm -f "$item/item.json" "$item/item.json.tmp"' EXIT
+trap '[ -e "$item/decision.json" ] || rm -f "$item/item.json" "$item/item.json.tmp"; rm -f "$check_body" "$check_err"' EXIT
 trap 'exit 143' TERM HUP INT
 
 app=$(realpath "$(dirname "$(realpath "$0")")/../../../approval-queue")
+# One pair per invocation: a PR hand-over and a triage hand-over run side by side.
+check_body="$root/check-$id.md"
+check_err="$root/check-$id.err"
 
 # check_brief <file>: refuses (exit 2) an item whose brief is missing or incomplete, before any
 # item directory exists, and sets headline. Anything else that fails is a tool failure (exit 1).
 headline=""
 check_brief() {
   local out rc=0
-  out=$(node "$app/src/check-brief.ts" "$kind" "$1" 2>"$root/check.err") || rc=$?
+  out=$(node "$app/src/check-brief.ts" "$kind" "$1" 2>"$check_err") || rc=$?
   if [ "$rc" -ne 0 ]; then
-    cat "$root/check.err" >&2
+    cat "$check_err" >&2
     [ "$rc" -eq 2 ] || echo "approval-queue: the brief check failed to run" >&2
     exit "$((rc == 2 ? 2 : 1))"
   fi
@@ -40,8 +43,8 @@ head="" number="" file=""
 case "$kind" in
   pr)
     view=$(gh pr view "$source" -R "$repo" --json body,headRefOid,number,url,headRefName,baseRefName,statusCheckRollup)
-    jq -r '.body' <<<"$view" >"$root/check-body.md"
-    check_brief "$root/check-body.md"
+    jq -r '.body' <<<"$view" >"$check_body"
+    check_brief "$check_body"
     mkdir -p "$item"
     jq -r '.body' <<<"$view" >"$item/body.md"
     jq 'del(.body, .headRefOid)' <<<"$view" >"$item/pr.json"

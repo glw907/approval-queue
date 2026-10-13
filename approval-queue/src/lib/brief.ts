@@ -39,7 +39,7 @@ export interface DetailSection {
 	label: string;
 	/** The first sentence of the section, shown while the row is closed. */
 	summary: string;
-	/** The section's whole paragraph, summary included. */
+	/** The section's whole text as markdown, summary included; the blocks after its first paragraph keep their line breaks. */
 	body: string;
 }
 
@@ -245,7 +245,10 @@ export function parseBrief(markdown: string): Result<{ brief: Brief }> {
 			seen.add(exact);
 		}
 		const first = found[0];
-		if (heading === 'What changes') {
+		if (found.length > 1 && (heading === 'What changes' || heading === 'If you approve' || heading === 'Worth knowing')) {
+			// Anything after the one block would be dropped from the page, so it is refused instead.
+			errors.push(`\`### ${heading}\` holds only its ${heading === 'Worth knowing' ? 'paragraph' : 'list'}; move the rest to a detail section`);
+		} else if (heading === 'What changes') {
 			if (first?.kind !== 'bullets') errors.push('`### What changes` must open with a bulleted list');
 			else {
 				brief.whatChanges = listItems(first);
@@ -270,8 +273,11 @@ export function parseBrief(markdown: string): Result<{ brief: Brief }> {
 		} else if (first?.kind !== 'paragraph') {
 			errors.push(`\`### ${heading}\` must open with a paragraph, whose first sentence is its summary`);
 		} else {
-			const body = paragraphText(first);
-			brief.details.push({ label: heading, summary: sentences(body)[0], body });
+			const lead = paragraphText(first);
+			// The first paragraph is joined to one line so its first sentence matches the summary; the
+			// blocks after it (lists, code fences, more paragraphs) keep their own lines for the page.
+			const body = [lead, ...found.slice(1).map((b) => b.lines.join('\n'))].join('\n\n');
+			brief.details.push({ label: heading, summary: sentences(lead)[0], body });
 		}
 	}
 	if (!haveChanges && !seen.has('What changes')) errors.unshift('`### What changes` is missing; it needs a bulleted list');

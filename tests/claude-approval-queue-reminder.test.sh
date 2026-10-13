@@ -45,4 +45,9 @@ assert_eq "$out" "" "no PR URL: silent"; assert_eq "$rc" "0" "no PR URL: exit 0"
 out=$(printf 'not json' | "$SCRIPT"); rc=$?
 assert_eq "$out" "" "bad input: silent"; assert_eq "$rc" "0" "bad input: exit 0"
 
+case "$ctx" in
+  *'~/.claude/docs/voice/approval-brief.md'*) ;;
+  *) echo "FAIL: created: context does not name the register: $ctx"; fail=1 ;;
+esac
+
 if [ "$fail" -eq 0 ]; then echo "claude-approval-queue-reminder: OK"; else exit 1; fi

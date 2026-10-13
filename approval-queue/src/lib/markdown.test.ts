@@ -28,6 +28,11 @@ describe('links', () => {
 		expect(render('[c](docs/x.md)')).toContain('<a href="docs/x.md">c</a>');
 	});
 
+	it('renders a link whose scheme hides behind a tab or a control character as its text', () => {
+		expect(render('[a](<java\tscript:alert(1)>)')).toBe('<p>a</p>\n');
+		expect(render('[a](<\u0001javascript:alert(1)>)')).toBe('<p>a</p>\n');
+	});
+
 	it('renders a javascript: or data: link as its text', () => {
 		expect(render('[x](javascript:alert(1))')).toBe('<p>x</p>\n');
 		expect(renderInline('[y](data:text/html,hi)')).toBe('y');
