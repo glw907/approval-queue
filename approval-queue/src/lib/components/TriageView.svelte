@@ -1,29 +1,37 @@
 <!-- @component
-A triage item: Now, Defer, and Drop sections whose rows move by key (`1`, `2`, `3`) or by a "Move to"
-menu, with focus following the moved row. A note edits in place. The rows are bound to
-`ItemPanel`, which submits them; nothing here posts.
-
-The rows' order never changes, so an item number is its position. A section lists its rows in
-that order, and a moved row shows "was X" until it returns to the proposal.
+A triage item: the session's calls in three groups (Do now, Do later, Don't do), each row with a
+choice join, a Note button, and a Technical detail disclosure. Choosing moves the row to the group
+it names, and keys `1`, `2`, `3` do the same for the focused row. The rows are bound to `ItemPanel`,
+which submits them; nothing here posts. A row's number is its position in the file and never changes.
 -->
 <script lang="ts">
 	import { tick } from 'svelte';
 	import { desk } from '#lib/desk.svelte.ts';
 	import { groupRows, moveRow, type Disposition, type Row } from '#lib/triage.ts';
+	import BriefBlock from './BriefBlock.svelte';
 
-	let { rows = $bindable() }: { rows: Row[] } = $props();
+	interface Props {
+		rows: Row[];
+		/** Each row's action, reason, and technical detail as rendered HTML, in the file's order. */
+		html: Array<{ action: string; why: string; detail: string | null }>;
+		headlineHtml: string;
+		ledeHtml: string;
+		/** The meta line above the block, such as "Triage · drafter Pass 0". */
+		meta: string;
+	}
+
+	let { rows = $bindable(), html, headlineHtml, ledeHtml, meta }: Props = $props();
 
 	const SECTIONS = [
-		{ key: 'now', label: 'Now' },
-		{ key: 'defer', label: 'Defer' },
-		{ key: 'drop', label: 'Drop' }
+		{ key: 'now', label: 'Do now', dot: 'bg-warning', pick: 'checked:bg-warning/25' },
+		{ key: 'defer', label: 'Do later', dot: 'bg-base-content/40', pick: 'checked:bg-base-300' },
+		{ key: 'drop', label: 'Don’t do', dot: 'bg-base-content/20', pick: 'checked:bg-base-300' }
 	] as const;
-	const LABEL: Record<Disposition, string> = { now: 'Now', defer: 'Defer', drop: 'Drop' };
+	const LABEL: Record<Disposition, string> = { now: 'Do now', defer: 'Do later', drop: 'Don’t do' };
 
 	const groups = $derived(groupRows(rows));
 	/** The row that holds the roving tabindex. */
 	let current = $state(0);
-	let menuOpen = $state<number | null>(null);
 	let editing = $state<number | null>(null);
 	let original = '';
 
@@ -47,7 +55,7 @@ that order, and a moved row shows "was X" until it returns to the proposal.
 		el.scrollIntoView({ block: 'nearest' });
 	}
 
-	/** Steps through the rows in the order they sit on the page: Now, then Defer, then Drop. */
+	/** Steps through the rows in the order they sit on the page: Do now, then Do later, then Don't do. */
 	function stepRow(step: number) {
 		const els = [...document.querySelectorAll<HTMLElement>('[data-row]')];
 		const at = els.findIndex((el) => el.contains(document.activeElement));
@@ -100,100 +108,63 @@ that order, and a moved row shows "was X" until it returns to the proposal.
 			endEdit(index, true);
 		}
 	}
-
-	/** Places the menu under its trigger, flipped above it near the decision bar, and focuses the checked item. */
-	async function onMenuToggle(e: ToggleEvent, index: number) {
-		const menu = e.currentTarget as HTMLElement;
-		if (e.newState !== 'open') {
-			if (menuOpen === index) menuOpen = null;
-			return;
-		}
-		menuOpen = index;
-		const trigger = document.querySelector<HTMLElement>(`[data-trigger="${index}"]`)!.getBoundingClientRect();
-		const box = menu.getBoundingClientRect();
-		const bar = document.getElementById('decision')?.getBoundingClientRect().top ?? innerHeight;
-		let top = trigger.bottom + 4;
-		if (top + box.height > bar - 8) top = trigger.top - box.height - 4;
-		const left = Math.min(innerWidth - box.width - 8, Math.max(8, trigger.right - box.width));
-		menu.style.top = `${Math.max(8, top)}px`;
-		menu.style.left = `${left}px`;
-		menu.querySelector<HTMLElement>('[aria-checked="true"]')?.focus();
-	}
-
-	function closeMenu(index: number, focusTrigger: boolean) {
-		document.getElementById(`mc-${index}`)?.hidePopover();
-		if (focusTrigger) document.querySelector<HTMLElement>(`[data-trigger="${index}"]`)?.focus();
-	}
-
-	function onMenuKey(e: KeyboardEvent, index: number) {
-		const items = [...(e.currentTarget as HTMLElement).querySelectorAll<HTMLElement>('[role=menuitemradio]')];
-		const at = items.indexOf(document.activeElement as HTMLElement);
-		const pick = { '1': 'now', '2': 'defer', '3': 'drop' }[e.key] as Disposition | undefined;
-		// The row handler on the document would otherwise step focus out of the open menu.
-		if (['Escape', 'Tab', 'ArrowDown', 'ArrowUp', 'Home', 'End'].includes(e.key)) e.stopPropagation();
-		if (e.key === 'Escape' || e.key === 'Tab') {
-			e.preventDefault();
-			closeMenu(index, true);
-		} else if (e.key === 'ArrowDown') {
-			e.preventDefault();
-			items[(at + 1) % items.length].focus();
-		} else if (e.key === 'ArrowUp') {
-			e.preventDefault();
-			items[(at - 1 + items.length) % items.length].focus();
-		} else if (e.key === 'Home') {
-			e.preventDefault();
-			items[0].focus();
-		} else if (e.key === 'End') {
-			e.preventDefault();
-			items[items.length - 1].focus();
-		} else if (pick && desk.singleKeys) {
-			e.preventDefault();
-			e.stopPropagation();
-			closeMenu(index, false);
-			moveTo(index, pick);
-		}
-	}
-
-	function pickItem(index: number, disposition: Disposition) {
-		closeMenu(index, false);
-		moveTo(index, disposition);
-	}
 </script>
 
-<p class="desk-muted mb-2 text-sm leading-7">
-	Each item starts at the session's proposal. ↑↓ move between items,
-	<span class="desk-sk">1 2 3 set now, defer, or drop;</span> menus take arrows and Esc.
-</p>
+<p class="mb-2 text-xs tracking-wide text-(--color-muted)">{meta}</p>
+<BriefBlock {headlineHtml} {ledeHtml} />
 
 {#each SECTIONS as section (section.key)}
-	<section class="desk-group" data-group={section.key} aria-labelledby="g-{section.key}">
-		<h2 id="g-{section.key}">
-			<span class="desk-dot" aria-hidden="true"></span>
+	<section data-group={section.key} aria-labelledby="g-{section.key}">
+		<h2 id="g-{section.key}" class="mt-9 mb-0 flex items-center gap-2 text-base font-semibold">
+			<span class="size-2 rounded-full {section.dot}" aria-hidden="true"></span>
 			{section.label}
-			<span class="desk-count">{groups[section.key].length}</span>
+			<span class="text-sm font-normal text-(--color-muted)">{groups[section.key].length}</span>
 		</h2>
 		{#if groups[section.key].length === 0}
-			<p class="desk-empty">Nothing here.</p>
+			<p class="py-3 text-sm text-(--color-muted)">Nothing here.</p>
 		{:else}
-			<ol class="desk-v" aria-labelledby="g-{section.key}">
+			<ul class="list">
 				{#each groups[section.key] as { row, index } (index)}
 					<!-- The list takes one tab stop and the arrows move within it, so each row is focusable. -->
 					<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
 					<li
 						data-row={index}
-						class:is-moved={row.disposition !== row.proposed}
+						class="list-row items-start px-0 py-3 after:border-base-content/10"
 						tabindex={current === index ? 0 : -1}
 						aria-labelledby="item-{index}"
-						aria-describedby="was-{index}"
 						onfocusin={() => (current = index)}
 					>
-						<span class="tb-n" aria-hidden="true">{index + 1}</span>
-						<div class="min-w-0">
-							<p class="tb-text" id="item-{index}">{row.action}</p>
-							<div class="tb-reason">
+						<div class="min-w-0 list-col-grow">
+							<p
+								id="item-{index}"
+								class={[
+									'max-w-[70ch] text-base leading-snug font-semibold text-pretty',
+									section.key === 'drop' && 'text-(--color-muted)'
+								]}
+							>
+								{@html html[index].action}
+							</p>
+							<p class="mt-0.5 max-w-[70ch] text-[0.95rem] leading-relaxed text-pretty text-(--color-muted)">
+								{@html html[index].why}
+								{#if row.note}<span class="italic">Your note: {row.note}</span>{/if}
+							</p>
+							<div class="mt-2 flex flex-wrap items-center gap-x-1 gap-y-2">
+								<div class="join rounded-field border border-base-300" role="radiogroup" aria-label="Call for item {index + 1}">
+									{#each SECTIONS as target (target.key)}
+										<input
+											class="join-item btn btn-xs btn-ghost font-normal checked:border-base-content/55 checked:font-semibold checked:text-base-content {target.pick}"
+											type="radio"
+											name="r{index}"
+											aria-label={target.label}
+											checked={row.disposition === target.key}
+											disabled={desk.held}
+											onchange={() => moveTo(index, target.key)}
+										/>
+									{/each}
+								</div>
 								{#if editing === index}
 									<input
-										class="input input-sm w-full max-w-[80ch]"
+										class="input input-sm w-full max-w-[60ch]"
 										data-note-input={index}
 										placeholder="Your note on this item"
 										aria-label="Note for item {index + 1}"
@@ -203,177 +174,45 @@ that order, and a moved row shows "was X" until it returns to the proposal.
 										onblur={() => endEdit(index, false)}
 									/>
 								{:else}
-									<span>{row.why}{#if row.note} <span class="italic">Your note: {row.note}</span>{/if}</span>
 									<button
 										type="button"
-										class="link link-hover min-h-6 text-[0.8rem]"
+										class="btn btn-xs btn-ghost font-normal text-(--color-muted)"
 										data-edit={index}
 										aria-label="{row.note ? 'Edit note' : 'Add a note'} for item {index + 1}"
 										disabled={desk.held}
 										onclick={() => startEdit(index)}
 									>
-										{row.note ? 'Edit note' : 'Add a note'}
-									</button>
-									<button
-										type="button"
-										class="link link-hover min-h-6 text-[0.8rem]"
-										data-trigger={index}
-										popovertarget="mc-{index}"
-										aria-haspopup="menu"
-										aria-expanded={menuOpen === index}
-										aria-label="Move item {index + 1} to another disposition"
-										disabled={desk.held}
-									>
-										Move to
+										<svg class="size-3 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m4 20 4-1 11-11-3-3L5 16l-1 4zM14 6l3 3" /></svg>
+										Note
 									</button>
 								{/if}
-								<span class="tb-was" id="was-{index}">
-									{row.disposition !== row.proposed ? `was ${LABEL[row.proposed]}` : ''}
-								</span>
 							</div>
-						</div>
-						<ul
-							id="mc-{index}"
-							class="dropdown desk-menu menu menu-sm w-48 rounded-box border border-base-300 bg-base-100 p-1"
-							popover
-							role="menu"
-							aria-label="Move item {index + 1} to"
-							ontoggle={(e) => onMenuToggle(e, index)}
-							onkeydown={(e) => onMenuKey(e, index)}
-						>
-							{#each SECTIONS as target, n (target.key)}
-								<li role="none">
-									<button
-										type="button"
-										role="menuitemradio"
-										aria-checked={row.disposition === target.key}
-										disabled={desk.held}
-										class={{ 'menu-active': row.disposition === target.key }}
-										onclick={() => pickItem(index, target.key)}
-									>
-										<span>
-											{target.label}
-											{#if row.proposed === target.key}<span class="desk-prop">proposed</span>{/if}
+							{#if html[index].detail}
+								<details class="group mt-0">
+									<summary class="flex w-fit cursor-pointer list-none items-center gap-1 py-1 text-xs text-(--color-muted) hover:text-base-content">
+										<span class="transition-transform group-open:rotate-90">
+											<svg class="size-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 6 6 6-6 6" /></svg>
 										</span>
-										<kbd class="kbd kbd-xs desk-kbd desk-sk">{n + 1}</kbd>
-									</button>
-								</li>
-							{/each}
-						</ul>
+										Technical detail
+									</summary>
+									<div class="desk-code mt-1 max-w-[70ch] text-xs leading-relaxed text-pretty opacity-90">{@html html[index].detail}</div>
+								</details>
+							{/if}
+						</div>
 					</li>
 				{/each}
-			</ol>
+			</ul>
 		{/if}
 	</section>
 {/each}
 
 <style>
-	.desk-group + .desk-group {
-		margin-top: 18px;
-	}
-	.desk-group h2 {
-		display: flex;
-		align-items: baseline;
-		gap: 8px;
-		padding-inline-start: 8px;
-		padding-bottom: 4px;
-		font-weight: 700;
-		font-size: 0.95rem;
-		border-bottom: 1px dashed var(--site-rule-color);
-	}
-	.desk-group h2 .desk-count {
-		font-weight: 400;
-		color: var(--color-muted);
-	}
-	.desk-group .desk-empty {
-		padding-inline-start: 48px;
-		padding-block: 8px;
-		font-size: 0.84rem;
-		color: var(--color-muted);
-	}
-	.desk-group[data-group='now'] {
-		--desk-hue: var(--cairn-warning-ink);
-	}
-	.desk-group[data-group='defer'] {
-		--desk-hue: var(--color-info);
-	}
-	.desk-group[data-group='drop'] {
-		--desk-hue: var(--color-muted);
-	}
-	.desk-dot {
-		display: inline-block;
-		width: 8px;
-		height: 8px;
-		border-radius: 50%;
-		background: var(--desk-hue);
-		align-self: center;
-	}
-
-	.desk-v {
-		list-style: none;
-	}
-	.desk-v > li {
-		position: relative;
-		display: grid;
-		grid-template-columns: 2rem minmax(0, 1fr);
-		column-gap: 16px;
-		padding: 10px 12px 10px 8px;
-		border-radius: var(--radius-box);
-	}
-	.desk-v > li + li {
-		margin-top: 2px;
-	}
-	.desk-v > li:focus-within {
-		background-color: var(--color-base-200);
-	}
-	.tb-n {
-		color: var(--color-muted);
-		font-variant-numeric: tabular-nums;
-		text-align: right;
-		line-height: 1.45;
-	}
-	.tb-text {
-		line-height: 1.45;
-		max-width: 80ch;
-	}
-	.tb-reason {
-		display: flex;
-		flex-wrap: wrap;
-		align-items: center;
-		gap: 2px 10px;
-		font-size: 0.84rem;
-		color: var(--color-muted);
-	}
-	.tb-was {
-		font-size: 0.78rem;
-		color: var(--color-muted);
-	}
-	.desk-v > li.is-moved .tb-n {
-		position: relative;
-	}
-	.desk-v > li.is-moved .tb-n::before {
-		content: '';
-		position: absolute;
-		left: -2px;
-		top: 0.72em;
-		width: 6px;
-		height: 6px;
-		border-radius: 50%;
-		background: var(--desk-hue);
-	}
-
-	.desk-menu {
-		position: fixed;
-		inset: auto;
-		margin: 0;
-		position-area: none;
-	}
-	.desk-menu [role='menuitemradio'] {
-		justify-content: space-between;
-	}
-	.desk-menu .desk-prop {
-		font-size: 0.72rem;
-		color: inherit;
-		opacity: 0.8;
+	.desk-code :global(code) {
+		font-family: var(--font-mono);
+		font-size: var(--text-step-inline-code);
+		background: var(--color-base-200);
+		padding: 1px 4px;
+		border-radius: 3px;
+		overflow-wrap: anywhere;
 	}
 </style>

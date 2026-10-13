@@ -29,6 +29,17 @@ export function technicalNotes(body: string): string {
 		.join('\n\n');
 }
 
+/** A design doc with its `## Brief` section removed; the page shows the brief above the document. */
+export function withoutBrief(doc: string): string {
+	const out: string[] = [];
+	let skipping = false;
+	for (const line of doc.split('\n')) {
+		if (/^##\s/.test(line)) skipping = /^##\s+Brief\s*#*\s*$/.test(line);
+		if (!skipping) out.push(line);
+	}
+	return out.join('\n');
+}
+
 /** The markdown under "## Review" up to the next heading of level 1 or 2, or null. */
 export function reviewSection(body: string): string | null {
 	const lines = body.split('\n');

@@ -298,18 +298,45 @@ describe('load', () => {
 		expect(await load({ params: { id: ID } } as never)).toMatchObject({ kind: 'design', minutes: 2 });
 	});
 
-	it('returns a triage with its headline, lede, and rows at their proposals', async () => {
+	it('returns a triage with its headline, lede, rendered row text, and rows at their proposals', async () => {
 		await seedTriage();
 		expect(await load({ params: { id: ID } } as never)).toMatchObject({
 			kind: 'triage',
-			headline: 'Three calls.',
-			lede: 'One now, one later, one dropped.',
+			headlineHtml: 'Three calls.',
+			ledeHtml: 'One now, one later, one dropped.',
 			rows: [
 				{ action: 'one', why: 'a', detail: 'tech', proposed: 'now', disposition: 'now', note: '' },
 				{ action: 'two', proposed: 'defer', disposition: 'defer', note: '' },
 				{ action: 'three', proposed: 'drop', disposition: 'drop', note: '' }
+			],
+			html: [
+				{ action: 'one', why: 'a', detail: 'tech' },
+				{ action: 'two', why: 'b', detail: null },
+				{ action: 'three', why: 'c', detail: null }
 			]
 		});
+	});
+
+	it('returns a design whose brief parses into the headline block and leaves the brief out of the document', async () => {
+		const doc = `# A design\n\n${fixture('pr-40-brief.md').replace('# Send every session-opened PR to approval\n\n', '')}\n## Design\n\nThe plan itself.\n`;
+		await seed(ID, { kind: 'design', file: 'd.md' }, { 'doc.md': doc });
+		const data = (await load({ params: { id: ID } } as never)) as unknown as {
+			headlineHtml: string;
+			ledeHtml: string;
+			whatChanges: string[];
+			ifYouApprove: string[];
+			worthKnowing: string;
+			details: { label: string }[];
+			docHtml: string;
+		};
+		expect(data.headlineHtml).toBe('Every PR a session opens will now come to you for approval, and approving one will merge it.');
+		expect(data.ledeHtml).toContain('Small fixes were skipping');
+		expect(data.whatChanges).toHaveLength(2);
+		expect(data.ifYouApprove).toHaveLength(3);
+		expect(data.worthKnowing).toContain('merge guard');
+		expect(data.details.map((d) => d.label)).toEqual(['The reminder', 'The merge permission', 'Testing']);
+		expect(data.docHtml).toContain('The plan itself.');
+		expect(data.docHtml).not.toContain('What changes');
 	});
 
 	it('throws 404 on an unknown id', async () => {

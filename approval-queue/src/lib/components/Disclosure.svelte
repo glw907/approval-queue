@@ -33,3 +33,10 @@ tier. `summaryHtml` is trusted markup the server rendered; the body is the child
 		{@render children?.()}
 	</div>
 </details>
+
+<style>
+	summary :global(code) {
+		font-family: var(--font-mono);
+		font-size: var(--text-step-inline-code);
+	}
+</style>

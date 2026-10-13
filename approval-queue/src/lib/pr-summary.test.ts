@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { checksSummary, reviewSection, reviewVerdict, technicalNotes } from './pr-summary.ts';
+import { checksSummary, reviewSection, reviewVerdict, technicalNotes, withoutBrief } from './pr-summary.ts';
 
 describe('technicalNotes', () => {
 	it('keeps what follows the brief and leaves out Before merge and Review', () => {
@@ -10,6 +10,14 @@ describe('technicalNotes', () => {
 
 	it('keeps the lead of a body that has no brief', () => {
 		expect(technicalNotes('Lead text\n\n## What landed\n\nThings')).toBe('Lead text\n\n## What landed\n\nThings');
+	});
+});
+
+describe('withoutBrief', () => {
+	it('drops the Brief section and keeps the title and every other section', () => {
+		expect(withoutBrief('# T\n\n## Brief\n\nHeadline.\n\n### What changes\n\n- a\n\n## Design\n\nBody')).toBe(
+			'# T\n\n## Design\n\nBody'
+		);
 	});
 });
 

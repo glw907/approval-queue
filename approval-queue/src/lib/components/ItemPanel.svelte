@@ -18,7 +18,9 @@ entry so the tab stays script-closable.
 	import { nextItem } from '#lib/queue.ts';
 	import { changedCount, type Row } from '#lib/triage.ts';
 	import type { PageData } from '../../routes/item/[id=id]/$types';
+	import BriefBlock from './BriefBlock.svelte';
 	import DesignView from './DesignView.svelte';
+	import DetailRows from './DetailRows.svelte';
 	import PrView from './PrView.svelte';
 	import TriageView from './TriageView.svelte';
 
@@ -125,7 +127,7 @@ entry so the tab stays script-closable.
 		if (action.search === '?/reject') {
 			return noteField?.value.trim() ? `Sent ${subject()} back with a note.` : `Sent ${subject()} back.`;
 		}
-		return `Submitted ${rows.length} items.`;
+		return `Submitted ${rows.length} calls.`;
 	}
 
 	async function unlock(message: string, focusTo: HTMLElement | null, toast: string | null) {
@@ -201,31 +203,27 @@ entry so the tab stays script-closable.
 	<div class="max-w-3xl">
 		{#if data.kind === 'pr'}
 			<PrView {data} bind:picks subject={subject() ?? ''} />
+		{:else if data.kind === 'design'}
+			<p class="mb-2 text-xs tracking-wide text-(--color-muted)">
+				{data.meta.repo.split('/').pop()}{#if data.meta.file} · {data.meta.file}{/if} · {data.minutes} min read
+			</p>
+			<BriefBlock
+				headlineHtml={data.headlineHtml}
+				ledeHtml={data.ledeHtml}
+				whatChanges={data.whatChanges}
+				ifYouApprove={data.ifYouApprove}
+				worthKnowing={data.worthKnowing}
+			/>
+			<DetailRows details={data.details} />
+			<div class="mt-10"><DesignView docHtml={data.docHtml} /></div>
 		{:else}
-			<header class="relative isolate pb-4">
-				<svg class="site-contour-texture" viewBox="0 0 400 60" preserveAspectRatio="none" aria-hidden="true">
-					<path d="M160 58c40-18 70-6 110-20s80-22 130-6" />
-					<path d="M160 48c40-18 70-6 110-20s80-22 130-6" />
-					<path d="M160 38c40-18 70-6 110-20s80-22 130-6" />
-				</svg>
-				<p class="desk-muted flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
-					{#if data.kind === 'design'}
-						<span>{data.meta.repo.split('/').pop()}</span>
-						{#if data.meta.file}<span>{data.meta.file}</span>{/if}
-						<span>{data.minutes} min read</span>
-					{:else}
-						<span class="badge badge-sm badge-outline">Triage</span>
-						<span>{subject()}</span>
-						<span>{rows.length} items, each with a proposed disposition</span>
-					{/if}
-				</p>
-				<h1 class="desk-title mt-1 text-[1.6rem] leading-tight"><i class="site-benchmark"></i>{data.meta.title}</h1>
-			</header>
-			{#if data.kind === 'design'}
-				<DesignView docHtml={data.docHtml} />
-			{:else}
-				<TriageView bind:rows />
-			{/if}
+			<TriageView
+				bind:rows
+				html={data.html}
+				headlineHtml={data.headlineHtml}
+				ledeHtml={data.ledeHtml}
+				meta="Triage · {data.meta.title}"
+			/>
 		{/if}
 	</div>
 </main>
@@ -247,11 +245,18 @@ entry so the tab stays script-closable.
 				<input type="hidden" name="disposition" value={row.disposition} />
 				<input type="hidden" name="note" value={row.note} />
 			{/each}
-			<p class="mr-auto text-sm" role="status">
-				{rows.length} items, {changed === 0 ? 'none' : changed} changed from proposed
-			</p>
-			<button class="btn btn-primary min-w-32" bind:this={submitButton} disabled={desk.held}>
-				Submit <kbd class={KEY}>Ctrl</kbd><kbd class={KEY}>Enter</kbd>
+			<div class="mr-auto flex min-w-0 items-start gap-3">
+				<span class="status mt-2 bg-base-content/50" aria-hidden="true"></span>
+				<div class="min-w-0" role="status">
+					<p class="leading-tight font-semibold">
+						{rows.length} calls, {changed === 0 ? 'none' : changed} changed
+					</p>
+					<p class="mt-0.5 text-sm leading-snug text-(--color-muted)">Submit sends your calls back to the session.</p>
+				</div>
+			</div>
+			<button class="btn btn-primary" bind:this={submitButton} disabled={desk.held}>
+				<svg class="size-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 5 5 9-10" /></svg>
+				Submit calls <kbd class={KEY}>Ctrl</kbd><kbd class={KEY}>Enter</kbd>
 			</button>
 		</form>
 	{:else}

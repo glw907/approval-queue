@@ -1,10 +1,10 @@
 import { APPROVAL_QUEUE_STATE } from '$app/env/private';
 import { error, fail } from '@sveltejs/kit';
-import { parseBrief } from '#lib/brief.ts';
+import { parseBrief, type Brief } from '#lib/brief.ts';
 import { cardsFor, fingerprint, readChoices } from '#lib/cards.ts';
 import { fileGroups } from '#lib/diff.ts';
 import { render, renderInline } from '#lib/markdown.ts';
-import { checksSummary, reviewSection, reviewVerdict, technicalNotes } from '#lib/pr-summary.ts';
+import { checksSummary, reviewSection, reviewVerdict, technicalNotes, withoutBrief } from '#lib/pr-summary.ts';
 import { nextItem } from '#lib/queue.ts';
 import {
 	listWaiting,
@@ -35,6 +35,15 @@ async function decide(id: string, decision: Decision) {
 	return { next: next ? `/item/${next.id}` : null };
 }
 
+/** The brief's detail sections as rendered rows; the open body drops the first sentence the closed row already shows. */
+function detailRows(brief: Brief | null) {
+	return (brief?.details ?? []).map((d) => ({
+		label: d.label,
+		summaryHtml: renderInline(d.summary),
+		bodyHtml: render(d.body.startsWith(d.summary) ? d.body.slice(d.summary.length).trim() : d.body)
+	}));
+}
+
 export const load: PageServerLoad = async ({ params }) => {
 	const item = await readItem(APPROVAL_QUEUE_STATE, params.id);
 	if (!item) error(404, 'Not found');
@@ -61,11 +70,7 @@ export const load: PageServerLoad = async ({ params }) => {
 			whatChanges: (brief?.whatChanges ?? []).map(renderInline),
 			ifYouApprove: (brief?.ifYouApprove ?? []).map(renderInline),
 			worthKnowing: brief?.worthKnowing === undefined ? null : renderInline(brief.worthKnowing),
-			details: (brief?.details ?? []).map((d) => ({
-				label: d.label,
-				summaryHtml: renderInline(d.summary),
-				bodyHtml: render(d.body.startsWith(d.summary) ? d.body.slice(d.summary.length).trim() : d.body)
-			})),
+			details: detailRows(brief),
 			cards: cardsFor(content.body, content.pr?.statusCheckRollup).map((card) => ({
 				...card,
 				html: card.kind === 'before-merge' ? render(card.text) : renderInline(card.text)
@@ -82,10 +87,37 @@ export const load: PageServerLoad = async ({ params }) => {
 	}
 	if (content.kind === 'design') {
 		const words = content.doc.split(/\s+/).filter(Boolean).length;
-		return { meta, decided, kind: 'design' as const, docHtml: render(content.doc), minutes: Math.ceil(words / 230) };
+		const parsed = parseBrief(content.doc);
+		const brief = parsed.ok ? parsed.brief : null;
+		return {
+			meta,
+			decided,
+			kind: 'design' as const,
+			headlineHtml: renderInline(brief?.headline ?? meta.headline ?? meta.title),
+			ledeHtml: renderInline(brief?.lede ?? ''),
+			whatChanges: (brief?.whatChanges ?? []).map(renderInline),
+			ifYouApprove: (brief?.ifYouApprove ?? []).map(renderInline),
+			worthKnowing: brief?.worthKnowing === undefined ? null : renderInline(brief.worthKnowing),
+			details: detailRows(brief),
+			docHtml: render(withoutBrief(content.doc)),
+			minutes: Math.ceil(words / 230)
+		};
 	}
 	const rows = content.rows.map((row) => ({ ...row, disposition: row.proposed, note: '' }));
-	return { meta, decided, kind: 'triage' as const, headline: content.headline, lede: content.lede, rows };
+	return {
+		meta,
+		decided,
+		kind: 'triage' as const,
+		headlineHtml: renderInline(content.headline),
+		ledeHtml: renderInline(content.lede),
+		rows,
+		// The text each row shows, rendered once here; `rows` keeps the file's own text for the post.
+		html: content.rows.map((row) => ({
+			action: renderInline(row.action),
+			why: renderInline(row.why),
+			detail: row.detail === undefined ? null : renderInline(row.detail)
+		}))
+	};
 };
 
 export const actions: Actions = {

@@ -12,6 +12,8 @@ its title and the rows it still has.
 	import { gate } from '#lib/cards.ts';
 	import { desk } from '#lib/desk.svelte.ts';
 	import type { PageData } from '../../routes/item/[id=id]/$types';
+	import BriefBlock from './BriefBlock.svelte';
+	import DetailRows from './DetailRows.svelte';
 	import Disclosure from './Disclosure.svelte';
 
 	interface Props {
@@ -104,46 +106,13 @@ its title and the rows it still has.
 	{/if}
 </p>
 
-<div class="rounded-box border-s-4 border-primary bg-base-200 py-6 ps-4 pe-4 lg:-ms-7 lg:ps-6 lg:pe-6">
-	<h1 class="desk-title text-[1.75rem] leading-tight text-balance">{@html data.headlineHtml}</h1>
-	{#if data.ledeHtml}
-		<p class="mt-3 max-w-[70ch] text-[1.05rem] leading-relaxed text-pretty opacity-85">{@html data.ledeHtml}</p>
-	{/if}
-	{#if data.whatChanges.length || data.ifYouApprove.length}
-		<div class="mt-6 border-t border-base-content/10 pt-5 text-[0.95rem] leading-snug">
-			<div class="grid gap-6 sm:grid-cols-2">
-				<div>
-					<h2 class="mb-2.5 text-[0.95rem] font-semibold">What changes</h2>
-					<ul class="space-y-2">
-						{#each data.whatChanges as item, i (i)}
-							<li class="flex gap-1">
-								<span class="w-3.5 shrink-0 text-(--color-muted)" aria-hidden="true">•</span>
-								<span class="text-pretty opacity-80">{@html item}</span>
-							</li>
-						{/each}
-					</ul>
-				</div>
-				<div>
-					<h2 class="mb-2.5 text-[0.95rem] font-semibold">If you approve</h2>
-					<ol class="space-y-2">
-						{#each data.ifYouApprove as item, i (i)}
-							<li class="flex gap-1">
-								<span class="w-3.5 shrink-0 tabular-nums text-(--color-muted)">{i + 1}.</span>
-								<span class="text-pretty opacity-80">{@html item}</span>
-							</li>
-						{/each}
-					</ol>
-				</div>
-			</div>
-			{#if data.worthKnowing}
-				<p class="mt-5 flex max-w-[70ch] items-start gap-2 text-sm text-(--color-muted)">
-					<svg class="mt-px size-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M12 11v5M12 8h.01" /></svg>
-					<span>{@html data.worthKnowing}</span>
-				</p>
-			{/if}
-		</div>
-	{/if}
-</div>
+<BriefBlock
+	headlineHtml={data.headlineHtml}
+	ledeHtml={data.ledeHtml}
+	whatChanges={data.whatChanges}
+	ifYouApprove={data.ifYouApprove}
+	worthKnowing={data.worthKnowing}
+/>
 
 {#if data.cards.length}
 	<section class="mt-8 space-y-3" aria-labelledby="decide-h">
@@ -206,16 +175,7 @@ its title and the rows it still has.
 	</section>
 {/if}
 
-{#if data.details.length}
-	<section class="mt-10" aria-labelledby="details-h">
-		<h2 id="details-h" class="mb-1 text-[0.7rem] font-semibold tracking-[0.08em] text-(--color-muted) uppercase">Details</h2>
-		{#each data.details as detail (detail.label)}
-			<Disclosure name={detail.label} summaryHtml={detail.summaryHtml}>
-				<div class="desk-md">{@html detail.bodyHtml}</div>
-			</Disclosure>
-		{/each}
-	</section>
-{/if}
+<DetailRows details={data.details} />
 
 <section class="mt-8" aria-labelledby="evidence-h">
 	<h2 id="evidence-h" class="mb-1 text-[0.7rem] font-semibold tracking-[0.08em] text-(--color-muted) uppercase">Evidence</h2>

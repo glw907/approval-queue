@@ -276,13 +276,13 @@ the rest through `desk.handlers`.
 						<tr><td><kbd class="kbd kbd-xs desk-kbd desk-sk">a</kbd></td><td>Approve</td></tr>
 						<tr>
 							<td><kbd class="kbd kbd-xs desk-kbd desk-sk">r</kbd></td>
-							<td>Reject, with the note field focused</td>
+							<td>Send back, with the note field focused</td>
 						</tr>
 						<tr>
 							<td class="whitespace-nowrap">
 								<kbd class="kbd kbd-xs desk-kbd">Ctrl</kbd> <kbd class="kbd kbd-xs desk-kbd">Enter</kbd>
 							</td>
-							<td>Send the rejection</td>
+							<td>Send back with the note</td>
 						</tr>
 						<tr>
 							<td><kbd class="kbd kbd-xs desk-kbd desk-sk">/</kbd></td>
@@ -307,13 +307,13 @@ the rest through `desk.handlers`.
 								<kbd class="kbd kbd-xs desk-kbd desk-sk">2</kbd>
 								<kbd class="kbd kbd-xs desk-kbd desk-sk">3</kbd>
 							</td>
-							<td>Now, defer, or drop the focused row</td>
+							<td>Do now, do later, or don’t do the focused row</td>
 						</tr>
 						<tr>
 							<td class="whitespace-nowrap">
 								<kbd class="kbd kbd-xs desk-kbd">Ctrl</kbd> <kbd class="kbd kbd-xs desk-kbd">Enter</kbd>
 							</td>
-							<td>Submit every row</td>
+							<td>Submit your calls</td>
 						</tr>
 					</tbody>
 				</table>
