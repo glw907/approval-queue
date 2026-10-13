@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# review-desk.test.sh: prove the review-desk command against this worktree's own copy, with
+# approval-queue.test.sh: prove the approval-queue command against this worktree's own copy, with
 # curl, firefox, setsid, and gh stubbed on PATH. Never starts the app or opens a browser.
 set -uo pipefail
 cd "$(dirname "$0")/.."
-SCRIPT="$(pwd)/bin/.local/bin/review-desk"
+SCRIPT="$(pwd)/bin/.local/bin/approval-queue"
 fail=0
 root="$(mktemp -d)"
 bgpid=""
@@ -39,7 +39,7 @@ STUB
 chmod +x "$stubs"/*
 
 export STUB_DIR="$root" XDG_STATE_HOME="$root/state" PATH="$stubs:$PATH"
-state="$XDG_STATE_HOME/review-desk"
+state="$XDG_STATE_HOME/approval-queue"
 printf '# design\n' >"$root/design.md"
 printf '[{"item":"a","disposition":"now","reason":"r"}]\n' >"$root/triage.json"
 
@@ -164,5 +164,5 @@ assert_eq "$?" "2" "bad kind: exit code"
 bash "$SCRIPT" design owner/repo T >/dev/null 2>&1
 assert_eq "$?" "2" "missing argument: exit code"
 
-[ "$fail" = 0 ] && echo "review-desk: ok"
+[ "$fail" = 0 ] && echo "approval-queue: ok"
 exit "$fail"

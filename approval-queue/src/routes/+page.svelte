@@ -77,7 +77,7 @@ turns the count off. An item that arrives while the page is open replaces it.
 	}
 </script>
 
-<svelte:head><title>Nothing waiting · Review desk</title></svelte:head>
+<svelte:head><title>Nothing waiting · Design & PR Approvals</title></svelte:head>
 <svelte:document onkeydown={onKeydown} />
 
 <main id="main" tabindex="-1" class="relative isolate flex flex-1 items-start px-5 pt-16 lg:px-8">

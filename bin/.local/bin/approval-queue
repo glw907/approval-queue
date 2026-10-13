@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
-# review-desk: put one item (a PR, a design, a triage list) in front of Geoff in the review desk app
+# approval-queue: put one item (a PR, a design, a triage list) in front of Geoff in the Design & PR Approvals app
 # and print his decision as JSON on stdout. Build, server, and Firefox output go to server.log.
 set -euo pipefail
 
-usage="usage: review-desk <pr|design|triage> <repo> <title> <source>"
+usage="usage: approval-queue <pr|design|triage> <repo> <title> <source>"
 if [ $# -ne 4 ]; then echo "$usage" >&2; exit 2; fi
 kind=$1 repo=$2 title=$3 source=$4
 case "$kind" in pr | design | triage) ;; *) echo "$usage" >&2; exit 2 ;; esac
 
-root="${XDG_STATE_HOME:-$HOME/.local/state}/review-desk"
+root="${XDG_STATE_HOME:-$HOME/.local/state}/approval-queue"
 log="$root/server.log"
 id="$(date +%Y%m%dT%H%M%S)-$$"
 item="$root/items/$id"
@@ -43,28 +43,28 @@ jq -n --arg id "$id" --arg kind "$kind" --arg repo "$repo" --arg title "$title" 
    + (if $file == "" then {} else {file: $file} end)' >"$item/item.json.tmp"
 mv "$item/item.json.tmp" "$item/item.json"
 
-app=$(realpath "$(dirname "$(realpath "$0")")/../../../review-desk")
+app=$(realpath "$(dirname "$(realpath "$0")")/../../../approval-queue")
 
 exec 9>"$root/start.lock"
 flock 9
 if ! curl -sf "$base/" >/dev/null 2>&1; then
   if [ ! -e "$app/build/index.js" ]; then
     if ! (cd "$app" && npm ci && npm run build) >>"$log" 2>&1; then
-      echo "review-desk: the first build failed; see $log" >&2
+      echo "approval-queue: the first build failed; see $log" >&2
       exit 1
     fi
   fi
-  HOST=127.0.0.1 PORT=7907 REVIEW_DESK_STATE="$root" setsid -f node "$app/build" 9>&- >>"$log" 2>&1
+  HOST=127.0.0.1 PORT=7907 APPROVAL_QUEUE_STATE="$root" setsid -f node "$app/build" 9>&- >>"$log" 2>&1
   up=""
   for _ in $(seq 100); do
     if curl -sf "$base/" >/dev/null 2>&1; then up=1; break; fi
     sleep 0.1
   done
-  if [ -z "$up" ]; then echo "review-desk: the app did not answer in 10 seconds; see $log" >&2; exit 1; fi
+  if [ -z "$up" ]; then echo "approval-queue: the app did not answer in 10 seconds; see $log" >&2; exit 1; fi
 fi
 
 if ! curl -sf "$base/item/$id" >/dev/null 2>&1; then
-  echo "review-desk: an app on 7907 does not serve this state root; stop it with pkill -f 'review-desk/[b]uild'" >&2
+  echo "approval-queue: an app on 7907 does not serve this state root; stop it with pkill -f 'approval-queue/[b]uild'" >&2
   exit 1
 fi
 

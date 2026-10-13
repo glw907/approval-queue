@@ -156,7 +156,7 @@ the rest through `desk.handlers`.
 			>
 				Queue ({data.queue.length})
 			</button>
-			<span class="ml-2 text-sm font-bold"><i class="site-benchmark"></i>Review desk</span>
+			<span class="ml-2 text-sm font-bold"><i class="site-benchmark"></i>Design & PR Approvals</span>
 		</header>
 		{@render children()}
 	</div>
@@ -177,7 +177,7 @@ the rest through `desk.handlers`.
 					<path d="M160 48c40-18 70-6 110-20s80-22 130-6" />
 					<path d="M160 38c40-18 70-6 110-20s80-22 130-6" />
 				</svg>
-				<p class="text-[1.05rem] font-bold"><i class="site-benchmark"></i>Review desk</p>
+				<p class="text-[1.05rem] font-bold"><i class="site-benchmark"></i>Design & PR Approvals</p>
 				<p class="desk-muted mt-0.5 text-sm" aria-live="polite">
 					{data.queue.length} waiting{data.queue.length ? ', oldest first' : ''}
 				</p>

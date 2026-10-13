@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const state = vi.hoisted(() => ({ root: '' }));
 vi.mock('$app/env/private', () => ({
-	get REVIEW_DESK_STATE() {
+	get APPROVAL_QUEUE_STATE() {
 		return state.root;
 	}
 }));
@@ -20,7 +20,7 @@ async function seed(id: string, created: string) {
 }
 
 beforeEach(async () => {
-	state.root = await mkdtemp(join(tmpdir(), 'review-desk-root-'));
+	state.root = await mkdtemp(join(tmpdir(), 'approval-queue-root-'));
 });
 afterEach(() => rm(state.root, { recursive: true, force: true }));
 

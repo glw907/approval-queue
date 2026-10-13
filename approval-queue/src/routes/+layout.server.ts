@@ -1,6 +1,6 @@
 import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { REVIEW_DESK_STATE } from '$app/env/private';
+import { APPROVAL_QUEUE_STATE } from '$app/env/private';
 import { listDecided, listWaiting } from '#lib/server/items.ts';
 import type { LayoutServerLoad } from './$types';
 
@@ -13,9 +13,9 @@ const startedAt = Date.now();
  */
 export const load: LayoutServerLoad = async ({ depends, isDataRequest }) => {
 	depends('desk:queue');
-	if (isDataRequest) await writeFile(join(REVIEW_DESK_STATE, 'tab.seen'), '');
+	if (isDataRequest) await writeFile(join(APPROVAL_QUEUE_STATE, 'tab.seen'), '');
 	return {
-		queue: await listWaiting(REVIEW_DESK_STATE),
-		decided: await listDecided(REVIEW_DESK_STATE, startedAt)
+		queue: await listWaiting(APPROVAL_QUEUE_STATE),
+		decided: await listDecided(APPROVAL_QUEUE_STATE, startedAt)
 	};
 };

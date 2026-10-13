@@ -1,4 +1,4 @@
-import { REVIEW_DESK_STATE } from '$app/env/private';
+import { APPROVAL_QUEUE_STATE } from '$app/env/private';
 import { error, fail } from '@sveltejs/kit';
 import { beforeMerge } from '#lib/before-merge.ts';
 import { fileGroups } from '#lib/diff.ts';
@@ -19,7 +19,7 @@ const DISPOSITIONS: readonly string[] = ['now', 'defer', 'drop'];
 
 /** Reads an item still waiting for a decision; an unknown or decided id is a 404. */
 async function readWaiting(id: string) {
-	const item = await readItem(REVIEW_DESK_STATE, id);
+	const item = await readItem(APPROVAL_QUEUE_STATE, id);
 	if (!item || item.decided) error(404, 'Not found');
 	return item;
 }
@@ -29,13 +29,13 @@ async function readWaiting(id: string) {
  * write, because the page's own queue can be stale.
  */
 async function decide(id: string, decision: Decision) {
-	const next = nextItem(await listWaiting(REVIEW_DESK_STATE), id);
-	await writeDecision(REVIEW_DESK_STATE, id, decision);
+	const next = nextItem(await listWaiting(APPROVAL_QUEUE_STATE), id);
+	await writeDecision(APPROVAL_QUEUE_STATE, id, decision);
 	return { next: next ? `/item/${next.id}` : null };
 }
 
 export const load: PageServerLoad = async ({ params }) => {
-	const item = await readItem(REVIEW_DESK_STATE, params.id);
+	const item = await readItem(APPROVAL_QUEUE_STATE, params.id);
 	if (!item) error(404, 'Not found');
 	const { meta, decided, content } = item;
 	if (content.kind === 'pr') {

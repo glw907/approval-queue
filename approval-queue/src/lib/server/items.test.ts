@@ -14,7 +14,7 @@ async function seed(id: string, meta: object, files: Record<string, string> = {}
 }
 
 beforeEach(async () => {
-	root = await mkdtemp(join(tmpdir(), 'review-desk-test-'));
+	root = await mkdtemp(join(tmpdir(), 'approval-queue-test-'));
 });
 afterEach(() => rm(root, { recursive: true, force: true }));
 
