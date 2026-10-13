@@ -1,0 +1,50 @@
+#!/usr/bin/env python3
+"""PostToolUse hook telling the session to put a PR it just opened on the review desk.
+
+The desk hand-over lived only in pass-core's Close section, so a PR opened outside a pass missed
+it. After a Bash call whose command runs `gh pr create`, the hook finds the new PR's URL in the
+tool response and returns `hookSpecificOutput.additionalContext` naming the `review-desk` command
+for that PR (https://code.claude.com/docs/en/hooks, "PostToolUse decision control"). Every input
+the script cannot parse, and every call that opened no PR, exits 0 silently.
+"""
+
+import json
+import re
+import sys
+
+PREFILTER = re.compile(r"gh\s+pr\s+create")
+PR_URL = re.compile(r"https://github\.com/([\w.-]+/[\w.-]+)/pull/(\d+)")
+CONTEXT = (
+    "You opened PR #{number} in {repo}. Put it on Geoff's review desk now: run "
+    '`review-desk pr {repo} "<the PR title>" {number}` as a background Bash command and wait for '
+    "the decision it prints as JSON. On an approve, merge with `gh pr merge {number} --repo {repo} "
+    "--merge --match-head-commit <head>`, taking <head> from the decision, run as its own Bash "
+    "command. Skip the desk only where pass-core's Close says the PR is not yours to hand over: an "
+    "executor whose launch prompt gives the hand-over to the conductor, or an ordinary-class pass "
+    "that merges its own PR."
+)
+
+
+def main() -> int:
+    """Read the hook input and return the exit code."""
+    try:
+        data = json.load(sys.stdin)
+        command = (data.get("tool_input") or {}).get("command")
+        response = json.dumps(data.get("tool_response"))
+    except (ValueError, AttributeError, TypeError):
+        return 0
+    if not isinstance(command, str) or not PREFILTER.search(command):
+        return 0
+    found = PR_URL.search(response)
+    if found is None:
+        return 0
+    repo, number = found.groups()
+    print(json.dumps({"hookSpecificOutput": {
+        "hookEventName": "PostToolUse",
+        "additionalContext": CONTEXT.format(repo=repo, number=number),
+    }}))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
