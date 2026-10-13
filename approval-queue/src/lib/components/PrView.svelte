@@ -1,13 +1,28 @@
 <!-- @component
-A PR: four figures, its checks and review, the body in collapsible sections, then the changed files
-grouped by top-level directory with a path filter and each diff opened in place. Color marks only
-a failing check, a blocking verdict, and the diff signs; each also says so in words.
+A PR in the order its reader needs it: the headline block (headline, lede, what changes, what approving
+does, and one footnote), the "Decide first" cards, the brief's detail rows, then the evidence rows.
+Color marks only the two must-act alert tints and the diff signs.
+
+The cards' radios sit here but belong to the decision form in `ItemPanel` (`form="decision-form"`),
+and `picks` is bound to the panel so its bar can unlock Approve. A PR whose body has no brief shows
+its title and the rows it still has.
 -->
 <script lang="ts">
+	import { tick } from 'svelte';
+	import { gate } from '#lib/cards.ts';
 	import { desk } from '#lib/desk.svelte.ts';
 	import type { PageData } from '../../routes/item/[id=id]/$types';
+	import Disclosure from './Disclosure.svelte';
 
-	let { data }: { data: Extract<PageData, { kind: 'pr' }> } = $props();
+	interface Props {
+		data: Extract<PageData, { kind: 'pr' }>;
+		/** The chosen choice index for each card, or undefined while it has none. */
+		picks: Array<number | undefined>;
+		/** The name and number the meta line leads with, such as `workstation #41`. */
+		subject: string;
+	}
+
+	let { data, picks = $bindable([]), subject }: Props = $props();
 
 	const VERDICTS = { accept: 'Accepted', fix: 'Fix', escalate: 'Escalate' };
 	const CHECK_NOTES = { pass: '', fail: 'failed', skip: 'skipped', pending: 'pending' };
@@ -16,6 +31,7 @@ a failing check, a blocking verdict, and the diff signs; each also says so in wo
 
 	let term = $state('');
 	let filter: HTMLInputElement | undefined;
+	let filesOpen = $state(false);
 	let groupOpen = $state<Record<string, boolean>>({});
 
 	const needle = $derived(term.trim().toLowerCase());
@@ -31,10 +47,33 @@ a failing check, a blocking verdict, and the diff signs; each also says so in wo
 			: `${data.totals.files} in ${data.groups.length} ${plural(data.groups.length, 'group', 'groups')}`
 	);
 	const allOpen = $derived(shown.every((g) => groupOpen[g.name]));
-	const reviewFails = $derived(data.verdict === 'fix' || data.verdict === 'escalate');
+	const left = $derived(gate(data.cards, picks).open.length);
+	const checksTotal = $derived(data.checks.rows.length);
+	const checksSummaryText = $derived(
+		checksTotal === 0
+			? 'No checks.'
+			: data.checks.failed > 0
+				? `${data.checks.failed} of ${checksTotal} failed.`
+				: data.checks.pending > 0
+					? `${data.checks.pending} of ${checksTotal} pending.`
+					: `All ${data.checks.passed} passed.`
+	);
+	const reviewSummary = $derived(
+		data.verdict ? `${VERDICTS[data.verdict]}.` : data.reviewHtml === null ? 'None run.' : 'Not stated.'
+	);
+	const filesSummary = $derived(
+		`${data.totals.files} ${plural(data.totals.files, 'file', 'files')}, +${count(data.totals.adds)} −${count(data.totals.dels)}.`
+	);
 
 	$effect(() => {
-		desk.handlers = { ...desk.handlers, 'focus-filter': () => filter?.focus() };
+		desk.handlers = {
+			...desk.handlers,
+			'focus-filter': async () => {
+				filesOpen = true;
+				await tick();
+				filter?.focus();
+			}
+		};
 	});
 
 	function toggleAll() {
@@ -48,47 +87,141 @@ a failing check, a blocking verdict, and the diff signs; each also says so in wo
 		filter?.blur();
 	}
 
+	/** A source line ends in a full stop; a session's own text may already carry one. */
+	const stop = (text: string) => (/[.!?]$/.test(text) ? text : `${text}.`);
+
 	function split(path: string) {
 		const at = path.lastIndexOf('/') + 1;
 		return [path.slice(0, at), path.slice(at)];
 	}
 </script>
 
-<div class="stats desk-glance mt-1" role="group" aria-label="PR at a glance">
-	<div class="stat">
-		<div class="stat-title">Risk</div>
-		<div class="stat-value">{data.risk ?? 'Not stated'}</div>
-	</div>
-	<a class="stat" href="#checks">
-		<div class="stat-title">Checks</div>
-		<div class="stat-value" class:desk-fail={data.checks.failed > 0}>{data.checks.text}</div>
-	</a>
-	<a class="stat" href="#verdicts">
-		<div class="stat-title">Review</div>
-		<div class="stat-value" class:desk-fail={reviewFails}>
-			{data.verdict ? VERDICTS[data.verdict] : 'Not stated'}
+<p class="mb-2 text-xs tracking-wide text-(--color-muted)">
+	{subject}
+	{#if data.link}
+		· {data.link.head} → {data.link.base} ·
+		<a class="link" href={data.link.url} target="_blank" rel="noopener noreferrer">GitHub</a>
+	{/if}
+</p>
+
+<div class="rounded-box border-s-4 border-primary bg-base-200 py-6 ps-4 pe-4 lg:-ms-7 lg:ps-6 lg:pe-6">
+	<h1 class="desk-title text-[1.75rem] leading-tight text-balance">{@html data.headlineHtml}</h1>
+	{#if data.ledeHtml}
+		<p class="mt-3 max-w-[70ch] text-[1.05rem] leading-relaxed text-pretty opacity-85">{@html data.ledeHtml}</p>
+	{/if}
+	{#if data.whatChanges.length || data.ifYouApprove.length}
+		<div class="mt-6 border-t border-base-content/10 pt-5 text-[0.95rem] leading-snug">
+			<div class="grid gap-6 sm:grid-cols-2">
+				<div>
+					<h2 class="mb-2.5 text-[0.95rem] font-semibold">What changes</h2>
+					<ul class="space-y-2">
+						{#each data.whatChanges as item, i (i)}
+							<li class="flex gap-1">
+								<span class="w-3.5 shrink-0 text-(--color-muted)" aria-hidden="true">•</span>
+								<span class="text-pretty opacity-80">{@html item}</span>
+							</li>
+						{/each}
+					</ul>
+				</div>
+				<div>
+					<h2 class="mb-2.5 text-[0.95rem] font-semibold">If you approve</h2>
+					<ol class="space-y-2">
+						{#each data.ifYouApprove as item, i (i)}
+							<li class="flex gap-1">
+								<span class="w-3.5 shrink-0 tabular-nums text-(--color-muted)">{i + 1}.</span>
+								<span class="text-pretty opacity-80">{@html item}</span>
+							</li>
+						{/each}
+					</ol>
+				</div>
+			</div>
+			{#if data.worthKnowing}
+				<p class="mt-5 flex max-w-[70ch] items-start gap-2 text-sm text-(--color-muted)">
+					<svg class="mt-px size-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M12 11v5M12 8h.01" /></svg>
+					<span>{@html data.worthKnowing}</span>
+				</p>
+			{/if}
 		</div>
-	</a>
-	<a class="stat" href="#files">
-		<div class="stat-title">Changes</div>
-		<div class="stat-value">
-			{count(data.totals.files)} {plural(data.totals.files, 'file', 'files')}
-			<span class="desk-add">+{count(data.totals.adds)}</span>
-			<span class="desk-del">−{count(data.totals.dels)}</span>
-		</div>
-	</a>
+	{/if}
 </div>
 
-<div class="mt-7 grid gap-x-12 gap-y-7 xl:grid-cols-2">
-	<section id="checks" aria-labelledby="checks-h">
-		<h2 id="checks-h" class="text-sm font-semibold">
-			Checks
-			<span class="desk-muted font-normal">
-				{data.checks.text}{data.meta.head ? `, on ${data.meta.head.slice(0, 8)}` : ''}
-			</span>
+{#if data.cards.length}
+	<section class="mt-8 space-y-3" aria-labelledby="decide-h">
+		<h2 id="decide-h" class="mb-3 flex items-baseline gap-3 text-base font-semibold">
+			Decide first
+			<span class="text-sm font-normal text-(--color-muted)">{left} of {data.cards.length} left</span>
 		</h2>
+		{#each data.cards as card, i (i)}
+			{@const error = card.kind === 'check' || card.kind === 'review'}
+			<section
+				id="card-{i}"
+				aria-labelledby="card-{i}-title"
+				class={['alert alert-soft items-start', error ? 'alert-error bg-error/7' : 'alert-warning bg-warning/10']}
+			>
+				{#if error}
+					<svg class="mt-0.5 size-5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 2 20h20L12 3zM12 10v4M12 17h.01" /></svg>
+				{:else}
+					<svg class="mt-0.5 size-5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M12 11v5M12 8h.01" /></svg>
+				{/if}
+				<div class="text-base-content">
+					<div class="flex items-center gap-2">
+						<h3 id="card-{i}-title" class="text-base font-semibold">{card.title}</h3>
+						{#if picks[i] !== undefined}
+							<span class="badge badge-ghost badge-sm">
+								<svg class="size-3 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 5 5 9-10" /></svg>
+								Decided
+							</span>
+						{/if}
+					</div>
+					{#if card.kind === 'before-merge'}
+						<div class="desk-md desk-card mt-1 max-w-[70ch] text-pretty">{@html card.html}</div>
+						<p class="mt-1 text-[0.95rem] text-(--color-muted)">{card.source}.</p>
+					{:else}
+						<p class="mt-1 max-w-[70ch] text-[0.95rem] leading-relaxed text-pretty">
+							{@html card.html}
+							<span class="text-(--color-muted)">{stop(card.source)}</span>
+						</p>
+					{/if}
+					<div
+						class="join mt-3 rounded-field border border-base-300 bg-base-100 max-sm:join-vertical"
+						role="radiogroup"
+						aria-labelledby="card-{i}-title"
+					>
+						{#each card.choices as choice, j (j)}
+							<input
+								class="join-item btn btn-sm checked:border-base-content checked:bg-base-content checked:text-base-100"
+								type="radio"
+								name="c{i}"
+								value={j}
+								form="decision-form"
+								aria-label={choice.recommended ? `${choice.label} (recommended)` : choice.label}
+								disabled={desk.held || data.decided}
+								bind:group={picks[i]}
+							/>
+						{/each}
+					</div>
+				</div>
+			</section>
+		{/each}
+	</section>
+{/if}
+
+{#if data.details.length}
+	<section class="mt-10" aria-labelledby="details-h">
+		<h2 id="details-h" class="mb-1 text-[0.7rem] font-semibold tracking-[0.08em] text-(--color-muted) uppercase">Details</h2>
+		{#each data.details as detail (detail.label)}
+			<Disclosure name={detail.label} summaryHtml={detail.summaryHtml}>
+				<div class="desk-md">{@html detail.bodyHtml}</div>
+			</Disclosure>
+		{/each}
+	</section>
+{/if}
+
+<section class="mt-8" aria-labelledby="evidence-h">
+	<h2 id="evidence-h" class="mb-1 text-[0.7rem] font-semibold tracking-[0.08em] text-(--color-muted) uppercase">Evidence</h2>
+	<Disclosure name="Checks" summaryHtml={checksSummaryText} quiet wide>
 		{#if data.checks.rows.length}
-			<ul class="desk-muted mt-1.5 grid gap-x-6 text-[0.84rem] sm:grid-cols-2">
+			<ul class="grid gap-x-6 text-[0.84rem] sm:grid-cols-2">
 				{#each data.checks.rows as row, i (i)}
 					<li class="flex min-w-0 items-center gap-2 py-0.5" class:desk-fail={row.state === 'fail'}>
 						<span class="truncate">{row.name}</span>
@@ -97,147 +230,106 @@ a failing check, a blocking verdict, and the diff signs; each also says so in wo
 				{/each}
 			</ul>
 		{/if}
-	</section>
-	<section id="verdicts" aria-labelledby="verdicts-h">
-		<h2 id="verdicts-h" class="text-sm font-semibold">
-			Review
-			<span class="desk-muted font-normal">{data.verdict ? VERDICTS[data.verdict].toLowerCase() : 'not stated'}</span>
-		</h2>
-		{#if data.reviewHtml}
-			<div class="desk-md mt-1" class:desk-fail={reviewFails}>{@html data.reviewHtml}</div>
-		{/if}
-	</section>
-</div>
-
-<section class="mt-8" aria-labelledby="desc-h">
-	<h2 id="desc-h" class="text-base font-semibold">Description</h2>
-	<div class="desk-md mt-1">{@html data.leadHtml}</div>
-	<div class="desk-plain-list mt-3">
-		{#each data.sections as section, i (i)}
-			<details
-				class="collapse collapse-arrow desk-collapse rounded-none border-t border-base-300"
-				open={section.title.toLowerCase() === 'what landed'}
-			>
-				<summary class="collapse-title text-sm">{section.title}</summary>
-				<div class="collapse-content"><div class="desk-md px-3 pb-3">{@html section.html}</div></div>
-			</details>
-		{/each}
-	</div>
-</section>
-
-<section id="files" class="mt-8" aria-labelledby="files-h">
-	<div class="flex flex-wrap items-center gap-x-4 gap-y-2">
-		<h2 id="files-h" class="text-base font-semibold">Files</h2>
-		<span class="desk-muted -ml-2 text-base" role="status">{summary}</span>
-		<label class="input input-sm ml-auto w-full sm:w-72">
-			<svg class="h-4 w-4 opacity-60" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-				<circle cx="11" cy="11" r="7" />
-				<path d="m20 20-3.5-3.5" />
-			</svg>
-			<input
-				type="search"
-				class="grow"
-				placeholder="Filter by path"
-				aria-label="Filter files by path"
-				bind:this={filter}
-				bind:value={term}
-				onkeydown={onFilterKey}
-			/>
-			<kbd class="kbd kbd-xs desk-kbd desk-sk">/</kbd>
-		</label>
-		<button type="button" class="btn btn-sm btn-ghost" onclick={toggleAll}>
-			{allOpen ? 'Close all groups' : 'Open all groups'}
-		</button>
-	</div>
-	<div class="mt-2">
-		{#each shown as group (group.name)}
-			{@const adds = group.files.reduce((n, f) => n + f.adds, 0)}
-			{@const dels = group.files.reduce((n, f) => n + f.dels, 0)}
-			<details
-				class="collapse collapse-arrow desk-collapse rounded-none border-t border-base-300"
-				open={needle !== '' || groupOpen[group.name]}
-				ontoggle={(e) => {
-					if (!needle) groupOpen[group.name] = e.currentTarget.open;
-				}}
-			>
-				<summary class="collapse-title">
-					<span class="font-mono text-[0.85rem] font-semibold">{group.name === 'Repository root' ? group.name : `${group.name}/`}</span>
-					<span class="desk-muted text-sm">
-						{needle ? `${group.files.length} of ${data.groups.find((g) => g.name === group.name)?.files.length} files` : `${group.files.length} ${plural(group.files.length, 'file', 'files')}`}
-					</span>
-					<span class="ml-auto flex shrink-0 items-center gap-3 text-[0.8rem] tabular-nums">
-						<span class="desk-add">+{count(adds)}</span>
-						<span class="desk-del">−{count(dels)}</span>
-					</span>
-				</summary>
-				<div class="collapse-content">
-					<ul class="pl-4">
-						{#each group.files as file (file.path)}
-							{@const [dir, name] = split(file.path)}
-							<li>
-								<details class="collapse collapse-arrow desk-collapse rounded-none border-t border-base-300">
-									<summary class="collapse-title text-sm">
-										<span class="min-w-0 truncate font-mono text-[0.8rem]"><span class="desk-muted">{dir}</span>{name}</span>
-										{#if file.status === 'new'}
-											<span class="badge badge-xs badge-outline desk-add shrink-0">new</span>
-										{:else if file.status === 'deleted'}
-											<span class="badge badge-xs badge-outline desk-del shrink-0">deleted</span>
-										{/if}
-										<span class="ml-auto flex shrink-0 items-center gap-3 text-[0.8rem] tabular-nums">
-											<span class="desk-add">+{file.adds}</span>
-											<span class="desk-del">−{file.dels}</span>
-										</span>
-									</summary>
-									<div class="collapse-content">
-										<table class="desk-diff" aria-label="Diff of {file.path}">
-											<tbody>
-												{#each file.rows as row, i (i)}
-													<tr class={row.kind}>
-														<td class="ln">{row.kind === 'add' || row.kind === 'hunk' ? '' : (row.oldLine ?? '')}</td>
-														<td class="ln">{row.kind === 'del' || row.kind === 'hunk' ? '' : (row.newLine ?? '')}</td>
-														<td class="sg">{row.kind === 'add' ? '+' : row.kind === 'del' ? '−' : ''}</td>
-														<td class="cd">{row.text}</td>
-													</tr>
-												{/each}
-											</tbody>
-										</table>
-									</div>
-								</details>
-							</li>
-						{/each}
-					</ul>
-				</div>
-			</details>
-		{/each}
-	</div>
-	{#if shown.length === 0}
-		<p class="desk-muted mt-2 text-sm" role="status">No file path matches that filter.</p>
+	</Disclosure>
+	<Disclosure name="Review" summaryHtml={reviewSummary} quiet>
+		{#if data.reviewHtml}<div class="desk-md">{@html data.reviewHtml}</div>{/if}
+	</Disclosure>
+	{#if data.technicalHtml}
+		<Disclosure name="Technical notes" summaryHtml="What landed and the gate." quiet>
+			<div class="desk-md">{@html data.technicalHtml}</div>
+		</Disclosure>
 	{/if}
+	<Disclosure name="Files" summaryHtml={filesSummary} quiet wide bind:open={filesOpen}>
+		<div class="flex flex-wrap items-center gap-x-4 gap-y-2">
+			<span class="text-sm text-(--color-muted)" role="status">{summary}</span>
+			<label class="input input-sm ml-auto w-full sm:w-72">
+				<svg class="h-4 w-4 opacity-60" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+					<circle cx="11" cy="11" r="7" />
+					<path d="m20 20-3.5-3.5" />
+				</svg>
+				<input
+					type="search"
+					class="grow"
+					placeholder="Filter by path"
+					aria-label="Filter files by path"
+					bind:this={filter}
+					bind:value={term}
+					onkeydown={onFilterKey}
+				/>
+				<kbd class="kbd kbd-xs desk-kbd desk-sk">/</kbd>
+			</label>
+			<button type="button" class="btn btn-sm btn-ghost" onclick={toggleAll}>
+				{allOpen ? 'Close all groups' : 'Open all groups'}
+			</button>
+		</div>
+		<div class="mt-2">
+			{#each shown as group (group.name)}
+				{@const adds = group.files.reduce((n, f) => n + f.adds, 0)}
+				{@const dels = group.files.reduce((n, f) => n + f.dels, 0)}
+				<details
+					class="collapse collapse-arrow desk-collapse rounded-none border-t border-base-300"
+					open={needle !== '' || groupOpen[group.name]}
+					ontoggle={(e) => {
+						if (!needle) groupOpen[group.name] = e.currentTarget.open;
+					}}
+				>
+					<summary class="collapse-title">
+						<span class="font-mono text-[0.85rem] font-semibold">{group.name === 'Repository root' ? group.name : `${group.name}/`}</span>
+						<span class="desk-muted text-sm">
+							{needle ? `${group.files.length} of ${data.groups.find((g) => g.name === group.name)?.files.length} files` : `${group.files.length} ${plural(group.files.length, 'file', 'files')}`}
+						</span>
+						<span class="ml-auto flex shrink-0 items-center gap-3 text-[0.8rem] tabular-nums">
+							<span class="desk-add">+{count(adds)}</span>
+							<span class="desk-del">−{count(dels)}</span>
+						</span>
+					</summary>
+					<div class="collapse-content">
+						<ul class="pl-4">
+							{#each group.files as file (file.path)}
+								{@const [dir, name] = split(file.path)}
+								<li>
+									<details class="collapse collapse-arrow desk-collapse rounded-none border-t border-base-300">
+										<summary class="collapse-title text-sm">
+											<span class="min-w-0 truncate font-mono text-[0.8rem]"><span class="desk-muted">{dir}</span>{name}</span>
+											{#if file.status === 'new'}
+												<span class="badge badge-xs badge-outline desk-add shrink-0">new</span>
+											{:else if file.status === 'deleted'}
+												<span class="badge badge-xs badge-outline desk-del shrink-0">deleted</span>
+											{/if}
+											<span class="ml-auto flex shrink-0 items-center gap-3 text-[0.8rem] tabular-nums">
+												<span class="desk-add">+{file.adds}</span>
+												<span class="desk-del">−{file.dels}</span>
+											</span>
+										</summary>
+										<div class="collapse-content">
+											<table class="desk-diff" aria-label="Diff of {file.path}">
+												<tbody>
+													{#each file.rows as row, i (i)}
+														<tr class={row.kind}>
+															<td class="ln">{row.kind === 'add' || row.kind === 'hunk' ? '' : (row.oldLine ?? '')}</td>
+															<td class="ln">{row.kind === 'del' || row.kind === 'hunk' ? '' : (row.newLine ?? '')}</td>
+															<td class="sg">{row.kind === 'add' ? '+' : row.kind === 'del' ? '−' : ''}</td>
+															<td class="cd">{row.text}</td>
+														</tr>
+													{/each}
+												</tbody>
+											</table>
+										</div>
+									</details>
+								</li>
+							{/each}
+						</ul>
+					</div>
+				</details>
+			{/each}
+		</div>
+		{#if shown.length === 0}
+			<p class="desk-muted mt-2 text-sm">No file path matches that filter.</p>
+		{/if}
+	</Disclosure>
 </section>
 
 <style>
-	.desk-glance {
-		display: flex;
-		flex-wrap: wrap;
-		row-gap: 0.75rem;
-		background: transparent;
-		overflow: visible;
-	}
-	.desk-glance .stat {
-		width: auto;
-		border: 0;
-		padding: 0 44px 0 0;
-		row-gap: 2px;
-	}
-	.desk-glance .stat-title {
-		color: var(--color-muted);
-		font-size: 0.8rem;
-	}
-	.desk-glance .stat-value {
-		font-size: 1rem;
-		font-weight: 600;
-		line-height: 1.4;
-	}
 	.desk-add {
 		color: var(--cairn-success-ink);
 	}
@@ -246,9 +338,6 @@ a failing check, a blocking verdict, and the diff signs; each also says so in wo
 	}
 	.desk-fail {
 		color: var(--cairn-error-ink);
-	}
-	.desk-plain-list > :global(* + *) {
-		border-top: 1px solid var(--color-base-300);
 	}
 
 	.desk-collapse > :global(.collapse-title) {
@@ -329,6 +418,10 @@ a failing check, a blocking verdict, and the diff signs; each also says so in wo
 	.desk-md {
 		font-size: 0.9rem;
 		line-height: 1.62;
+	}
+	.desk-md.desk-card {
+		font-size: 0.95rem;
+		line-height: 1.625;
 	}
 	.desk-md > :global(:first-child) {
 		margin-top: 0;

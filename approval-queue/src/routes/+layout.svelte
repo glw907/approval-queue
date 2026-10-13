@@ -56,9 +56,9 @@ the rest through `desk.handlers`.
 
 	function age(created: string) {
 		const minutes = Math.max(0, Math.round((Date.now() - Date.parse(created)) / 60000));
-		if (minutes < 60) return `${minutes} min`;
-		if (minutes < 1440) return `${Math.round(minutes / 60)} h`;
-		return `${Math.round(minutes / 1440)} d`;
+		if (minutes < 60) return `${minutes}m`;
+		if (minutes < 1440) return `${Math.round(minutes / 60)}h`;
+		return `${Math.round(minutes / 1440)}d`;
 	}
 
 	function toggleSheet() {
@@ -114,7 +114,8 @@ the rest through `desk.handlers`.
 				singleKeys: desk.singleKeys,
 				sheetOpen: desk.sheetOpen,
 				held: desk.held,
-				noteOpen: desk.noteOpen
+				noteOpen: desk.noteOpen,
+				approveLocked: desk.approveLocked
 			}
 		);
 		if (!action) return;
@@ -139,7 +140,7 @@ the rest through `desk.handlers`.
 		id="queue-toggle"
 		type="checkbox"
 		class="drawer-toggle"
-		aria-label="Queue"
+		aria-label="Show the queue"
 		tabindex="-1"
 		bind:checked={drawerOpen}
 		onchange={() => !drawerOpen && document.getElementById('queue-open')?.focus()}
@@ -156,7 +157,7 @@ the rest through `desk.handlers`.
 			>
 				Queue ({data.queue.length})
 			</button>
-			<span class="ml-2 text-sm font-bold"><i class="site-benchmark"></i>Design & PR Approvals</span>
+			<span class="ml-2 text-sm font-semibold">Design & PR Approvals</span>
 		</header>
 		{@render children()}
 	</div>
@@ -166,46 +167,42 @@ the rest through `desk.handlers`.
 			aria-label="Close the queue"
 			class="drawer-overlay"
 		></label>
-		<nav
-			id="queue-nav"
-			aria-label="Review queue"
-			class="flex min-h-full w-[19rem] flex-col border-r border-base-300 bg-base-200"
-		>
-			<div class="relative isolate border-b border-base-300 px-4 pt-4 pb-3">
-				<svg class="site-contour-texture" viewBox="0 0 400 60" preserveAspectRatio="none" aria-hidden="true">
-					<path d="M160 58c40-18 70-6 110-20s80-22 130-6" />
-					<path d="M160 48c40-18 70-6 110-20s80-22 130-6" />
-					<path d="M160 38c40-18 70-6 110-20s80-22 130-6" />
-				</svg>
-				<p class="text-[1.05rem] font-bold"><i class="site-benchmark"></i>Design & PR Approvals</p>
-				<p class="desk-muted mt-0.5 text-sm" aria-live="polite">
-					{data.queue.length} waiting{data.queue.length ? ', oldest first' : ''}
-				</p>
+		<nav id="queue-nav" aria-label="Queue" class="flex min-h-full w-72 flex-col bg-base-200">
+			<div class="px-4 pt-5 pb-2">
+				<p class="font-semibold">Design & PR Approvals</p>
+				<p class="text-sm text-(--color-muted)" aria-live="polite">{data.queue.length} waiting</p>
 			</div>
-			<ul class="menu desk-queue w-full gap-0.5 px-2 py-2 text-sm">
+			<ul class="menu w-full gap-1 p-2 text-sm">
 				{#each data.queue as item (item.id)}
 					<li>
 						<a
 							href="/item/{item.id}"
 							data-q
-							class={{ 'menu-active': item.id === currentId, 'menu-focus': item.id === focusedId }}
+							class={{
+								'menu-active bg-base-300 text-base-content': item.id === currentId,
+								'menu-focus': item.id === focusedId
+							}}
 							aria-current={item.id === currentId ? 'page' : undefined}
 							onfocus={() => (focusedId = item.id)}
 							onblur={() => (focusedId = null)}
 						>
-							<span class="desk-q-meta"><span class="mr-1">{KINDS[item.kind]}</span>{label(item)}</span>
-							<span class="desk-q-meta tabular-nums">{age(item.created)}</span>
-							<span class="desk-q-title">{item.title}</span>
+							<div class="w-full">
+								<div class={['flex justify-between gap-2 text-xs', item.id === currentId ? 'text-base-content/75' : 'text-(--color-muted)']}>
+									<span>{KINDS[item.kind]} · {label(item)}</span>
+									<span class="tabular-nums">{age(item.created)}</span>
+								</div>
+								<div class="mt-0.5 leading-snug">{item.headline ?? item.title}</div>
+							</div>
 						</a>
 					</li>
 				{:else}
-					<li class="menu-disabled desk-muted px-3 py-2 text-sm">Nothing waiting.</li>
+					<li class="menu-disabled px-3 py-2 text-sm text-(--color-muted)">Nothing waiting.</li>
 				{/each}
 			</ul>
 			{#if data.decided.length}
-				<div class="border-t border-dashed border-(--site-rule-color) px-4 py-3">
-					<h2 class="desk-muted text-sm font-semibold">Decided this session</h2>
-					<ul class="mt-1 text-[0.8rem]">
+				<div class="px-4 py-3">
+					<h2 class="text-sm font-semibold text-(--color-muted)">Decided this session</h2>
+					<ul class="mt-1 text-xs">
 						{#each data.decided as { meta, decision } (meta.id)}
 							<li class="flex items-baseline justify-between gap-3 py-1">
 								<span class="truncate">{KINDS[meta.kind]} {label(meta)}</span>
@@ -216,15 +213,14 @@ the rest through `desk.handlers`.
 				</div>
 			{/if}
 			<div class="grow"></div>
-			<div class="desk-muted flex flex-wrap items-center gap-x-2 gap-y-1 px-4 py-3 text-[0.8rem]">
+			<div class="flex flex-wrap items-center gap-x-2 gap-y-1 px-4 py-3 text-xs text-(--color-muted)">
 				{#if desk.page === 'triage'}
 					<span class="desk-sk">j k next and previous</span>
 				{/if}
-				<button type="button" class="btn btn-sm btn-ghost ml-auto" id="open-keys" onclick={toggleSheet}>
+				<button type="button" class="btn btn-sm btn-ghost -ms-2" id="open-keys" onclick={toggleSheet}>
 					Keyboard shortcuts <kbd class="kbd kbd-xs desk-kbd desk-sk">?</kbd>
 				</button>
 			</div>
-			<footer class="site-collar"><span>127.0.0.1:7907</span><span>Survey</span></footer>
 		</nav>
 	</div>
 </div>

@@ -1,4 +1,3 @@
-export type RiskClass = 'auth-data' | 'runner' | 'ordinary';
 export type Verdict = 'accept' | 'fix' | 'escalate';
 export type CheckState = 'pass' | 'fail' | 'skip' | 'pending';
 
@@ -11,27 +10,23 @@ export interface ChecksSummary {
 	rows: { name: string; state: CheckState }[];
 }
 
-/** First "class `<name>`" in the body, since no structured field carries it. */
-export function riskClass(body: string): RiskClass | null {
-	const match = /class\s+`(auth-data|runner|ordinary)`/i.exec(body);
-	return match ? (match[1].toLowerCase() as RiskClass) : null;
-}
-
-/** Splits at `## ` headings; "Before merge" and "Review" have their own slots on the page. */
-export function bodySections(body: string): { lead: string; sections: { title: string; body: string }[] } {
+/**
+ * The technical notes: what follows the `## Brief`, less the "Before merge" and "Review" sections,
+ * which have their own places on the page. A body with no brief keeps its lead text too.
+ */
+export function technicalNotes(body: string): string {
 	const parts: { title: string; lines: string[] }[] = [{ title: '', lines: [] }];
 	for (const line of body.split('\n')) {
 		const heading = /^##\s+(.*?)\s*#*\s*$/.exec(line);
 		if (heading) parts.push({ title: heading[1], lines: [] });
 		else parts[parts.length - 1].lines.push(line);
 	}
-	const [lead, ...rest] = parts;
-	return {
-		lead: lead.lines.join('\n').trim(),
-		sections: rest
-			.filter((p) => !/^(before merge|review)$/i.test(p.title))
-			.map((p) => ({ title: p.title, body: p.lines.join('\n').trim() }))
-	};
+	const hasBrief = parts.some((p) => p.title === 'Brief');
+	return parts
+		.filter((p) => !/^(brief|before merge|review)$/i.test(p.title) && (p.title !== '' || !hasBrief))
+		.map((p) => (p.title ? `## ${p.title}\n\n${p.lines.join('\n').trim()}` : p.lines.join('\n').trim()))
+		.filter(Boolean)
+		.join('\n\n');
 }
 
 /** The markdown under "## Review" up to the next heading of level 1 or 2, or null. */

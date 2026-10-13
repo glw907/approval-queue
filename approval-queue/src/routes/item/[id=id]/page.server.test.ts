@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -30,6 +31,16 @@ async function seed(id: string, meta: object, files: Record<string, string>) {
 	await writeFile(join(dir, 'item.json'), JSON.stringify({ id, repo: 'o/r', title: 't', created: '2026-10-11T10:00:00Z', ...meta }));
 }
 
+const fixture = (name: string) => readFileSync(new URL(`../../../lib/fixtures/${name}`, import.meta.url), 'utf8');
+const PR41 = fixture('pr-41-body.md');
+const PR41_META = fixture('pr-41-pr.json');
+/** PR #41 with a `fix` review and one `### Decide:` block, as T5's variant. */
+const PR41_VARIANT = `${PR41.replace('## Before merge', `${fixture('pr-41-variant.md')}## Before merge`)}\n## Review\n\nA gap. Verdict: \`fix\`.\n`;
+const FP41 = 'check:A check failed|before-merge:A step must run before merging';
+const FP_VARIANT = 'check:A check failed|review:The review asks for a fix|before-merge:A step must run before merging|decide:Which branch name to keep';
+const seedPr41 = (body = PR41) =>
+	seed(ID, { kind: 'pr', head: 'abc', number: 41 }, { 'body.md': body, 'diff.patch': '+a', 'pr.json': PR41_META });
+
 const seedPr = () => seed(ID, { kind: 'pr', head: 'abc' }, { 'body.md': 'hello', 'diff.patch': '+a' });
 const seedTriage = () => seed(ID, { kind: 'triage' }, { 'triage.json': JSON.stringify(TRIAGE) });
 
@@ -47,10 +58,72 @@ beforeEach(async () => {
 afterEach(() => rm(state.root, { recursive: true, force: true }));
 
 describe('actions', () => {
-	it('approve writes the decision', async () => {
+	it('approve writes the decision, with no choices for a PR that raises no card', async () => {
 		await seedPr();
 		await call('approve');
+		expect(await decision()).toEqual({ decision: 'approve', choices: [] });
+	});
+
+	it('approve on a design writes no choices', async () => {
+		await seed(ID, { kind: 'design', file: 'd.md' }, { 'doc.md': '# d' });
+		await call('approve');
 		expect(await decision()).toEqual({ decision: 'approve' });
+	});
+
+	describe('the Approve lock', () => {
+		const noDecision = () => expect(readFile(join(state.root, 'items', ID, 'decision.json'), 'utf8')).rejects.toThrow();
+
+		it('writes the choices with the titles from the server’s list', async () => {
+			await seedPr41();
+			await call('approve', [['cards', FP41], ['c0', '1'], ['c1', '1']]);
+			expect(await decision()).toEqual({
+				decision: 'approve',
+				choices: [
+					{ title: 'A check failed', choice: 'Approve anyway' },
+					{ title: 'A step must run before merging', choice: 'I’ll run it myself' }
+				]
+			});
+		});
+
+		it('refuses a post with a missing choice', async () => {
+			await seedPr41();
+			expect(await call('approve', [['cards', FP41], ['c0', '1']])).toMatchObject({ status: 400 });
+			await noDecision();
+		});
+
+		it('refuses a send-back choice', async () => {
+			await seedPr41();
+			expect(await call('approve', [['cards', FP41], ['c0', '0'], ['c1', '0']])).toMatchObject({ status: 400 });
+			await noDecision();
+		});
+
+		it('refuses an out-of-range index', async () => {
+			await seedPr41();
+			expect(await call('approve', [['cards', FP41], ['c0', '1'], ['c1', '9']])).toMatchObject({ status: 400 });
+			await noDecision();
+		});
+
+		it('refuses a post that skips the cards the body raises', async () => {
+			await seedPr41();
+			expect(await call('approve', [['cards', FP41]])).toMatchObject({ status: 400 });
+			await noDecision();
+		});
+
+		it('refuses a post made against a different card list, so no pick shifts onto another card', async () => {
+			await seedPr41();
+			// The reader saw only the Before merge card; a failing check has since added a card in front of it.
+			const stale = 'before-merge:A step must run before merging';
+			expect(await call('approve', [['cards', stale], ['c0', '1'], ['c1', '1']])).toMatchObject({ status: 400 });
+			expect(await call('approve', [['c0', '1'], ['c1', '1']])).toMatchObject({ status: 400 });
+			await noDecision();
+		});
+
+		it('checks the session’s Decide block too', async () => {
+			await seedPr41(PR41_VARIANT);
+			expect(await call('approve', [['cards', FP_VARIANT], ['c0', '1'], ['c1', '1'], ['c2', '1']])).toMatchObject({ status: 400 });
+			await call('approve', [['cards', FP_VARIANT], ['c0', '1'], ['c1', '1'], ['c2', '1'], ['c3', '1']]);
+			expect((await decision()).choices.at(-1)).toEqual({ title: 'Which branch name to keep', choice: 'Rename it' });
+		});
 	});
 
 	it('reject writes the note', async () => {
@@ -160,76 +233,61 @@ describe('load', () => {
 		expect(await load({ params: { id: ID } } as never)).toMatchObject({ decided: true, kind: 'pr' });
 	});
 
-	it('returns a waiting PR with its figures, sections, and file groups', async () => {
-		const body = [
-			'Lead paragraph.',
-			'',
-			'Risk class `runner`.',
-			'',
-			'## What landed',
-			'',
-			'Stuff.',
-			'',
-			'## Review',
-			'',
-			'First: `fix`. Second: `accept`.'
-		].join('\n');
-		const diff = [
-			'diff --git a/README.md b/README.md',
-			'--- a/README.md',
-			'+++ b/README.md',
-			'@@ -1,1 +1,2 @@',
-			' keep',
-			'+added',
-			'diff --git a/src/a.ts b/src/a.ts',
-			'new file mode 100644',
-			'--- /dev/null',
-			'+++ b/src/a.ts',
-			'@@ -0,0 +1,1 @@',
-			'+x'
-		].join('\n');
-		const pr = {
-			number: 7,
-			url: 'https://github.com/o/r/pull/7',
-			headRefName: 'feature',
-			baseRefName: 'main',
-			statusCheckRollup: [
-				{ __typename: 'CheckRun', name: 'build', workflowName: 'ci', status: 'COMPLETED', conclusion: 'SUCCESS' },
-				{ __typename: 'CheckRun', name: 'lint', workflowName: 'ci', status: 'COMPLETED', conclusion: 'FAILURE' }
-			]
-		};
-		await seed(ID, { kind: 'pr', head: 'abc', number: 7 }, { 'body.md': body, 'diff.patch': diff, 'pr.json': JSON.stringify(pr) });
-		const data = await load({ params: { id: ID } } as never);
-		expect(data).toMatchObject({
-			decided: false,
-			kind: 'pr',
-			risk: 'runner',
-			verdict: 'accept',
-			beforeMergeHtml: null,
-			link: { url: pr.url, branches: 'feature into main' },
-			checks: { text: '1 passed, 1 failed', failed: 1 },
-			totals: { files: 2, adds: 2, dels: 0 }
+	it('loads PR #40 with its brief, details, and no cards', async () => {
+		await seed(ID, { kind: 'pr', head: 'abc', number: 40 }, {
+			'body.md': fixture('pr-40-brief.md'),
+			'diff.patch': '+a',
+			'pr.json': JSON.stringify({ ...JSON.parse(PR41_META), number: 40, statusCheckRollup: [] })
 		});
-		const pr_ = data as unknown as {
-			leadHtml: string;
-			sections: { title: string; html: string }[];
-			reviewHtml: string;
-			groups: { name: string; files: { path: string }[] }[];
+		const data = (await load({ params: { id: ID } } as never)) as unknown as {
+			headlineHtml: string;
+			ledeHtml: string;
+			whatChanges: string[];
+			ifYouApprove: string[];
+			worthKnowing: string;
+			details: { label: string; summaryHtml: string; bodyHtml: string }[];
+			cards: unknown[];
+			technicalHtml: string;
 		};
-		expect(pr_.leadHtml).toContain('Lead paragraph.');
-		expect(pr_.sections.map((x) => x.title)).toEqual(['What landed']);
-		expect(pr_.reviewHtml).toContain('accept');
-		expect(pr_.groups.map((g) => [g.name, g.files.map((f) => f.path)])).toEqual([
-			['Repository root', ['README.md']],
-			['src', ['src/a.ts']]
-		]);
+		expect(data.headlineHtml).toBe('Every PR a session opens will now come to you for approval, and approving one will merge it.');
+		expect(data.ledeHtml).toContain('Small fixes were skipping');
+		expect(data.whatChanges).toHaveLength(2);
+		expect(data.ifYouApprove).toHaveLength(3);
+		expect(data.worthKnowing).toContain('merge guard');
+		expect(data.details.map((d) => d.label)).toEqual(['The reminder', 'The merge permission', 'Testing']);
+		expect(data.details[0].summaryHtml).toBe('Fires whenever a session opens a PR.');
+		expect(data.details[0].bodyHtml).toContain('<code>claude-approval-queue-reminder</code>');
+		expect(data.details[0].bodyHtml).not.toContain('Fires whenever');
+		expect(data.cards).toEqual([]);
+		expect(data.technicalHtml).toContain('What landed');
+	});
+
+	it('loads PR #41 with the failed check, then the Before merge step', async () => {
+		await seedPr41();
+		const data = (await load({ params: { id: ID } } as never)) as unknown as {
+			cards: { kind: string; html: string; choices: { sendBack: boolean }[] }[];
+			checks: { text: string };
+			link: { head: string; base: string };
+		};
+		expect(data.cards.map((c) => c.kind)).toEqual(['check', 'before-merge']);
+		expect(data.cards[1].html).toContain('<li>');
+		expect(data.checks.text).toBe('2 passed, 1 failed');
+		expect(data.link).toMatchObject({ head: 'desk-hook', base: 'main' });
+	});
+
+	it('loads four cards in order for the variant with a fix review and a Decide block', async () => {
+		await seedPr41(PR41_VARIANT);
+		const data = (await load({ params: { id: ID } } as never)) as unknown as { cards: { kind: string }[]; verdict: string };
+		expect(data.cards.map((c) => c.kind)).toEqual(['check', 'review', 'before-merge', 'decide']);
+		expect(data.verdict).toBe('fix');
 	});
 
 	it('returns a PR without pr.json with no link and no checks', async () => {
 		await seedPr();
 		expect(await load({ params: { id: ID } } as never)).toMatchObject({
 			link: null,
-			risk: null,
+			headlineHtml: 't',
+			cards: [],
 			verdict: null,
 			checks: { text: 'No checks' }
 		});
@@ -238,13 +296,6 @@ describe('load', () => {
 	it('returns a design with its read time', async () => {
 		await seed(ID, { kind: 'design', file: 'd.md' }, { 'doc.md': 'word '.repeat(460) });
 		expect(await load({ params: { id: ID } } as never)).toMatchObject({ kind: 'design', minutes: 2 });
-	});
-
-	it('renders a Before merge section for a PR that has one', async () => {
-		await seed(ID, { kind: 'pr', head: 'abc' }, { 'body.md': 'x\n\n## Before merge\n\nRun `stow -R bin`.', 'diff.patch': '+a' });
-		expect(await load({ params: { id: ID } } as never)).toMatchObject({
-			beforeMergeHtml: '<p>Run <code>stow -R bin</code>.</p>\n'
-		});
 	});
 
 	it('returns a triage with its headline, lede, and rows at their proposals', async () => {

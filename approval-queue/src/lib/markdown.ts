@@ -10,6 +10,12 @@ const marked = new Marked({
 	renderer: {
 		html({ text }) {
 			return escape(text);
+		},
+		// A scheme other than http, https, or mailto (javascript:, data:) renders as its text, not a link.
+		link({ href, title, tokens }) {
+			const text = this.parser.parseInline(tokens);
+			if (/^[a-z][a-z0-9+.-]*:/i.test(href) && !/^(https?|mailto):/i.test(href)) return text;
+			return `<a href="${escape(href)}"${title ? ` title="${escape(title)}"` : ''}>${text}</a>`;
 		}
 	}
 });
@@ -17,4 +23,9 @@ const marked = new Marked({
 /** Renders markdown to HTML with every raw HTML token, block and inline, escaped. */
 export function render(source: string): string {
 	return marked.parse(source, { async: false });
+}
+
+/** Renders one line of markdown without a wrapping paragraph, for headlines, list items, and card text. */
+export function renderInline(source: string): string {
+	return marked.parseInline(source, { async: false });
 }

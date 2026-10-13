@@ -7,7 +7,8 @@ const base: KeyContext = {
 	singleKeys: true,
 	sheetOpen: false,
 	held: false,
-	noteOpen: false
+	noteOpen: false,
+	approveLocked: false
 };
 const none = { ctrl: false, meta: false, alt: false, shift: false };
 const ctx = (over: Partial<KeyContext>): KeyContext => ({ ...base, ...over });
@@ -16,6 +17,11 @@ describe('keyAction', () => {
 	it('approves on a PR and not on triage', () => {
 		expect(keyAction('a', none, base)).toBe('approve');
 		expect(keyAction('a', none, ctx({ page: 'triage' }))).toBeNull();
+	});
+
+	it('does nothing on a while Approve is locked, and still sends back on r', () => {
+		expect(keyAction('a', none, ctx({ approveLocked: true }))).toBeNull();
+		expect(keyAction('r', none, ctx({ approveLocked: true }))).toBe('open-note');
 	});
 
 	it('opens the note on r, and focuses the filter on / for a PR only', () => {

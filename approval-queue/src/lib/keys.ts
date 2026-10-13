@@ -24,6 +24,8 @@ export interface KeyContext {
 	/** A decision is counting down in the toast. */
 	held: boolean;
 	noteOpen: boolean;
+	/** Approve is disabled: a card has no pick, or a pick sends the PR back. */
+	approveLocked: boolean;
 }
 
 export interface KeyMods {
@@ -41,7 +43,7 @@ const MOVES: Record<string, KeyAction> = { '1': 'move-now', '2': 'move-defer', '
  * A held decision ignores every decision key, since the buttons lock but a key would not.
  */
 export function keyAction(key: string, mods: KeyMods, context: KeyContext): KeyAction | null {
-	const { page, typing, singleKeys, sheetOpen, held, noteOpen } = context;
+	const { page, typing, singleKeys, sheetOpen, held, noteOpen, approveLocked } = context;
 	const plain = !mods.ctrl && !mods.meta && !mods.alt;
 	if (sheetOpen) return key === '?' && plain ? 'toggle-sheet' : null;
 
@@ -64,7 +66,7 @@ export function keyAction(key: string, mods: KeyMods, context: KeyContext): KeyA
 	if (key === 'k') return 'queue-prev';
 	if (key === 'z') return held ? 'undo' : null;
 	if (held) return null;
-	if (page !== 'triage' && key === 'a') return noteOpen ? null : 'approve';
+	if (page !== 'triage' && key === 'a') return noteOpen || approveLocked ? null : 'approve';
 	if (page !== 'triage' && key === 'r') return 'open-note';
 	if (page === 'pr' && key === '/') return 'focus-filter';
 	if (page === 'triage' && key in MOVES) return MOVES[key];

@@ -1,32 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import { bodySections, checksSummary, reviewSection, reviewVerdict, riskClass } from './pr-summary.ts';
+import { checksSummary, reviewSection, reviewVerdict, technicalNotes } from './pr-summary.ts';
 
-describe('riskClass', () => {
-	it('reads both real phrasings', () => {
-		expect(riskClass('Pass.\n\nClass `runner`, two tasks.')).toBe('runner');
-		expect(riskClass('Risk class `auth-data` for this pass')).toBe('auth-data');
+describe('technicalNotes', () => {
+	it('keeps what follows the brief and leaves out Before merge and Review', () => {
+		const body =
+			'# Title\n\n## Brief\n\nHeadline.\n\n## What landed\n\nThings\n\n## Review\n\n`accept`\n\n## Before merge\n\nDo it\n\n## Score\n\n6 h';
+		expect(technicalNotes(body)).toBe('## What landed\n\nThings\n\n## Score\n\n6 h');
 	});
 
-	it('takes the first and ignores case', () => {
-		expect(riskClass('CLASS `Ordinary` then class `runner`')).toBe('ordinary');
-	});
-
-	it('returns null with none', () => {
-		expect(riskClass('No class here, class `other`')).toBeNull();
-	});
-});
-
-describe('bodySections', () => {
-	it('splits a lead from titled sections and leaves out Before merge and Review', () => {
-		const body = 'Lead text\n\n## What landed\n\nThings\n\n## Review\n\n`accept`\n\n## Before merge\n\nDo it';
-		expect(bodySections(body)).toEqual({
-			lead: 'Lead text',
-			sections: [{ title: 'What landed', body: 'Things' }]
-		});
-	});
-
-	it('gives an empty lead when the body opens with a heading', () => {
-		expect(bodySections('## A\n\nx\n\n## B\n\ny').lead).toBe('');
+	it('keeps the lead of a body that has no brief', () => {
+		expect(technicalNotes('Lead text\n\n## What landed\n\nThings')).toBe('Lead text\n\n## What landed\n\nThings');
 	});
 });
 

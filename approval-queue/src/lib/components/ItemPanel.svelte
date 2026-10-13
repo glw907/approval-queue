@@ -12,6 +12,7 @@ entry so the tab stays script-closable.
 	import { enhance, type SubmitFunction } from '$app/forms';
 	import { beforeNavigate, goto } from '$app/navigation';
 	import { tick } from 'svelte';
+	import { fingerprint, gate } from '#lib/cards.ts';
 	import { desk } from '#lib/desk.svelte.ts';
 	import { startHold } from '#lib/hold.ts';
 	import { nextItem } from '#lib/queue.ts';
@@ -22,6 +23,10 @@ entry so the tab stays script-closable.
 	import TriageView from './TriageView.svelte';
 
 	let { data }: { data: PageData } = $props();
+
+	const BAR =
+		'flex max-w-3xl flex-wrap items-center gap-x-4 gap-y-3 rounded-box border border-base-300 bg-base-100 px-5 py-3.5 shadow-[0_8px_28px_-6px_rgb(0_0_0/0.22),0_2px_6px_-2px_rgb(0_0_0/0.10)]';
+	const KEY = 'kbd kbd-xs border-current/25 bg-transparent text-current opacity-85';
 
 	let form = $state<HTMLFormElement>();
 	let noteField = $state<HTMLTextAreaElement>();
@@ -37,12 +42,27 @@ entry so the tab stays script-closable.
 	let rows = $state<Row[]>(data.kind === 'triage' ? data.rows : []);
 	const changed = $derived(changedCount(rows));
 
+	// A card's pick is its choice's index; Approve unlocks once every card has one and none sends back.
+	let picks = $state<Array<number | undefined>>([]);
+	const cards = $derived(data.kind === 'pr' ? data.cards : []);
+	const decided = $derived(gate(cards, picks));
+	const approvable = $derived(!decided.locked);
+	const tip = $derived(!approvable && decided.open.length ? `Decide ${decided.open[0].title} first` : undefined);
+	const readySub = $derived.by(() => {
+		if (cards.length > 0) return 'Every decision is made.';
+		if (data.kind !== 'pr') return '';
+		const { passed, failed, pending, rows } = data.checks;
+		return rows.length > 0 && failed === 0 && pending === 0
+			? `All ${passed} checks passed. Nothing to decide first.`
+			: 'Nothing to decide first.';
+	});
+
 	$effect(() => {
 		desk.page = data.kind;
 		if (!data.decided) {
 			desk.handlers = {
 				...desk.handlers,
-				approve: () => approveButton && form?.requestSubmit(approveButton),
+				approve: () => approveButton && !approveButton.disabled && form?.requestSubmit(approveButton),
 				'open-note': openNote,
 				'close-note': closeNote,
 				'send-rejection': () => form?.requestSubmit(sendButton),
@@ -55,6 +75,12 @@ entry so the tab stays script-closable.
 			desk.noteOpen = false;
 			desk.page = 'design';
 		};
+	});
+
+	// Its own effect: a pick must not re-run the handler registration, whose teardown clears every handler and the note.
+	$effect(() => {
+		desk.approveLocked = decided.locked;
+		return () => (desk.approveLocked = false);
 	});
 
 	// Keep a focused control clear of the bar and the toast above it.
@@ -97,7 +123,7 @@ entry so the tab stays script-closable.
 	function decisionText(action: URL) {
 		if (action.search === '?/approve') return `Approved ${subject()}.`;
 		if (action.search === '?/reject') {
-			return noteField?.value.trim() ? `Rejected ${subject()} with a note.` : `Rejected ${subject()}.`;
+			return noteField?.value.trim() ? `Sent ${subject()} back with a note.` : `Sent ${subject()} back.`;
 		}
 		return `Submitted ${rows.length} items.`;
 	}
@@ -171,53 +197,51 @@ entry so the tab stays script-closable.
 	};
 </script>
 
-<main id="main" tabindex="-1" class="flex-1 px-5 pt-5 pb-8 lg:px-8">
-	<header class="relative isolate pb-4">
-		<svg class="site-contour-texture" viewBox="0 0 400 60" preserveAspectRatio="none" aria-hidden="true">
-			<path d="M160 58c40-18 70-6 110-20s80-22 130-6" />
-			<path d="M160 48c40-18 70-6 110-20s80-22 130-6" />
-			<path d="M160 38c40-18 70-6 110-20s80-22 130-6" />
-		</svg>
-		<p class="desk-muted flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
-			{#if data.kind === 'pr'}
-				<span>{subject()}</span>
-				{#if data.link}
-					<span>{data.link.branches}</span>
-					<a class="link" href={data.link.url} target="_blank" rel="noopener noreferrer">GitHub</a>
-				{/if}
-			{:else if data.kind === 'design'}
-				<span>{data.meta.repo.split('/').pop()}</span>
-				{#if data.meta.file}<span>{data.meta.file}</span>{/if}
-				<span>{data.minutes} min read</span>
+<main id="main" tabindex="-1" class="flex-1 px-5 pt-4 pb-8 lg:px-12">
+	<div class="max-w-3xl">
+		{#if data.kind === 'pr'}
+			<PrView {data} bind:picks subject={subject() ?? ''} />
+		{:else}
+			<header class="relative isolate pb-4">
+				<svg class="site-contour-texture" viewBox="0 0 400 60" preserveAspectRatio="none" aria-hidden="true">
+					<path d="M160 58c40-18 70-6 110-20s80-22 130-6" />
+					<path d="M160 48c40-18 70-6 110-20s80-22 130-6" />
+					<path d="M160 38c40-18 70-6 110-20s80-22 130-6" />
+				</svg>
+				<p class="desk-muted flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
+					{#if data.kind === 'design'}
+						<span>{data.meta.repo.split('/').pop()}</span>
+						{#if data.meta.file}<span>{data.meta.file}</span>{/if}
+						<span>{data.minutes} min read</span>
+					{:else}
+						<span class="badge badge-sm badge-outline">Triage</span>
+						<span>{subject()}</span>
+						<span>{rows.length} items, each with a proposed disposition</span>
+					{/if}
+				</p>
+				<h1 class="desk-title mt-1 text-[1.6rem] leading-tight"><i class="site-benchmark"></i>{data.meta.title}</h1>
+			</header>
+			{#if data.kind === 'design'}
+				<DesignView docHtml={data.docHtml} />
 			{:else}
-				<span class="badge badge-sm badge-outline">Triage</span>
-				<span>{subject()}</span>
-				<span>{rows.length} items, each with a proposed disposition</span>
+				<TriageView bind:rows />
 			{/if}
-		</p>
-		<h1 class="desk-title mt-1 text-[1.6rem] leading-tight"><i class="site-benchmark"></i>{data.meta.title}</h1>
-	</header>
-
-	{#if data.kind === 'pr'}
-		<PrView {data} />
-	{:else if data.kind === 'design'}
-		<DesignView docHtml={data.docHtml} />
-	{:else}
-		<TriageView bind:rows />
-	{/if}
+		{/if}
+	</div>
 </main>
 
-<div id="decision" class="sticky bottom-0 z-20 border-t border-base-300 bg-base-200">
+<div id="decision" class="sticky bottom-0 z-10 bg-linear-to-t from-base-100 from-60% to-transparent px-5 pt-8 pb-4 lg:px-12">
 	{#if data.decided}
-		<p class="px-5 py-3 text-sm lg:px-8">Decided</p>
+		<p class="max-w-3xl rounded-box border border-base-300 bg-base-100 px-5 py-3.5 text-sm">Decided</p>
 	{:else if data.kind === 'triage'}
 		<form
+			id="decision-form"
 			method="post"
 			action="?/submit"
 			bind:this={form}
 			use:enhance={decide}
 			aria-label="Decision"
-			class="flex flex-wrap items-center gap-x-4 gap-y-2 px-5 py-3 lg:px-8"
+			class={BAR}
 		>
 			{#each rows as row, i (i)}
 				<input type="hidden" name="disposition" value={row.disposition} />
@@ -227,22 +251,17 @@ entry so the tab stays script-closable.
 				{rows.length} items, {changed === 0 ? 'none' : changed} changed from proposed
 			</p>
 			<button class="btn btn-primary min-w-32" bind:this={submitButton} disabled={desk.held}>
-				Submit <kbd class="kbd kbd-xs desk-kbd">Ctrl</kbd><kbd class="kbd kbd-xs desk-kbd">Enter</kbd>
+				Submit <kbd class={KEY}>Ctrl</kbd><kbd class={KEY}>Enter</kbd>
 			</button>
 		</form>
 	{:else}
-		<form
-			method="post"
-			bind:this={form}
-			use:enhance={decide}
-			aria-label="Decision"
-			class="px-5 py-3 lg:px-8"
-		>
+		<form id="decision-form" method="post" bind:this={form} use:enhance={decide} aria-label="Decision" class={BAR}>
+			<input type="hidden" name="cards" value={fingerprint(cards)} />
 			{#if desk.noteOpen}
-				<div class="mb-3">
+				<div class="basis-full">
 					<label for="note" class="text-sm font-semibold">
-						Rejection note
-						<span class="desk-muted font-normal">(optional; the session reads it as the reason)</span>
+						Note for the session
+						<span class="font-normal text-(--color-muted)">(optional; the session reads it as the reason)</span>
 					</label>
 					<textarea
 						id="note"
@@ -255,55 +274,66 @@ entry so the tab stays script-closable.
 					></textarea>
 				</div>
 			{/if}
-			<div class="flex flex-wrap items-center gap-x-4 gap-y-2">
-				<div class="mr-auto min-w-0 text-sm">
-					{#if data.kind === 'pr' && data.beforeMergeHtml !== null}
-						<div role="alert" class="alert alert-warning alert-vertical items-start">
-							<strong>Before merge</strong>
-							<!-- A scrolling region takes focus so the keyboard can reach its overflow. -->
-							<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-							<div class="md max-h-40 overflow-y-auto" tabindex="0" role="region" aria-label="Before merge steps">
-								{@html data.beforeMergeHtml}
-							</div>
-						</div>
+			<div class="mr-auto flex min-w-0 items-start gap-3">
+				<span class={['status mt-2', decided.locked ? 'status-warning' : 'status-success']} aria-hidden="true"></span>
+				<div class="min-w-0" id="bar-state" role="status">
+					{#if decided.sendBack}
+						<p class="leading-tight font-semibold">Sending back</p>
+						<p class="mt-0.5 text-sm leading-snug text-(--color-muted)">You chose to send this back to the session.</p>
+					{:else if decided.open.length}
+						<p class="leading-tight font-semibold">
+							{decided.open.length} {decided.open.length === 1 ? 'decision' : 'decisions'} left
+						</p>
+						<p class="mt-0.5 text-sm leading-snug text-(--color-muted)">
+							Decide <a class="link" href="#card-{cards.indexOf(decided.open[0])}">{decided.open[0].title}</a> to unlock Approve.
+						</p>
+					{:else}
+						<p class="leading-tight font-semibold">Ready to approve</p>
+						<p class="mt-0.5 text-sm leading-snug text-(--color-muted)">{readySub}</p>
 					{/if}
 				</div>
+			</div>
+			<div class="ms-auto flex flex-wrap gap-3">
 				{#if desk.noteOpen}
-					<div class="flex items-center gap-2">
-						<button type="button" class="btn btn-ghost" disabled={desk.held} onclick={closeNote}>
-							Cancel <kbd class="kbd kbd-xs desk-kbd">Esc</kbd>
-						</button>
-						<button
-							class="btn btn-error"
-							formaction="?/reject"
-							bind:this={sendButton}
-							disabled={desk.held}
-						>
-							Send rejection <kbd class="kbd kbd-xs desk-kbd">Ctrl</kbd><kbd class="kbd kbd-xs desk-kbd">Enter</kbd>
-						</button>
-					</div>
+					<button type="button" class="btn btn-ghost" disabled={desk.held} onclick={closeNote}>
+						Cancel <kbd class={KEY}>Esc</kbd>
+					</button>
+					<button class="btn btn-primary" formaction="?/reject" bind:this={sendButton} disabled={desk.held}>
+						{@render undoIcon()}Send back <kbd class={KEY}>Ctrl</kbd><kbd class={KEY}>Enter</kbd>
+					</button>
 				{:else}
-					<div class="flex items-center gap-2">
-						<button
-							type="button"
-							class="btn btn-outline btn-error"
-							bind:this={rejectButton}
-							disabled={desk.held}
-							onclick={openNote}
+					<button
+						type="button"
+						class={['btn', decided.sendBack ? 'btn-primary' : 'btn-outline']}
+						bind:this={rejectButton}
+						disabled={desk.held}
+						onclick={openNote}
+					>
+						{@render undoIcon()}Send back <kbd class={[KEY, 'desk-sk']}>R</kbd>
+					</button>
+					{#if !decided.sendBack}
+						<div
+							class={tip && 'tooltip tooltip-top'}
+							data-tip={tip}
 						>
-							Reject <kbd class="kbd kbd-xs desk-kbd desk-sk">r</kbd>
-						</button>
-						<button
-							class="btn btn-primary min-w-32"
-							formaction="?/approve"
-							bind:this={approveButton}
-							disabled={desk.held}
-						>
-							Approve <kbd class="kbd kbd-xs desk-kbd desk-sk">a</kbd>
-						</button>
-					</div>
+							<button
+								class="btn btn-primary"
+								formaction="?/approve"
+								bind:this={approveButton}
+								aria-describedby="bar-state"
+								disabled={desk.held || !approvable}
+							>
+								<svg class="size-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 5 5 9-10" /></svg>
+								{data.kind === 'pr' ? 'Approve and merge' : 'Approve'} <kbd class={[KEY, 'desk-sk']}>A</kbd>
+							</button>
+						</div>
+					{/if}
 				{/if}
 			</div>
 		</form>
 	{/if}
 </div>
+
+{#snippet undoIcon()}
+	<svg class="size-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 14 4 9l5-5M4 9h11a5 5 0 0 1 0 10h-3" /></svg>
+{/snippet}
