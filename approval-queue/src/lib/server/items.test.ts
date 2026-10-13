@@ -103,13 +103,13 @@ describe('readItem', () => {
 	});
 
 	it('reads a triage list', async () => {
-		const rows = [{ item: 'x', disposition: 'now', reason: 'why' }];
+		const triage = { headline: 'H.', lede: 'L.', rows: [{ action: 'x', why: 'why', proposed: 'now' }] };
 		await seed(
 			'20261011T100000-1',
 			{ kind: 'triage', repo: 'r', title: 't', created: 'c' },
-			{ 'triage.json': JSON.stringify(rows) }
+			{ 'triage.json': JSON.stringify(triage) }
 		);
-		expect((await readItem(root, '20261011T100000-1'))?.content).toEqual({ kind: 'triage', rows });
+		expect((await readItem(root, '20261011T100000-1'))?.content).toEqual({ kind: 'triage', ...triage });
 	});
 
 	it('returns undefined for an unknown id', async () => {

@@ -11,7 +11,7 @@ import {
 	writeDecision,
 	type Decision,
 	type Disposition,
-	type TriageRow
+	type SubmittedRow
 } from '#lib/server/items.ts';
 import type { Actions, PageServerLoad } from './$types';
 
@@ -70,8 +70,8 @@ export const load: PageServerLoad = async ({ params }) => {
 		const words = content.doc.split(/\s+/).filter(Boolean).length;
 		return { meta, decided, kind: 'design' as const, docHtml: render(content.doc), minutes: Math.ceil(words / 230) };
 	}
-	const rows = content.rows.map((row) => ({ ...row, proposed: row.disposition }));
-	return { meta, decided, kind: 'triage' as const, rows };
+	const rows = content.rows.map((row) => ({ ...row, disposition: row.proposed, note: '' }));
+	return { meta, decided, kind: 'triage' as const, headline: content.headline, lede: content.lede, rows };
 };
 
 export const actions: Actions = {
@@ -91,19 +91,19 @@ export const actions: Actions = {
 		if (item.content.kind !== 'triage') return fail(400, { message: 'Not a triage item' });
 		const form = await request.formData();
 		const dispositions = form.getAll('disposition');
-		const reasons = form.getAll('reason');
+		const notes = form.getAll('note');
 		const source = item.content.rows;
-		if (dispositions.length !== source.length || reasons.length !== source.length) {
+		if (dispositions.length !== source.length || notes.length !== source.length) {
 			return fail(400, { message: 'Row count does not match' });
 		}
-		const rows: TriageRow[] = [];
+		const rows: SubmittedRow[] = [];
 		for (const [i, row] of source.entries()) {
 			const disposition = dispositions[i];
-			const reason = reasons[i];
-			if (typeof disposition !== 'string' || !DISPOSITIONS.includes(disposition) || typeof reason !== 'string') {
+			const note = notes[i];
+			if (typeof disposition !== 'string' || !DISPOSITIONS.includes(disposition) || typeof note !== 'string') {
 				return fail(400, { message: 'Invalid disposition' });
 			}
-			rows.push({ item: row.item, disposition: disposition as Disposition, reason });
+			rows.push({ action: row.action, disposition: disposition as Disposition, note });
 		}
 		return decide(params.id, { decision: 'submit', rows });
 	}
