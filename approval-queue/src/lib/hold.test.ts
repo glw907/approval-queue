@@ -29,4 +29,17 @@ describe('startHold', () => {
 		expect(fire).not.toHaveBeenCalled();
 		expect(tick).toHaveBeenCalledTimes(2);
 	});
+
+	it('fires at once on flush, and never again', () => {
+		const tick = vi.fn();
+		const fire = vi.fn();
+		const hold = startHold(5000, { tick, fire });
+		vi.advanceTimersByTime(2000);
+		hold.flush();
+		expect(fire).toHaveBeenCalledTimes(1);
+		hold.flush();
+		vi.advanceTimersByTime(10000);
+		expect(fire).toHaveBeenCalledTimes(1);
+		expect(tick).toHaveBeenCalledTimes(2);
+	});
 });

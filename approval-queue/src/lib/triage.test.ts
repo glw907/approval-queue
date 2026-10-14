@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { changedCount, groupRows, moveRow, type Row } from './triage.ts';
+import { changedCount, groupRows, moveRow, seedRows, type Row } from './triage.ts';
 
 const rows: Row[] = [
 	{ action: '1', why: '', disposition: 'now', proposed: 'now', note: 'a' },
@@ -40,5 +40,25 @@ describe('changedCount', () => {
 		const moved = moveRow(rows, 0, 'drop');
 		expect(changedCount(moved)).toBe(1);
 		expect(changedCount(moveRow(moved, 0, 'now'))).toBe(0);
+	});
+});
+
+describe('seedRows', () => {
+	const fresh = rows.map((row) => ({ ...row, disposition: row.proposed, note: '' }));
+
+	it('restores an unsent draft, so calls made before leaving the item survive the return', () => {
+		const draft = moveRow(fresh, 0, 'drop');
+		expect(seedRows(fresh, draft)[0].disposition).toBe('drop');
+	});
+
+	it('starts from the proposals when there is no draft', () => {
+		expect(seedRows(fresh, undefined)).toEqual(fresh);
+	});
+
+	it('drops a draft whose actions no longer match the item', () => {
+		const stale = fresh.slice(1).map((row) => ({ ...row, disposition: 'drop' as const }));
+		expect(seedRows(fresh, stale)).toEqual(fresh);
+		const renamed = fresh.map((row, i) => (i === 0 ? { ...row, action: 'other', disposition: 'drop' as const } : row));
+		expect(seedRows(fresh, renamed)).toEqual(fresh);
 	});
 });

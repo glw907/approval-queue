@@ -317,6 +317,27 @@ describe('load', () => {
 		});
 	});
 
+	it('returns a decided triage with the calls that were submitted, not the proposals', async () => {
+		await seedTriage();
+		const submitted = {
+			decision: 'submit',
+			rows: [
+				{ action: 'one', disposition: 'drop', note: 'not needed' },
+				{ action: 'two', disposition: 'defer', note: '' },
+				{ action: 'three', disposition: 'now', note: '' }
+			]
+		};
+		await writeFile(join(state.root, 'items', ID, 'decision.json'), JSON.stringify(submitted));
+		expect(await load({ params: { id: ID } } as never)).toMatchObject({
+			decided: true,
+			rows: [
+				{ action: 'one', proposed: 'now', disposition: 'drop', note: 'not needed' },
+				{ action: 'two', proposed: 'defer', disposition: 'defer', note: '' },
+				{ action: 'three', proposed: 'drop', disposition: 'now', note: '' }
+			]
+		});
+	});
+
 	it('returns a design whose brief parses into the headline block and leaves the brief out of the document', async () => {
 		const doc = `# A design\n\n${fixture('pr-40-brief.md').replace('# Send every session-opened PR to approval\n\n', '')}\n## Design\n\nThe plan itself.\n`;
 		await seed(ID, { kind: 'design', file: 'd.md' }, { 'doc.md': doc });

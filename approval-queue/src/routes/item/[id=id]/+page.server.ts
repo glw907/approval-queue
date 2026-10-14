@@ -47,7 +47,7 @@ function detailRows(brief: Brief | null) {
 export const load: PageServerLoad = async ({ params }) => {
 	const item = await readItem(APPROVAL_QUEUE_STATE, params.id);
 	if (!item) error(404, 'Not found');
-	const { meta, decided, content } = item;
+	const { meta, decided, content, decision } = item;
 	if (content.kind === 'pr') {
 		const review = reviewSection(content.body);
 		const notes = technicalNotes(content.body);
@@ -103,7 +103,13 @@ export const load: PageServerLoad = async ({ params }) => {
 			minutes: Math.ceil(words / 230)
 		};
 	}
-	const rows = content.rows.map((row) => ({ ...row, disposition: row.proposed, note: '' }));
+	// A decided triage shows the calls that were sent, matched by action so a reordered file never
+	// pairs a call with the wrong row.
+	const sent = new Map(decision?.decision === 'submit' ? decision.rows.map((call) => [call.action, call]) : []);
+	const rows = content.rows.map((row) => {
+		const call = sent.get(row.action);
+		return { ...row, disposition: call?.disposition ?? row.proposed, note: call?.note ?? '' };
+	});
 	return {
 		meta,
 		decided,
