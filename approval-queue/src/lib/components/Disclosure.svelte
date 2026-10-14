@@ -1,8 +1,8 @@
 <!-- @component
 One closed-by-default row: a leading chevron that points right and turns down when open, the row's
-name, and under the name a summary that stays visible while it is open. The chevron sits on the
-name's line, however many lines the summary wraps to. `quiet` sets the smaller Evidence
-tier. `summaryHtml` is trusted markup the server rendered; the body is the children.
+name, and under the name a summary that stays visible while it is open. An empty summary
+leaves the name alone on the row. The chevron sits on the name's line, however many lines the
+summary wraps to. `quiet` sets the smaller Evidence tier. `summaryHtml` is trusted markup the server rendered; the body is the children.
 -->
 <script lang="ts">
 	import type { Snippet } from 'svelte';
@@ -29,9 +29,11 @@ tier. `summaryHtml` is trusted markup the server rendered; the body is the child
 			<svg class="size-4 shrink-0 text-(--color-muted)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 6 6 6-6 6" /></svg>
 		</span>
 		<span class={['font-medium', nameSize, quiet && 'opacity-80']}>{name}</span>
-		<span class={['col-start-2 text-pretty text-(--color-muted)', quiet ? 'text-xs' : 'text-sm']}>
-			{@html summaryHtml}
-		</span>
+		{#if summaryHtml}
+			<span class={['col-start-2 text-pretty text-(--color-muted)', quiet ? 'text-xs' : 'text-sm']}>
+				{@html summaryHtml}
+			</span>
+		{/if}
 	</summary>
 	<div class={['collapse-content ps-6 pe-0 text-sm leading-relaxed text-pretty opacity-90', !wide && 'max-w-[70ch]']}>
 		{@render children?.()}
