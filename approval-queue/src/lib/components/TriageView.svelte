@@ -152,7 +152,7 @@ which submits them; nothing here posts. A row's number is its position in the fi
 								<div class="join rounded-field border border-base-300" role="radiogroup" aria-label="Call for item {index + 1}">
 									{#each SECTIONS as target (target.key)}
 										<input
-											class="join-item btn btn-xs btn-ghost font-normal checked:border-base-content/55 checked:font-semibold checked:text-base-content {target.pick}"
+											class="join-item btn btn-xs btn-ghost font-normal checked:border-base-content/55 checked:font-semibold checked:text-base-content not-checked:hover:border-transparent not-checked:hover:bg-base-content/5 {target.pick}"
 											type="radio"
 											name="r{index}"
 											aria-label={target.label}
