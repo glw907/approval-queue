@@ -1,22 +1,24 @@
 <!-- @component
 One open item: its header, its view, and the sticky decision bar. The page renders it inside a
-`{#key}` on the item's id, so every per-item state here (the note, the triage rows, a failed post)
-starts fresh when the next item loads.
+`{#key}` on the item's id, so per-item state here (the note, a failed post) starts fresh when the
+next item loads. Triage calls are the exception: unsent ones are kept in `desk.drafts`, so
+opening another item and coming back keeps them.
 
 A decision is held in the page for five seconds before the form posts: the submit function awaits
-the hold, and Undo calls `cancel()` so nothing is sent. A post that fails unlocks the bar and
-shows why; a post that succeeds navigates to the item the server named, replacing the history
-entry so the tab stays script-closable.
+the hold, and Undo calls `cancel()` so nothing is sent. Opening another item during the hold sends
+the decision at once, while closing the tab undoes it, since a closing page cannot finish a post.
+A post that fails unlocks the bar and shows why; a post that succeeds navigates to the item the
+server named, replacing the history entry so the tab stays script-closable.
 -->
 <script lang="ts">
 	import { enhance, type SubmitFunction } from '$app/forms';
-	import { beforeNavigate, goto } from '$app/navigation';
+	import { beforeNavigate, goto, invalidateAll } from '$app/navigation';
 	import { tick } from 'svelte';
 	import { fingerprint, gate } from '#lib/cards.ts';
 	import { desk } from '#lib/desk.svelte.ts';
 	import { startHold } from '#lib/hold.ts';
 	import { nextItem } from '#lib/queue.ts';
-	import { changedCount, type Row } from '#lib/triage.ts';
+	import { changedCount, seedRows, type Row } from '#lib/triage.ts';
 	import type { PageData } from '../../routes/item/[id=id]/$types';
 	import BriefBlock from './BriefBlock.svelte';
 	import DesignView from './DesignView.svelte';
@@ -37,12 +39,23 @@ entry so the tab stays script-closable.
 	let sendButton = $state<HTMLButtonElement>();
 	let submitButton = $state<HTMLButtonElement>();
 	let returnTo: HTMLElement | null = null;
-	let hold: { cancel: () => void } | null = null;
+	let hold: { cancel: () => void; flush: () => void } | null = null;
+	// Set when a held decision is sent because another item is opening, so success must not navigate too.
+	let leaving = false;
 
 	// The page keys this component on the item id, so the rows are read once per item.
 	// svelte-ignore state_referenced_locally
-	let rows = $state<Row[]>(data.kind === 'triage' ? data.rows : []);
+	let rows = $state<Row[]>(
+		data.kind === 'triage' ? (data.decided ? data.rows : seedRows(data.rows, desk.drafts.get(data.meta.id))) : []
+	);
 	const changed = $derived(changedCount(rows));
+
+	$effect(() => {
+		if (data.kind !== 'triage' || data.decided) return;
+		const edited = changedCount(rows) > 0 || rows.some((row) => row.note !== '');
+		if (edited) desk.drafts.set(data.meta.id, $state.snapshot(rows));
+		else desk.drafts.delete(data.meta.id);
+	});
 
 	// A card's pick is its choice's index; Approve unlocks once every card has one and none sends back.
 	let picks = $state<Array<number | undefined>>([]);
@@ -99,8 +112,14 @@ entry so the tab stays script-closable.
 		};
 	});
 
-	beforeNavigate(() => {
-		if (hold) desk.undo?.();
+	beforeNavigate((navigation) => {
+		if (!hold) return;
+		if (navigation.willUnload) {
+			desk.undo?.();
+			return;
+		}
+		leaving = true;
+		hold.flush();
 	});
 
 	async function openNote() {
@@ -164,13 +183,15 @@ entry so the tab stays script-closable.
 			};
 		});
 		hold = null;
+		// The next item is already opening, so its keys and rows must not wait on this post.
+		if (leaving) desk.held = false;
 		if (!fired) {
 			cancel();
 			await unlock('Undone. Nothing was sent.', returnTo, null);
 			return;
 		}
 
-		const done = `${text} ${where}.`;
+		const done = leaving ? text : `${text} ${where}.`;
 		// The Undo button holds focus and is about to unmount, so focus moves first.
 		document.getElementById('main')?.focus();
 		desk.counting = false;
@@ -179,6 +200,13 @@ entry so the tab stays script-closable.
 		desk.announce(done);
 		return async ({ result }) => {
 			if (result.type === 'success') {
+				desk.drafts.delete(data.meta.id);
+				if (leaving) {
+					desk.toast = null;
+					// Reopening the same item keeps the panel, so its decided state comes only from a reload.
+					await invalidateAll();
+					return;
+				}
 				const next = (result.data as { next: string | null }).next;
 				await goto(next ?? '/', { replace: true, refreshAll: true });
 				desk.held = false;
@@ -192,7 +220,7 @@ entry so the tab stays script-closable.
 			}
 			const reason =
 				result.type === 'error' ? result.error.message : result.type === 'failure' ? result.data?.message : 'unknown';
-			const failed = `Not sent: ${reason}`;
+			const failed = leaving ? `The decision on ${subject()} was not sent: ${reason}` : `Not sent: ${reason}`;
 			desk.toastError = true;
 			await unlock(failed, returnTo, failed);
 		};

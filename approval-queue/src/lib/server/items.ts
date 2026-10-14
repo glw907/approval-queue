@@ -51,6 +51,8 @@ export interface Item {
 	meta: ItemMeta;
 	content: ItemContent;
 	decided: boolean;
+	/** The `decision.json` the page wrote; absent while the item waits. */
+	decision?: Decision;
 }
 
 async function readJson<T>(path: string): Promise<T | undefined> {
@@ -105,7 +107,7 @@ export async function readItem(root: string, id: string): Promise<Item | undefin
 	const dir = join(root, 'items', id);
 	const meta = await readJson<ItemMeta>(join(dir, 'item.json'));
 	if (!meta) return undefined;
-	const decided = (await readJson(join(dir, 'decision.json'))) !== undefined;
+	const decision = await readJson<Decision>(join(dir, 'decision.json'));
 	let content: ItemContent;
 	if (meta.kind === 'pr') {
 		const pr = await readJson<PrMeta>(join(dir, 'pr.json'));
@@ -122,7 +124,7 @@ export async function readItem(root: string, id: string): Promise<Item | undefin
 		// The command validates the file before writing it; a missing or old-shape file renders as empty.
 		content = { kind: 'triage', headline: '', lede: '', rows: [], ...(triage && !Array.isArray(triage) && triage) };
 	}
-	return { meta, content, decided };
+	return { meta, content, decided: decision !== undefined, ...(decision && { decision }) };
 }
 
 /** Writes `decision.json` through a temp file in the item directory, so the waiting command never reads a partial file. */

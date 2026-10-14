@@ -1,4 +1,5 @@
 import type { KeyAction } from '#lib/keys.ts';
+import type { Row } from '#lib/triage.ts';
 
 /**
  * State the layout, the open item, and the key handler share. The layout owns the keys and the
@@ -25,6 +26,11 @@ class Desk {
 	handlers: Partial<Record<KeyAction, () => void>> = {};
 	/** Cancels the hold in progress; null when none is counting. */
 	undo: (() => void) | null = null;
+	/**
+	 * Unsent triage calls by item id. The item panel is rebuilt for every item, so calls made
+	 * before opening another item live here until they are submitted.
+	 */
+	drafts = new Map<string, Row[]>();
 
 	/** Blanks the region first so a repeated message is read again. */
 	announce(message: string) {
