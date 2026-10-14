@@ -151,10 +151,16 @@ bash "$SCRIPT" design owner/repo T1 "$root/design.md" >/dev/null 2>&1 &
 p1=$!
 bash "$SCRIPT" design owner/repo T2 "$root/design.md" >/dev/null 2>&1 &
 p2=$!
+# The opened tab polls like a real one, so a command that queued its item after the first
+# stamp of tab.seen still finds the tab inside its 5-second wait.
+wait_for "$root/firefox.record"
+( while :; do touch "$state/tab.seen"; sleep 0.5; done ) &
+poller=$!
 for _ in $(seq 50); do [ "$(ls "$state"/items/*/item.json 2>/dev/null | wc -l)" = 2 ] && break; sleep 0.1; done
 sleep 1
 for d in "$state"/items/*/; do printf '{"decision":"approve"}\n' >"$d/decision.json"; done
 wait "$p1" "$p2"
+kill "$poller"; wait "$poller" 2>/dev/null
 assert_eq "$(wc -l <"$root/firefox.record" 2>/dev/null)" "1" "concurrent: tabs opened"
 
 # TERM to a waiting command: exit 143, no item.json.
