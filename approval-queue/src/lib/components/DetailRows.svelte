@@ -1,6 +1,7 @@
 <!-- @component
 The brief's detail sections as chevron rows under a "Details" eyebrow: each row shows the section's
-name and first sentence, and opens to the rest. Renders nothing when the brief has none.
+name and first sentence, and opens to the rest. A section that opens with a table shows its
+name alone. Renders nothing when the brief has none.
 -->
 <script lang="ts">
 	import Disclosure from './Disclosure.svelte';
@@ -32,8 +33,24 @@ name and first sentence, and opens to the rest. Renders nothing when the brief h
 	}
 	.desk-code :global(p),
 	.desk-code :global(ul),
-	.desk-code :global(ol) {
+	.desk-code :global(ol),
+	.desk-code :global(table) {
 		margin: 0.45rem 0;
+	}
+	.desk-code :global(table) {
+		border-collapse: collapse;
+		width: 100%;
+	}
+	.desk-code :global(th),
+	.desk-code :global(td) {
+		border-bottom: 1px solid var(--color-base-300);
+		padding: 4px 10px 4px 0;
+		text-align: left;
+		vertical-align: top;
+	}
+	.desk-code :global(th) {
+		font-weight: 600;
+		color: var(--color-muted);
 	}
 	.desk-code > :global(:first-child) {
 		margin-top: 0;

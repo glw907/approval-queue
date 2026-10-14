@@ -36,6 +36,25 @@ describe('detail sections and the one-block sections', () => {
 		expect(commands.body).toContain('A closing paragraph.');
 	});
 
+	it('gives a section that opens with a table no summary and keeps the table whole', () => {
+		const table = '| Row | Value |\n| --- | --- |\n| Close | review, gate, push |';
+		const result = parseBrief(brief(`\n### Score\n\n${table}\n\nOne note after it.`));
+		expect(result.ok).toBe(true);
+		if (!result.ok) return;
+		const [score] = result.brief.details;
+		expect(score.summary).toBe('');
+		expect(score.body).toBe(`${table}\n\nOne note after it.`);
+	});
+
+	it('keeps a table that follows the opening paragraph on its own lines', () => {
+		const result = parseBrief(brief('\n### Score\n\nThe pass ran clean.\n| Row | Value |\n| --- | --- |\n| Close | push |'));
+		expect(result.ok).toBe(true);
+		if (!result.ok) return;
+		const [score] = result.brief.details;
+		expect(score.summary).toBe('The pass ran clean.');
+		expect(score.body).toBe('The pass ran clean.\n\n| Row | Value |\n| --- | --- |\n| Close | push |');
+	});
+
 	it('refuses text after the one list or paragraph, since the page would drop it', () => {
 		for (const extra of [
 			'\n### Worth knowing\n\nOne.\n\nTwo.',

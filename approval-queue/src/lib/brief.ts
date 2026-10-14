@@ -71,7 +71,7 @@ interface Line {
 	fenced: boolean;
 }
 
-type BlockKind = 'paragraph' | 'bullets' | 'numbers' | 'other';
+type BlockKind = 'paragraph' | 'bullets' | 'numbers' | 'table' | 'other';
 
 interface Block {
 	kind: BlockKind;
@@ -81,6 +81,7 @@ interface Block {
 const FENCE = /^\s{0,3}(```|~~~)/;
 const BULLET = /^\s{0,3}[-*+]\s+/;
 const NUMBER = /^\s{0,3}\d+[.)]\s+/;
+const TABLE = /^\s{0,3}\|/;
 
 function scan(text: string): Line[] {
 	let open: string | null = null;
@@ -100,6 +101,7 @@ const isHeading = (line: Line, level: '## ' | '### ') => !line.fenced && line.te
 function classify(line: string): BlockKind {
 	if (BULLET.test(line)) return 'bullets';
 	if (NUMBER.test(line)) return 'numbers';
+	if (TABLE.test(line)) return 'table';
 	return 'paragraph';
 }
 
@@ -270,8 +272,11 @@ export function parseBrief(markdown: string): Result<{ brief: Brief }> {
 			if (block) brief.decides.push(block);
 		} else if (/^decide\s*:/i.test(heading)) {
 			errors.push('write it as `### Decide: <title>`');
+		} else if (first?.kind === 'table') {
+			// A table has no first sentence to show on the closed row, so the row shows its name alone.
+			brief.details.push({ label: heading, summary: '', body: found.map((b) => b.lines.join('\n')).join('\n\n') });
 		} else if (first?.kind !== 'paragraph') {
-			errors.push(`\`### ${heading}\` must open with a paragraph, whose first sentence is its summary`);
+			errors.push(`\`### ${heading}\` must open with a paragraph, whose first sentence is its summary, or a table`);
 		} else {
 			const lead = paragraphText(first);
 			// The first paragraph is joined to one line so its first sentence matches the summary; the
