@@ -3,16 +3,15 @@ A PR in the order its reader needs it: the headline block (headline, lede, what 
 does, and one footnote), the "Decide first" cards, the brief's detail rows, then the evidence rows.
 Color marks only the two must-act alert tints and the diff signs.
 
-The cards' radios sit here but belong to the decision form in `ItemPanel` (`form="decision-form"`),
-and `picks` is bound to the panel so its bar can unlock Approve. A PR whose body has no brief shows
-its title and the rows it still has.
+`picks` passes through to `DecideCards` and is bound up to the panel so its bar can unlock Approve.
+A PR whose body has no brief shows its title and the rows it still has.
 -->
 <script lang="ts">
 	import { tick } from 'svelte';
-	import { gate } from '#lib/cards.ts';
 	import { desk } from '#lib/desk.svelte.ts';
 	import type { PageData } from '../../routes/item/[id=id]/$types';
 	import BriefBlock from './BriefBlock.svelte';
+	import DecideCards from './DecideCards.svelte';
 	import DetailRows from './DetailRows.svelte';
 	import Disclosure from './Disclosure.svelte';
 
@@ -49,7 +48,6 @@ its title and the rows it still has.
 			: `${data.totals.files} in ${data.groups.length} ${plural(data.groups.length, 'group', 'groups')}`
 	);
 	const allOpen = $derived(shown.every((g) => groupOpen[g.name]));
-	const left = $derived(gate(data.cards, picks).open.length);
 	const checksTotal = $derived(data.checks.rows.length);
 	const checksSummaryText = $derived(
 		checksTotal === 0
@@ -89,9 +87,6 @@ its title and the rows it still has.
 		filter?.blur();
 	}
 
-	/** A source line ends in a full stop; a session's own text may already carry one. */
-	const stop = (text: string) => (/[.!?]$/.test(text) ? text : `${text}.`);
-
 	function split(path: string) {
 		const at = path.lastIndexOf('/') + 1;
 		return [path.slice(0, at), path.slice(at)];
@@ -114,66 +109,7 @@ its title and the rows it still has.
 	worthKnowing={data.worthKnowing}
 />
 
-{#if data.cards.length}
-	<section class="mt-8 space-y-3" aria-labelledby="decide-h">
-		<h2 id="decide-h" class="mb-3 flex items-baseline gap-3 text-base font-semibold">
-			Decide first
-			<span class="text-sm font-normal text-(--color-muted)">{left} of {data.cards.length} left</span>
-		</h2>
-		{#each data.cards as card, i (i)}
-			{@const error = card.kind === 'check' || card.kind === 'review'}
-			<section
-				id="card-{i}"
-				aria-labelledby="card-{i}-title"
-				class={['alert alert-soft items-start', error ? 'alert-error bg-error/7' : 'alert-warning bg-warning/10']}
-			>
-				{#if error}
-					<svg class="mt-0.5 size-5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 2 20h20L12 3zM12 10v4M12 17h.01" /></svg>
-				{:else}
-					<svg class="mt-0.5 size-5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M12 11v5M12 8h.01" /></svg>
-				{/if}
-				<div class="text-base-content">
-					<div class="flex items-center gap-2">
-						<h3 id="card-{i}-title" class="text-base font-semibold">{card.title}</h3>
-						{#if picks[i] !== undefined}
-							<span class="badge badge-ghost badge-sm">
-								<svg class="size-3 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 5 5 9-10" /></svg>
-								Decided
-							</span>
-						{/if}
-					</div>
-					{#if card.kind === 'before-merge'}
-						<div class="desk-md desk-card mt-1 max-w-[70ch] text-pretty">{@html card.html}</div>
-						<p class="mt-1 text-[0.95rem] text-(--color-muted)">{card.source}.</p>
-					{:else}
-						<p class="mt-1 max-w-[70ch] text-[0.95rem] leading-relaxed text-pretty">
-							{@html card.html}
-							<span class="text-(--color-muted)">{stop(card.source)}</span>
-						</p>
-					{/if}
-					<div
-						class="join mt-3 rounded-field border border-base-300 bg-base-100 max-sm:join-vertical"
-						role="radiogroup"
-						aria-labelledby="card-{i}-title"
-					>
-						{#each card.choices as choice, j (j)}
-							<input
-								class="join-item btn btn-sm checked:border-base-content checked:bg-base-content checked:text-base-100"
-								type="radio"
-								name="c{i}"
-								value={j}
-								form="decision-form"
-								aria-label={choice.recommended ? `${choice.label} (recommended)` : choice.label}
-								disabled={desk.held || data.decided}
-								bind:group={picks[i]}
-							/>
-						{/each}
-					</div>
-				</div>
-			</section>
-		{/each}
-	</section>
-{/if}
+<DecideCards cards={data.cards} bind:picks decided={data.decided} />
 
 <DetailRows details={data.details} />
 

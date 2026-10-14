@@ -21,6 +21,7 @@ server named, replacing the history entry so the tab stays script-closable.
 	import { changedCount, seedRows, type Row } from '#lib/triage.ts';
 	import type { PageData } from '../../routes/item/[id=id]/$types';
 	import BriefBlock from './BriefBlock.svelte';
+	import DecideCards from './DecideCards.svelte';
 	import DesignView from './DesignView.svelte';
 	import DetailRows from './DetailRows.svelte';
 	import PrView from './PrView.svelte';
@@ -59,7 +60,7 @@ server named, replacing the history entry so the tab stays script-closable.
 
 	// A card's pick is its choice's index; Approve unlocks once every card has one and none sends back.
 	let picks = $state<Array<number | undefined>>([]);
-	const cards = $derived(data.kind === 'pr' ? data.cards : []);
+	const cards = $derived(data.kind === 'triage' ? [] : data.cards);
 	const decided = $derived(gate(cards, picks));
 	const approvable = $derived(!decided.locked);
 	const tip = $derived(!approvable && decided.open.length ? `Decide ${decided.open[0].title} first` : undefined);
@@ -245,6 +246,7 @@ server named, replacing the history entry so the tab stays script-closable.
 				ifYouApprove={data.ifYouApprove}
 				worthKnowing={data.worthKnowing}
 			/>
+			<DecideCards cards={data.cards} bind:picks decided={data.decided} />
 			<DetailRows details={data.details} />
 			<div class="mt-10"><DesignView docHtml={data.docHtml} /></div>
 		{:else}

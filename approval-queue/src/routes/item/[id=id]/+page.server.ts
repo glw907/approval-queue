@@ -1,7 +1,7 @@
 import { APPROVAL_QUEUE_STATE } from '$app/env/private';
 import { error, fail } from '@sveltejs/kit';
 import { parseBrief, type Brief } from '#lib/brief.ts';
-import { cardsFor, fingerprint, readChoices } from '#lib/cards.ts';
+import { cardsFor, decideCards, fingerprint, readChoices, type Card } from '#lib/cards.ts';
 import { fileGroups } from '#lib/diff.ts';
 import { render, renderInline } from '#lib/markdown.ts';
 import { checksSummary, reviewSection, reviewVerdict, technicalNotes, withoutBrief } from '#lib/pr-summary.ts';
@@ -34,6 +34,10 @@ async function decide(id: string, decision: Decision) {
 	await writeDecision(APPROVAL_QUEUE_STATE, id, decision);
 	return { next: next ? `/item/${next.id}` : null };
 }
+
+/** Cards with the HTML the page shows; a before-merge card holds the session's own Markdown steps. */
+const withHtml = (cards: Card[]) =>
+	cards.map((card) => ({ ...card, html: card.kind === 'before-merge' ? render(card.text) : renderInline(card.text) }));
 
 /** The brief's detail sections as rendered rows; the open body drops the first sentence the closed row already shows. */
 function detailRows(brief: Brief | null) {
@@ -71,10 +75,7 @@ export const load: PageServerLoad = async ({ params }) => {
 			ifYouApprove: (brief?.ifYouApprove ?? []).map(renderInline),
 			worthKnowing: brief?.worthKnowing === undefined ? null : renderInline(brief.worthKnowing),
 			details: detailRows(brief),
-			cards: cardsFor(content.body, content.pr?.statusCheckRollup).map((card) => ({
-				...card,
-				html: card.kind === 'before-merge' ? render(card.text) : renderInline(card.text)
-			})),
+			cards: withHtml(cardsFor(content.body, content.pr?.statusCheckRollup)),
 			reviewHtml: review === null ? null : render(review),
 			technicalHtml: notes === '' ? null : render(notes),
 			groups,
@@ -99,6 +100,7 @@ export const load: PageServerLoad = async ({ params }) => {
 			ifYouApprove: (brief?.ifYouApprove ?? []).map(renderInline),
 			worthKnowing: brief?.worthKnowing === undefined ? null : renderInline(brief.worthKnowing),
 			details: detailRows(brief),
+			cards: withHtml(decideCards(content.doc)),
 			docHtml: render(withoutBrief(content.doc)),
 			minutes: Math.ceil(words / 230)
 		};
@@ -131,12 +133,12 @@ export const actions: Actions = {
 		const item = await readWaiting(params.id);
 		const { content } = item;
 		if (content.kind === 'triage') return fail(400, { message: 'Nothing to approve' });
-		if (content.kind === 'design') return decide(params.id, { decision: 'approve' });
 		// The page disables Approve, but a post can still arrive without it; the server rebuilds the
 		// cards from the body and checks every pick itself.
 		const form = await request.formData().catch(() => null);
 		if (!form) return fail(400, { message: 'Not a form post' });
-		const cards = cardsFor(content.body, content.pr?.statusCheckRollup);
+		const cards =
+			content.kind === 'design' ? decideCards(content.doc) : cardsFor(content.body, content.pr?.statusCheckRollup);
 		// Picks are indexes into this list, so a list that changed since the page loaded must not be matched by position.
 		if ((form.get('cards') ?? '') !== fingerprint(cards)) return fail(400, { message: 'The decisions changed; reload the page' });
 		const picked = readChoices(cards, (field) => form.get(field));
