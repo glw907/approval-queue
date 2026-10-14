@@ -2,7 +2,7 @@
 # install.test.sh: prove scripts/install.sh against a temp HOME, never the real one.
 set -uo pipefail
 cd "$(dirname "$0")/.."
-here="$(pwd)"
+here="$(pwd -P)"
 fail=0
 root="$(mktemp -d)"
 trap 'rm -rf "$root"' EXIT
