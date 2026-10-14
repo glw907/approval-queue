@@ -87,12 +87,15 @@ server named, replacing the history entry so the tab stays script-closable.
 		}
 		return () => {
 			desk.handlers = {};
-			desk.noteOpen = false;
 			desk.page = 'design';
 		};
 	});
 
-	// Its own effect: a pick must not re-run the handler registration, whose teardown clears every handler and the note.
+	// The queue poll hands the panel fresh `data` every two seconds and re-runs the effect above,
+	// so the note closes only when the panel itself goes, on opening another item.
+	$effect(() => () => (desk.noteOpen = false));
+
+	// Its own effect: a pick must not re-run the handler registration, whose teardown clears every handler.
 	$effect(() => {
 		desk.approveLocked = decided.locked;
 		return () => (desk.approveLocked = false);
