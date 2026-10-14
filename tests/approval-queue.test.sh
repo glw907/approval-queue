@@ -206,7 +206,8 @@ printf '[{"item":"a","disposition":"now","reason":"r"}]\n' >"$root/triage-old.js
 refuse "old triage shape" 'old triage shape' bash "$SCRIPT" triage owner/repo T "$root/triage-old.json"
 
 # Every exemplar in the register passes the check, run with no approval-queue/node_modules in play.
-register="claude/.claude/docs/voice/approval-brief.md"
+register="${REGISTER:-$HOME/.claude/docs/voice/approval-brief.md}"
+[ -r "$register" ] || { echo "FAIL: brief register not readable at $register (set REGISTER)"; exit 1; }
 n=0
 while IFS=$'\t' read -r fence file; do
   n=$((n + 1))
