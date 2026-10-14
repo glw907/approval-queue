@@ -38,6 +38,11 @@ const PR41_META = fixture('pr-41-pr.json');
 const PR41_VARIANT = `${PR41.replace('## Before merge', `${fixture('pr-41-variant.md')}## Before merge`)}\n## Review\n\nA gap. Verdict: \`fix\`.\n`;
 const FP41 = 'check:A check failed|before-merge:A step must run before merging';
 const FP_VARIANT = 'check:A check failed|review:The review asks for a fix|before-merge:A step must run before merging|decide:Which branch name to keep';
+/** PR #40's brief as a design doc, with T5's Decide block before its Worth knowing. */
+const DESIGN_DECIDE = `# A design\n\n${fixture('pr-40-brief.md')
+	.replace('# Send every session-opened PR to approval\n\n', '')
+	.replace('### Worth knowing', `${fixture('pr-41-variant.md')}\n### Worth knowing`)}\n## Design\n\nThe plan itself.\n`;
+const FP_DESIGN = 'decide:Which branch name to keep';
 const seedPr41 = (body = PR41) =>
 	seed(ID, { kind: 'pr', head: 'abc', number: 41 }, { 'body.md': body, 'diff.patch': '+a', 'pr.json': PR41_META });
 
@@ -64,10 +69,36 @@ describe('actions', () => {
 		expect(await decision()).toEqual({ decision: 'approve', choices: [] });
 	});
 
-	it('approve on a design writes no choices', async () => {
+	it('approve on a design with no Decide block writes no choices', async () => {
 		await seed(ID, { kind: 'design', file: 'd.md' }, { 'doc.md': '# d' });
-		await call('approve');
-		expect(await decision()).toEqual({ decision: 'approve' });
+		await call('approve', [['cards', '']]);
+		expect(await decision()).toEqual({ decision: 'approve', choices: [] });
+	});
+
+	describe('a design with a Decide block', () => {
+		const seedDesign = () => seed(ID, { kind: 'design', file: 'd.md' }, { 'doc.md': DESIGN_DECIDE });
+		const noDecision = () => expect(readFile(join(state.root, 'items', ID, 'decision.json'), 'utf8')).rejects.toThrow();
+
+		it('records the pick as the choice', async () => {
+			await seedDesign();
+			await call('approve', [['cards', FP_DESIGN], ['c0', '1']]);
+			expect(await decision()).toEqual({
+				decision: 'approve',
+				choices: [{ title: 'Which branch name to keep', choice: 'Rename it' }]
+			});
+		});
+
+		it('refuses an approve with no pick', async () => {
+			await seedDesign();
+			expect(await call('approve', [['cards', FP_DESIGN]])).toMatchObject({ status: 400 });
+			await noDecision();
+		});
+
+		it('refuses an approve made against a different card list', async () => {
+			await seedDesign();
+			expect(await call('approve', [['cards', ''], ['c0', '1']])).toMatchObject({ status: 400 });
+			await noDecision();
+		});
 	});
 
 	describe('the Approve lock', () => {
@@ -336,6 +367,21 @@ describe('load', () => {
 				{ action: 'three', proposed: 'drop', disposition: 'now', note: '' }
 			]
 		});
+	});
+
+	it('returns a design with a card for each Decide block and none of the PR-only cards', async () => {
+		await seed(ID, { kind: 'design', file: 'd.md' }, { 'doc.md': DESIGN_DECIDE });
+		const data = (await load({ params: { id: ID } } as never)) as unknown as {
+			cards: { kind: string; title: string; html: string; choices: { label: string; recommended: boolean }[] }[];
+		};
+		expect(data.cards.map((c) => `${c.kind}:${c.title}`)).toEqual(['decide:Which branch name to keep']);
+		expect(data.cards[0].html).toContain('named for the old tool');
+		expect(data.cards[0].choices.map((c) => c.recommended)).toEqual([false, true]);
+	});
+
+	it('returns a design with no cards when its doc has no brief', async () => {
+		await seed(ID, { kind: 'design', file: 'd.md' }, { 'doc.md': '# d' });
+		expect(await load({ params: { id: ID } } as never)).toMatchObject({ kind: 'design', cards: [] });
 	});
 
 	it('returns a design whose brief parses into the headline block and leaves the brief out of the document', async () => {

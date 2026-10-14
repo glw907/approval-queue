@@ -64,19 +64,20 @@ export function cardsFor(body: string, rollup: Parameters<typeof checksSummary>[
 			choices: [choice('The session runs it, then merges'), choice('I’ll run it myself')]
 		});
 	}
-	const brief = parseBrief(body);
-	if (brief.ok) {
-		for (const block of brief.brief.decides) {
-			cards.push({
-				kind: 'decide',
-				title: block.title,
-				source: block.source ?? 'From the session',
-				text: block.text,
-				choices: block.choices.map((c) => choice(c.label, false, c.recommended))
-			});
-		}
-	}
-	return cards;
+	return [...cards, ...decideCards(body)];
+}
+
+/** The cards a brief's `### Decide:` blocks raise; a design item has only these. A text with no brief raises none. */
+export function decideCards(text: string): Card[] {
+	const brief = parseBrief(text);
+	if (!brief.ok) return [];
+	return brief.brief.decides.map((block) => ({
+		kind: 'decide',
+		title: block.title,
+		source: block.source ?? 'From the session',
+		text: block.text,
+		choices: block.choices.map((c) => choice(c.label, false, c.recommended))
+	}));
 }
 
 /** Names the card list a page showed, so a post made against a different list is refused rather than shifted. */
