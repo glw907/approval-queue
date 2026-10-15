@@ -1,0 +1,7 @@
+/* Copied from cairn-themes/survey-theme/core/survey.css at commit dea983976f4d7951d3e2a7395938859a978d4bd8. Do not edit. */
+/* Survey core: plain daisyUI theme variables and site- classes.
+   Imports nothing from cairn and does not import Tailwind or activate daisyUI;
+   the consumer's entry sheet does both before importing this file. */
+@import "./fonts.css";
+@import "./theme.css";
+@import "./components.css";

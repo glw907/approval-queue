@@ -1,0 +1,8 @@
+/* Copied from cairn-themes/survey-theme/core/fonts.css at commit dea983976f4d7951d3e2a7395938859a978d4bd8. Do not edit. */
+/* Survey fonts, self-hosted from Fontsource. The consumer installs the three packages. */
+@import "@fontsource/spectral/400.css";
+@import "@fontsource/spectral/400-italic.css";
+@import "@fontsource/spectral/500.css";
+@import "@fontsource/spectral/600.css";
+@import "@fontsource-variable/karla";
+@import "@fontsource/monaspace-neon/400.css";

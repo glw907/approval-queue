@@ -1,0 +1,114 @@
+#!/usr/bin/env bash
+# approval-queue: put one item (a PR, a design, a triage list) in front of Geoff in the Design & PR Approvals app
+# and print his decision as JSON on stdout. Build, server, and Firefox output go to server.log.
+set -euo pipefail
+
+usage="usage: approval-queue <pr|design|triage> <repo> <title> <source>"
+if [ $# -ne 4 ]; then echo "$usage" >&2; exit 2; fi
+kind=$1 repo=$2 title=$3 source=$4
+case "$kind" in pr | design | triage) ;; *) echo "$usage" >&2; exit 2 ;; esac
+
+root="${XDG_STATE_HOME:-$HOME/.local/state}/approval-queue"
+log="$root/server.log"
+id="$(date +%Y%m%dT%H%M%S)-$$"
+item="$root/items/$id"
+base="http://127.0.0.1:7907"
+mkdir -p "$root"
+: >>"$log"
+
+# A command that leaves without a decision takes its item off the index.
+trap '[ -e "$item/decision.json" ] || rm -f "$item/item.json" "$item/item.json.tmp"; rm -f "$check_body" "$check_err"' EXIT
+trap 'exit 143' TERM HUP INT
+
+app=$(realpath "$(dirname "$(realpath "$0")")/../../../approval-queue")
+# One pair per invocation: a PR hand-over and a triage hand-over run side by side.
+check_body="$root/check-$id.md"
+check_err="$root/check-$id.err"
+
+# check_brief <file>: refuses (exit 2) an item whose brief is missing or incomplete, before any
+# item directory exists, and sets headline. Anything else that fails is a tool failure (exit 1).
+headline=""
+check_brief() {
+  local out rc=0
+  out=$(node "$app/src/check-brief.ts" "$kind" "$1" 2>"$check_err") || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    cat "$check_err" >&2
+    [ "$rc" -eq 2 ] || echo "approval-queue: the brief check failed to run" >&2
+    exit "$((rc == 2 ? 2 : 1))"
+  fi
+  headline=$(jq -r '.headline' <<<"$out")
+}
+
+head="" number="" file=""
+case "$kind" in
+  pr)
+    view=$(gh pr view "$source" -R "$repo" --json body,headRefOid,number,url,headRefName,baseRefName,statusCheckRollup)
+    jq -r '.body' <<<"$view" >"$check_body"
+    check_brief "$check_body"
+    mkdir -p "$item"
+    jq -r '.body' <<<"$view" >"$item/body.md"
+    jq 'del(.body, .headRefOid)' <<<"$view" >"$item/pr.json"
+    head=$(jq -r '.headRefOid' <<<"$view")
+    number=$(jq -r '.number' <<<"$view")
+    gh pr diff "$source" -R "$repo" >"$item/diff.patch"
+    ;;
+  design) check_brief "$source"; mkdir -p "$item"; cp "$source" "$item/doc.md"; file=$(basename "$source") ;;
+  triage) check_brief "$source"; mkdir -p "$item"; cp "$source" "$item/triage.json" ;;
+esac
+
+jq -n --arg id "$id" --arg kind "$kind" --arg repo "$repo" --arg title "$title" \
+  --arg created "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg head "$head" \
+  --arg number "$number" --arg file "$file" --arg headline "$headline" \
+  '{id: $id, kind: $kind, repo: $repo, title: $title, created: $created, headline: $headline}
+   + (if $head == "" then {} else {head: $head} end)
+   + (if $number == "" then {} else {number: ($number | tonumber)} end)
+   + (if $file == "" then {} else {file: $file} end)' >"$item/item.json.tmp"
+mv "$item/item.json.tmp" "$item/item.json"
+
+exec 9>"$root/start.lock"
+flock 9
+if ! curl -sf "$base/" >/dev/null 2>&1; then
+  if [ ! -e "$app/build/index.js" ]; then
+    if ! (cd "$app" && npm ci && npm run build) >>"$log" 2>&1; then
+      echo "approval-queue: the first build failed; see $log" >&2
+      exit 1
+    fi
+  fi
+  HOST=127.0.0.1 PORT=7907 APPROVAL_QUEUE_STATE="$root" setsid -f node "$app/build" 9>&- >>"$log" 2>&1
+  up=""
+  for _ in $(seq 100); do
+    if curl -sf "$base/" >/dev/null 2>&1; then up=1; break; fi
+    sleep 0.1
+  done
+  if [ -z "$up" ]; then echo "approval-queue: the app did not answer in 10 seconds; see $log" >&2; exit 1; fi
+fi
+
+if ! curl -sf "$base/item/$id" >/dev/null 2>&1; then
+  echo "approval-queue: an app on 7907 does not serve this state root; stop it with pkill -f 'approval-queue/[b]uild'" >&2
+  exit 1
+fi
+
+# One tab serves the whole queue. An open tab polls every 2 seconds and each poll touches tab.seen,
+# so a tab.seen under 5 seconds old marks a live tab, and a poll after item.json proves it holds
+# this item. With no such poll, the command opens a tab and stamps tab.seen itself, so a command
+# waiting on the lock hands its item to that tab instead of opening another.
+seen="$root/tab.seen"
+shown=""
+if [ -n "$(find "$seen" -newermt '-5 seconds' 2>/dev/null)" ]; then
+  for _ in $(seq 50); do
+    if [ "$seen" -nt "$item/item.json" ]; then shown=1; break; fi
+    sleep 0.1
+  done
+fi
+if [ -z "$shown" ]; then
+  setsid -f firefox --new-tab "$base/item/$id" >>"$log" 2>&1
+  touch "$seen"
+fi
+exec 9>&-
+
+while [ ! -e "$item/decision.json" ]; do sleep 1; done
+if [ "$kind" = pr ]; then
+  jq -c --arg h "$head" '. + {head: $h}' "$item/decision.json"
+else
+  jq -c . "$item/decision.json"
+fi
