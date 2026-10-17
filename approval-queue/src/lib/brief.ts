@@ -145,7 +145,7 @@ function listItems(block: Block): string[] {
 }
 
 /** Sentences by `Intl.Segmenter`, which keeps "e.g.", "U.S.", and "PR #40." whole. */
-function sentences(text: string): string[] {
+export function sentences(text: string): string[] {
 	const parts = [...new Intl.Segmenter('en', { granularity: 'sentence' }).segment(text)];
 	return parts.map((p) => p.segment.trim()).filter((s) => s !== '');
 }
