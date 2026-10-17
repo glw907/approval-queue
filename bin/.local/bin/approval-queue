@@ -70,15 +70,44 @@ fetch_pr() {
   exit 1
 }
 
-# queue_packet: parses the packet, fetches every part under the queue lock, and writes the item
-# directory, item.json last. Sets repo and leaves the lock released.
+register='~/.claude/docs/voice/approval-brief.md'
+
+# refuse_packet <defect>: prints the defect, logs {time, initiative, defect} to refusals.jsonl, exit 2.
+refuse_packet() {
+  printf '%s\n' "$1" >&2
+  jq -nc --arg t "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg i "$initiative" --arg d "$1" \
+    '{time: $t, initiative: $i, defect: $d}' >>"$root/refusals.jsonl"
+  exit 2
+}
+
+# waiting_item <ref>: prints the id of a waiting item (one with an item.json and no decision.json)
+# that holds the PR, whether a packet part or a pr-kind item.
+waiting_item() {
+  local f
+  for f in "$root"/items/*/item.json; do
+    [ -e "$f" ] && [ ! -e "$(dirname "$f")/decision.json" ] || continue
+    jq -r --arg ref "$1" 'select((.kind == "packet" and (.refs | index($ref)))
+      or (.kind == "pr" and "\(.repo)#\(.number)" == $ref)) | .id' "$f"
+  done | head -n 1
+}
+
+# queue_packet: parses the packet, fetches every part under the queue lock, checks the PR data, and
+# writes the item directory, item.json last. With --check it stops before writing anything. Sets
+# repo and leaves the lock released.
 queue_packet() {
-  local rc=0 k kind_k owner_k repo_k number_k path_k headline
+  local rc=0 k kind_k owner_k repo_k number_k path_k headline initiative_title="" ref st other defects=()
+  if [ "$initiative" != none ]; then
+    [[ $initiative =~ ^[a-z0-9-]+$ && -e "$projects/initiatives/$initiative/initiative.yaml" ]] \
+      || refuse_packet "the initiative is none or the id of a record: no initiatives/$initiative/initiative.yaml under $projects ($register)"
+    initiative_title=$(sed -nE '/^title:/{s/^title:[[:space:]]*//;s/[[:space:]]+$//;s/^"(.*)"$/\1/;s/^'"'"'(.*)'"'"'$/\1/;p;q}' \
+      "$projects/initiatives/$initiative/initiative.yaml")
+  fi
   node "$app/src/check-brief.ts" packet "$source" >"$fetch.json" 2>"$check_err" || rc=$?
   if [ "$rc" -ne 0 ]; then
+    [ "$rc" -eq 2 ] && refuse_packet "$(cat "$check_err")"
     cat "$check_err" >&2
-    [ "$rc" -eq 2 ] || echo "approval-queue: the packet check failed to run" >&2
-    exit "$((rc == 2 ? 2 : 1))"
+    echo "approval-queue: the packet check failed to run" >&2
+    exit 1
   fi
   mkdir -p "$fetch/parts"
   mv "$fetch.json" "$fetch/packet.json"
@@ -96,15 +125,41 @@ queue_packet() {
     esac
   done < <(jq -r '.parts | to_entries[] | .value.part as $p
     | [.key, $p.kind, ($p.owner // ""), ($p.repo // ""), ($p.number // "" | tostring), ($p.path // "")] | join("\u001f")' "$fetch/packet.json")
+  while IFS=$'\x1f' read -r k ref; do
+    st=$(node "$app/src/check-pr.ts" "$fetch/parts/$k/pr.json" "$fetch/parts/$k/body.md") \
+      || { echo "approval-queue: the PR check failed to run for $ref" >&2; exit 1; }
+    if [ "$(jq -r '.state' <<<"$st")" != OPEN ]; then
+      defects+=("$ref is $(jq -r '.state' <<<"$st"); a merged or closed PR cannot be queued")
+      continue
+    fi
+    other=$(waiting_item "$ref")
+    [ -z "$other" ] || { defects+=("$ref is already in the waiting item $other; decide it first"); continue; }
+    if [ "$(jq -r '.pending' <<<"$st")" -gt 0 ]; then
+      defects+=("$ref has checks still pending; wait for the checks to finish")
+      continue
+    fi
+    if jq -e '(.failed | length) > 0 or .verdict == "fix" or .verdict == "escalate"' <<<"$st" >/dev/null \
+      && ! jq -e --arg r "$ref" 'any(.asks[]; .rule == "gate-failed" and .part.ref == $r)' "$fetch/packet.json" >/dev/null; then
+      defects+=("$ref has a failing check or a review verdict of fix or escalate; a failing gate is an ask with the rule gate-failed naming it")
+    fi
+    if jq -e '.beforeMerge' <<<"$st" >/dev/null \
+      && ! jq -e --arg r "$ref" 'any(.asks[]; .part.ref == $r)' "$fetch/packet.json" >/dev/null; then
+      defects+=("$ref has a Before merge section; a Before merge step is an ask naming the PR")
+    fi
+  done < <(jq -r '.parts | to_entries[] | select(.value.part.kind == "pr") | [.key, .value.part.ref] | join("\u001f")' "$fetch/packet.json")
+  if [ "${#defects[@]}" -gt 0 ]; then
+    refuse_packet "$(printf '%s\n' "${defects[@]}") (see $register)"
+  fi
+  if [ -n "$check" ]; then exit 0; fi
   headline=$(jq -r '.headline' "$fetch/packet.json")
   repo=$(jq -r '[.parts[].part | select(.kind != "step")][0] | "\(.owner)/\(.repo)"' "$fetch/packet.json")
   mkdir -p "$item"
   cp "$source" "$item/packet.md"
   mv "$fetch/packet.json" "$item/packet.json"
   mv "$fetch/parts" "$item/parts"
-  jq -n --arg id "$id" --arg initiative "$initiative" --arg repo "$repo" --arg headline "$headline" \
+  jq -n --arg id "$id" --arg initiative "$initiative" --arg ititle "$initiative_title" --arg repo "$repo" --arg headline "$headline" \
     --arg created "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --slurpfile packet "$item/packet.json" \
-    '{id: $id, kind: "packet", initiative: $initiative, repo: $repo, title: $headline, created: $created,
+    '{id: $id, kind: "packet", initiative: $initiative, initiativeTitle: $ititle, repo: $repo, title: $headline, created: $created,
       headline: $headline, refs: [$packet[0].parts[].part.ref]}' >"$item/item.json.tmp"
   mv "$item/item.json.tmp" "$item/item.json"
   exec 8>&-
@@ -116,6 +171,14 @@ case "$kind" in
     view=$(gh pr view "$source" -R "$repo" --json body,headRefOid,number,url,headRefName,baseRefName,statusCheckRollup)
     jq -r '.body' <<<"$view" >"$check_body"
     check_brief "$check_body"
+    # The lock keeps two commands from both passing the waiting-item check; item.json lands before it drops.
+    exec 8>"$root/queue.lock"
+    flock 8
+    other=$(waiting_item "$repo#$(jq -r '.number' <<<"$view")")
+    if [ -n "$other" ]; then
+      echo "approval-queue: $repo#$(jq -r '.number' <<<"$view") is already in the waiting item $other; decide it first" >&2
+      exit 2
+    fi
     mkdir -p "$item"
     jq -r '.body' <<<"$view" >"$item/body.md"
     jq 'del(.body, .headRefOid)' <<<"$view" >"$item/pr.json"
@@ -137,6 +200,7 @@ if [ "$kind" != packet ]; then
      + (if $number == "" then {} else {number: ($number | tonumber)} end)
      + (if $file == "" then {} else {file: $file} end)' >"$item/item.json.tmp"
   mv "$item/item.json.tmp" "$item/item.json"
+  exec 8>&-
 fi
 
 exec 9>"$root/start.lock"

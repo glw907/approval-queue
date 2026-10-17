@@ -25,6 +25,7 @@ stubs="$root/stubs"
 mkdir -p "$stubs"
 cat >"$stubs/curl" <<'STUB'
 #!/usr/bin/env bash
+echo "$*" >>"$STUB_DIR/curl.record"
 exit 0
 STUB
 cat >"$stubs/firefox" <<'STUB'
@@ -199,6 +200,134 @@ queue design glw907/drafter "A title" "$root/single-design.md" && decide '{"deci
 assert_eq "$(tail -n 1 "$log" | jq -c '[.ref,.kind,.lane,.verdict,.sha256]')" \
   "[\"glw907/drafter:single-design.md\",\"design\",\"single\",\"hold\",\"$(sha256sum "$root/single-design.md" | cut -d' ' -f1)\"]" "design kind: log line"
 assert_eq "$(($(log_lines) - before))" "2" "single kinds: log line count"
+
+# item.json names the packet kind, the initiative and its title, the lead repo, and every ref.
+queue packet drafter "$PACKET"
+assert_eq "$(jq -c '[.kind,.initiative,.initiativeTitle,.repo,.refs]' "$dir/item.json")" \
+  '["packet","drafter","Drafter release notes","glw907/drafter",["glw907/drafter#41","glw907/drafter#42","glw907/drafter#43","step:1"]]' "item.json fields"
+assert_eq "$(jq -r .headline "$dir/item.json")" "$(head -1 "$PACKET" | sed 's/^# //')" "item.json headline"
+assert_eq "$(jq -r .head "$dir/parts/1/pr.json")" "bbb222" "item: part 1 head"
+assert_eq "$(cat "$dir/parts/1/diff.patch")" "diff --git a/pr42 b/pr42" "item: part 1 diff"
+[ -s "$dir/parts/1/body.md" ] && cmp -s "$PACKET" "$dir/packet.md" || { echo "FAIL: item: body or packet.md missing"; fail=1; }
+assert_eq "$(jq -r .headline "$dir/packet.json")" "$(jq -r .headline "$dir/item.json")" "item: packet.json parse"
+decide "$GOOD"
+
+# A packet with initiative none queues with no initiative title.
+queue packet none "$PACKET"
+assert_eq "$(jq -c '[.initiative,.initiativeTitle]' "$dir/item.json")" '["none",""]' "initiative none"
+decide "$GOOD"
+
+# refuse <label> <want> <command args>: the command exits 2 naming the defect, queues nothing,
+# and logs {time, initiative, defect} to refusals.jsonl.
+refuse() {
+  local label=$1 want=$2 initiative=$3 got
+  shift 3
+  rm -rf "$state/items" "$root/firefox.record" "$state/refusals.jsonl"
+  timeout 20 bash "$SCRIPT" packet "$@" >"$root/out" 2>"$root/err"
+  assert_eq "$?" "2" "$label: exit code"
+  grep -qF -- "$want" "$root/err" || { echo "FAIL: $label: message lacks '$want': $(cat "$root/err")"; fail=1; }
+  assert_eq "$(wc -c <"$root/out")" "0" "$label: stdout"
+  ! compgen -G "$state/items/*" >/dev/null || { echo "FAIL: $label: left an item directory"; fail=1; }
+  got=$(tail -n 1 "$state/refusals.jsonl" 2>/dev/null)
+  assert_eq "$(jq -r .initiative <<<"$got")" "$initiative" "$label: refusals.jsonl initiative"
+  jq -e --arg w "$want" '.defect | contains($w)' <<<"$got" >/dev/null 2>&1 || { echo "FAIL: $label: refusals.jsonl defect lacks '$want': $got"; fail=1; }
+  jq -e '.time | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T")' <<<"$got" >/dev/null 2>&1 || { echo "FAIL: $label: refusals.jsonl time"; fail=1; }
+}
+# usage_refusal <label> <command args>: a malformed command line exits 2 before anything else.
+usage_refusal() {
+  local label=$1
+  shift
+  timeout 20 bash "$SCRIPT" "$@" >"$root/out" 2>"$root/err"
+  assert_eq "$?" "2" "$label: exit code"
+}
+
+# The initiative is none or names a directory holding initiative.yaml.
+refuse "initiative with a capital" "initiative" Drafter Drafter "$PACKET"
+refuse "initiative with a path" "initiative" ../drafter ../drafter "$PACKET"
+refuse "initiative with no record" "initiative" nosuch nosuch "$PACKET"
+mkdir -p "$APPROVAL_QUEUE_PROJECTS/initiatives/norecord"
+refuse "initiative directory with no initiative.yaml" "initiative" norecord norecord "$PACKET"
+usage_refusal "packet without a file" packet drafter
+usage_refusal "packet --check without a file" packet --check drafter
+
+# A defect in the file alone is a parser refusal with the register path.
+sed '1s/.*/# One sentence. Then another./' "$PACKET" >"$root/bad-headline.md"
+refuse "parser refusal" "the headline is one sentence" drafter drafter "$root/bad-headline.md"
+grep -q 'approval-brief.md' "$root/err" || { echo "FAIL: parser refusal: no register path"; fail=1; }
+
+# End-to-end check 5: once the stub reports #43 MERGED, handing it over again exits 2 naming the state.
+mkpr 43 ccc333 MERGED pass
+refuse "merged PR" "glw907/drafter#43 is MERGED" drafter drafter "$PACKET"
+mkpr 43 ccc333 CLOSED pass
+refuse "closed PR" "glw907/drafter#43 is CLOSED" drafter drafter "$PACKET"
+mkpr 43 ccc333 OPEN pass
+
+# The second states table: pending checks, failing gates, Before merge, and no checks at all.
+mkpr 42 bbb222 OPEN pending
+refuse "pending check" "wait for the checks to finish" drafter drafter "$PACKET"
+mkpr 42 bbb222 OPEN fail
+refuse "failing check with no ask" "a failing gate is an ask" drafter drafter "$PACKET"
+mkpr 42 bbb222 OPEN pass
+jq '.body += "\n## Review\n\nThe review verdict is `fix`.\n"' "$root/pr-42.json" >"$root/pr-42.tmp" && mv "$root/pr-42.tmp" "$root/pr-42.json"
+refuse "review verdict fix with no ask" "a failing gate is an ask" drafter drafter "$PACKET"
+jq '.body = (.body | sub("`fix`"; "`escalate`"))' "$root/pr-42.json" >"$root/pr-42.tmp" && mv "$root/pr-42.tmp" "$root/pr-42.json"
+refuse "review verdict escalate with no ask" "a failing gate is an ask" drafter drafter "$PACKET"
+mkpr 42 bbb222 OPEN pass
+jq '.body += "\n## Before merge\n\n1. Run the migration.\n"' "$root/pr-42.json" >"$root/pr-42.tmp" && mv "$root/pr-42.tmp" "$root/pr-42.json"
+refuse "Before merge with no ask" "a Before merge step is an ask" drafter drafter "$PACKET"
+mkpr 42 bbb222 OPEN none
+queue packet drafter "$PACKET"
+assert_eq "$(jq -c '.statusCheckRollup' "$dir/parts/1/pr.json")" "[]" "no checks: accepted"
+decide "$GOOD"
+mkpr 42 bbb222 OPEN pass
+
+# A PR whose head moves on every fetch exits 1 after three tries, prints nothing, and queues nothing.
+touch "$root/pr-42.moving"; rm -f "$root/pr-42.calls"
+rm -rf "$state/items"
+timeout 20 bash "$SCRIPT" packet drafter "$PACKET" >"$root/out" 2>"$root/err"
+assert_eq "$?" "1" "moving head: exit code"
+assert_eq "$(wc -c <"$root/out")" "0" "moving head: stdout"
+assert_eq "$(cat "$root/pr-42.calls")" "6" "moving head: two views per try, three tries"
+! compgen -G "$state/items/*" >/dev/null || { echo "FAIL: moving head: left an item directory"; fail=1; }
+rm -f "$root/pr-42.moving"
+
+# A PR already in another waiting item is refused, whichever kind queues it.
+queue packet drafter "$PACKET"
+first=$(basename "$dir")
+firstpid=$bgpid
+timeout 20 bash "$SCRIPT" packet drafter "$PACKET" >"$root/out2" 2>"$root/err2"
+assert_eq "$?" "2" "waiting item (packet): exit code"
+grep -q "glw907/drafter#41.*$first" "$root/err2" || { echo "FAIL: waiting item (packet): message lacks the item: $(cat "$root/err2")"; fail=1; }
+timeout 20 bash "$SCRIPT" pr glw907/drafter "A title" 42 >"$root/out2" 2>"$root/err2"
+assert_eq "$?" "2" "waiting item (pr kind): exit code"
+grep -q "glw907/drafter#42.*$first" "$root/err2" || { echo "FAIL: waiting item (pr kind): message lacks the item: $(cat "$root/err2")"; fail=1; }
+assert_eq "$(ls "$state/items" | wc -l)" "1" "waiting item: no second item directory"
+decide "$GOOD"
+# Once decided, the PRs are free again.
+queue packet drafter "$PACKET"
+decide "$GOOD"
+
+# A pr-kind item in the queue blocks a packet naming its PR.
+queue pr glw907/drafter "A title" 42
+refuse_dir=$dir
+timeout 20 bash "$SCRIPT" packet drafter "$PACKET" >"$root/out2" 2>"$root/err2"
+assert_eq "$?" "2" "waiting pr item: exit code"
+grep -q "glw907/drafter#42.*$(basename "$refuse_dir")" "$root/err2" || { echo "FAIL: waiting pr item: message lacks the item: $(cat "$root/err2")"; fail=1; }
+decide '{"decision":"approve"}'
+
+# --check runs the checks and queues nothing: no item, no tab, no app start.
+rm -rf "$state/items" "$state/tab.seen" "$state/start.lock" "$root/firefox.record" "$root/curl.record"
+timeout 20 bash "$SCRIPT" packet --check drafter "$PACKET" >"$root/out" 2>"$root/err"
+assert_eq "$?" "0" "--check: exit code"
+assert_eq "$(wc -c <"$root/out")" "0" "--check: stdout"
+! compgen -G "$state/items/*" >/dev/null || { echo "FAIL: --check: left an item directory"; fail=1; }
+[ ! -e "$root/firefox.record" ] && [ ! -e "$state/tab.seen" ] || { echo "FAIL: --check: opened a tab"; fail=1; }
+[ ! -e "$root/curl.record" ] || { echo "FAIL: --check: reached for the app"; fail=1; }
+[ ! -e "$state/start.lock" ] || { echo "FAIL: --check: took the app start lock"; fail=1; }
+mkpr 43 ccc333 MERGED pass
+timeout 20 bash "$SCRIPT" packet --check drafter "$PACKET" >"$root/out" 2>"$root/err"
+assert_eq "$?" "2" "--check on a refused packet: exit code"
+mkpr 43 ccc333 OPEN pass
 
 live_after=$(stat -c %s "$live_log" 2>/dev/null || echo none)
 assert_eq "$live_after" "$live_before" "live decisions.jsonl untouched"
