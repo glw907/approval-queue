@@ -331,6 +331,11 @@ packet_decision() {
         esac
       done | jq -s .
   )
+  # jq runs its program once per JSON value, so a file holding none or two must be refused first.
+  if [ "$(jq -s 'length' "$item/decision.json" 2>/dev/null)" != 1 ]; then
+    echo "approval-queue: decision.json does not hold exactly one decision; nothing was logged" >&2
+    exit 1
+  fi
   if ! res=$(jq -c --slurpfile pk "$item/packet.json" --argjson fx "$facts" \
     --arg t "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg id "$id" --arg ini "$(jq -r '.initiative' "$item/item.json")" \
     "$decision_program" "$item/decision.json" 2>/dev/null); then
