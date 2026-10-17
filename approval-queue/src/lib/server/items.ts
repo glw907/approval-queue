@@ -28,6 +28,10 @@ export interface ItemMeta {
 	number?: number;
 	/** A design's source file name; absent on an item the old command wrote. */
 	file?: string;
+	/** A packet's initiative id, or `none`; the sidebar and the board group by it. */
+	initiative?: string;
+	/** The initiative record's title; empty for `none`. */
+	initiativeTitle?: string;
 }
 
 /** The `pr.json` fields: what `gh pr view` returns besides the body and head commit. */

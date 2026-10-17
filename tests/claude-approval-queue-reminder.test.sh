@@ -24,11 +24,11 @@ assert_eq "$rc" "0" "created: exit 0"
 assert_eq "$(jq -r .hookSpecificOutput.hookEventName <<<"$out")" "PostToolUse" "created: event name"
 ctx=$(jq -r .hookSpecificOutput.additionalContext <<<"$out")
 case "$ctx" in
-  *'approval-queue pr glw907/workstation "<the PR title>" 38'*) ;;
-  *) echo "FAIL: created: context lacks the approval-queue command: $ctx"; fail=1 ;;
+  *'`approval-packet` skill'*'`glw907/workstation#38`'*'approval-queue packet <initiative> <file>'*) ;;
+  *) echo "FAIL: created: context lacks the packet hand-over: $ctx"; fail=1 ;;
 esac
 case "$ctx" in
-  *'gh pr merge 38 --repo glw907/workstation --merge --match-head-commit <head>'*) ;;
+  *'gh pr merge <number> --repo <repo> --merge --match-head-commit <head>'*) ;;
   *) echo "FAIL: created: context lacks the merge command: $ctx"; fail=1 ;;
 esac
 
@@ -45,6 +45,13 @@ assert_eq "$out" "" "no PR URL: silent"; assert_eq "$rc" "0" "no PR URL: exit 0"
 out=$(printf 'not json' | "$SCRIPT"); rc=$?
 assert_eq "$out" "" "bad input: silent"; assert_eq "$rc" "0" "bad input: exit 0"
 
+case "$ctx" in
+  *'approval-queue pr '*) echo "FAIL: created: context still names the single-PR command: $ctx"; fail=1 ;;
+esac
+case "$ctx" in
+  *"Skip the approval queue only where pass-core's Close says"*) ;;
+  *) echo "FAIL: created: context lost the skip clause: $ctx"; fail=1 ;;
+esac
 case "$ctx" in
   *'~/.claude/docs/voice/approval-brief.md'*) ;;
   *) echo "FAIL: created: context does not name the register: $ctx"; fail=1 ;;
