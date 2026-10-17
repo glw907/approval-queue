@@ -1,0 +1,5 @@
+{
+  "backlog_path": "BACKLOG.md",
+  "domains": ["approval-queue"],
+  "default_priority": "medium"
+}
