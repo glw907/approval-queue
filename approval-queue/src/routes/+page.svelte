@@ -9,6 +9,7 @@ stop and the whole row is the target.
 <script lang="ts">
 	import { age, boardGroups, SORT_COOKIE, type Sort } from '#lib/board.ts';
 	import EmptyState from '#lib/components/EmptyState.svelte';
+	import PacketIcon from '#lib/components/PacketIcon.svelte';
 
 	let { data } = $props();
 
@@ -92,7 +93,14 @@ stop and the whole row is the target.
 										<a class="board-link font-medium" href="/item/{row.id}" data-sveltekit-replacestate>
 											{row.headline}
 										</a>
-										<div class="desk-muted mt-0.5 text-[0.8rem]">{scent(row)}</div>
+										<div class="desk-muted mt-0.5 flex flex-wrap items-center gap-x-2 text-[0.8rem]">
+											<span>{scent(row)}</span>
+											{#if row.irreversible}
+												<span class="tone-error inline-flex items-center gap-1 font-semibold">
+													<PacketIcon name="lock" class="size-3.5" />Irreversible
+												</span>
+											{/if}
+										</div>
 									</td>
 									<td class="num align-top">
 										{#if row.single}<span class="desk-muted">&ndash;</span>{:else}<span class={row.asks ? 'font-semibold' : 'desk-muted'}>{row.asks}</span>{/if}

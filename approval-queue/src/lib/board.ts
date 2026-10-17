@@ -18,6 +18,8 @@ export interface BoardRow {
 	/** The rule ids of the asks, once each. */
 	rules: string[];
 	repos: number;
+	/** True when an approve runs a step or an ask that cannot be undone. */
+	irreversible: boolean;
 	/** Set on an item that is not a packet; the board names its kind in place of its asks. */
 	single?: string;
 }

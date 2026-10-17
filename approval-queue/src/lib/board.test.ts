@@ -5,6 +5,7 @@ const row = (id: string, group: string, created: string, asks = 0): BoardRow => 
 	id,
 	group,
 	created,
+	irreversible: false,
 	asks,
 	headline: id,
 	rules: [],

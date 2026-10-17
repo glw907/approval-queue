@@ -32,7 +32,7 @@ const board = (sort?: string) =>
 	load({ depends() {}, cookies: { get: () => sort } } as never) as Promise<{
 		empty: false;
 		sort: string;
-		rows: Array<{ id: string; group: string; asks: number; rules: string[]; repos: number; single?: string }>;
+		rows: Array<{ id: string; group: string; asks: number; rules: string[]; repos: number; irreversible: boolean; single?: string }>;
 	}>;
 
 describe('/', () => {
@@ -41,6 +41,17 @@ describe('/', () => {
 		const data = await board();
 		expect(data.rows).toMatchObject([{ id: 'p1', group: 'Drafter UI', asks: 2, repos: 1 }]);
 		expect(data.rows[0].rules).toContain('gate-failed');
+	});
+
+	it('marks a packet with an irreversible step, and only that packet', async () => {
+		await seedPacket(state.root, 'p1', PACKET, { initiative: 'drafter-ui', initiativeTitle: 'Drafter UI' });
+		await seedPacket(state.root, 'p2', PACKET.replace(/^1\. \[session\]/m, '1. [irreversible]'), {
+			initiative: 'drafter-ui',
+			initiativeTitle: 'Drafter UI',
+			created: '2026-10-11T11:00:00Z'
+		});
+		const { rows } = await board();
+		expect(Object.fromEntries(rows.map((r) => [r.id, r.irreversible]))).toEqual({ p1: false, p2: true });
 	});
 
 	it('shows an item that is not a packet under Single items, with no redirect', async () => {
