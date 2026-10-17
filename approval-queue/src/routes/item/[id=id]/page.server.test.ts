@@ -536,6 +536,26 @@ describe('a packet', () => {
 		});
 	});
 
+	it('a reject that is not a form post answers 400 and writes nothing', async () => {
+		const request = new Request('http://127.0.0.1:7907/', { method: 'POST', body: '{}', headers: { 'content-type': 'application/json' } });
+		expect(await actions.reject({ request, params: { id: ID } } as never)).toMatchObject({ status: 400 });
+		await noDecision();
+	});
+
+	it('load returns the recorded decision for a decided packet, so the page shows what was chosen', async () => {
+		await call('approve', await fields());
+		const data = (await load({ params: { id: ID } } as never)) as Record<string, any>;
+		expect(data.decided).toBe(true);
+		expect(data.decision).toMatchObject({
+			decision: 'approve',
+			parts: expect.arrayContaining([{ ref: 'glw907/drafter#42', verdict: 'hold' }]),
+			asks: [
+				{ index: 1, choice: 'Merge anyway' },
+				{ index: 2, choice: 'Beta' }
+			]
+		});
+	});
+
 	it('refuses submit, which is the triage action', async () => {
 		expect(await call('submit')).toMatchObject({ status: 400 });
 	});

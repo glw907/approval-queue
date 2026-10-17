@@ -59,6 +59,20 @@ describe('/', () => {
 		expect((await board()).rows).toMatchObject([{ id: 'a', group: 'Single items', asks: 0, single: 'Design' }]);
 	});
 
+	it.each([
+		['a packet.json that is not JSON', (dir: string) => writeFile(join(dir, 'packet.json'), '{nope')],
+		['a packet.json withdrawn mid-load', (dir: string) => rm(join(dir, 'packet.json'))]
+	])('names an unreadable packet in Single items instead of failing the board: %s', async (_name, damage) => {
+		await seedPacket(state.root, 'p1', PACKET, { initiative: 'drafter-ui', initiativeTitle: 'Drafter UI' });
+		await seedPacket(state.root, 'p2', PACKET, { created: '2026-10-11T11:00:00Z' });
+		await damage(join(state.root, 'items', 'p2'));
+		const { rows } = await board();
+		expect(rows).toMatchObject([
+			{ id: 'p1', group: 'Drafter UI' },
+			{ id: 'p2', headline: 'p2', group: 'Single items', asks: 0, irreversible: false, single: 'Unreadable' }
+		]);
+	});
+
 	it('reads the sort from the cookie, asks first by default', async () => {
 		await seed('a', '2026-10-11T10:00:00Z');
 		expect((await board()).sort).toBe('asks');
