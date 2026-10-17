@@ -6,10 +6,12 @@ import { fileGroups } from '#lib/diff.ts';
 import { render, renderInline } from '#lib/markdown.ts';
 import { checksSummary, reviewSection, reviewVerdict, technicalNotes, withoutBrief } from '#lib/pr-summary.ts';
 import { nextItem } from '#lib/queue.ts';
+import { buildApprove, isIrreversible, packetFingerprint } from '#lib/server/packet-decision.ts';
 import {
 	listWaiting,
 	readItem,
 	writeDecision,
+	writeDecisionOnce,
 	type Decision,
 	type Disposition,
 	type SubmittedRow
@@ -32,6 +34,25 @@ async function readWaiting(id: string) {
 async function decide(id: string, decision: Decision) {
 	const next = nextItem(await listWaiting(APPROVAL_QUEUE_STATE), id);
 	await writeDecision(APPROVAL_QUEUE_STATE, id, decision);
+	return { next: next ? `/item/${next.id}` : null };
+}
+
+const ALREADY_DECIDED = { message: 'Already decided' };
+
+/**
+ * Answers a post whose item has gone. A post from a packet page carries its fingerprint, so that
+ * page learns its session withdrew the item and is offered the board; any other post is a 404.
+ */
+async function gone(request: Request) {
+	const form = await request.formData().catch(() => null);
+	if (!form?.has('fingerprint')) error(404, 'Not found');
+	return fail(410, { message: 'This item was withdrawn by its session; nothing was recorded', board: '/' });
+}
+
+/** Writes a packet's decision with `link`, so a second post answers 409 instead of replacing the first. */
+async function decideOnce(id: string, decision: Decision) {
+	const next = nextItem(await listWaiting(APPROVAL_QUEUE_STATE), id);
+	if (!(await writeDecisionOnce(APPROVAL_QUEUE_STATE, id, decision))) return fail(409, ALREADY_DECIDED);
 	return { next: next ? `/item/${next.id}` : null };
 }
 
@@ -105,6 +126,39 @@ export const load: PageServerLoad = async ({ params }) => {
 			minutes: Math.ceil(words / 230)
 		};
 	}
+	if (content.kind === 'packet') {
+		const { packet, parts } = content;
+		return {
+			meta,
+			decided,
+			kind: 'packet' as const,
+			headline: packet.headline,
+			lede: packet.lede,
+			background: packet.background,
+			steps: packet.steps,
+			notChecked: packet.notChecked,
+			asks: packet.asks.map((ask, i) => ({ index: i + 1, ...ask, part: ask.part?.ref ?? null })),
+			routine: packet.routine.map((row) => ({ ref: row.part.ref, kind: row.part.kind, verdict: row.verdict, fact: row.fact, why: row.why })),
+			parts: parts.map((part) => ({
+				ref: part.ref,
+				kind: part.kind,
+				lane: part.lane,
+				verdict: part.verdict,
+				head: part.head,
+				sha256: part.sha256,
+				...(part.kind === 'pr' && {
+					checks: checksSummary(part.pr?.statusCheckRollup),
+					review: reviewVerdict(part.body ?? ''),
+					groups: fileGroups(part.diff ?? ''),
+					link: part.pr ? { url: part.pr.url, head: part.pr.headRefName, base: part.pr.baseRefName } : null
+				}),
+				...(part.kind === 'design' && { doc: part.doc })
+			})),
+			fingerprint: packetFingerprint(parts, packet.asks),
+			irreversible: isIrreversible(packet),
+			irreversibleSteps: packet.steps.filter((s) => s.tag === 'irreversible').map((s) => s.n)
+		};
+	}
 	// A decided triage shows the calls that were sent, matched by action so a reordered file never
 	// pairs a call with the wrong row.
 	const sent = new Map(decision?.decision === 'submit' ? decision.rows.map((call) => [call.action, call]) : []);
@@ -130,9 +184,19 @@ export const load: PageServerLoad = async ({ params }) => {
 
 export const actions: Actions = {
 	approve: async ({ params, request }) => {
+		const found = await readItem(APPROVAL_QUEUE_STATE, params.id);
+		if (!found) return gone(request);
+		if (found.content.kind === 'packet') {
+			if (found.decided) return fail(409, ALREADY_DECIDED);
+			const form = await request.formData().catch(() => null);
+			if (!form) return fail(400, { message: 'Not a form post' });
+			// The server rebuilt the parts and asks from the item's files; the post only answers them.
+			const built = buildApprove(found.content, form);
+			return built.ok ? decideOnce(params.id, built.decision) : fail(400, { message: built.message });
+		}
 		const item = await readWaiting(params.id);
 		const { content } = item;
-		if (content.kind === 'triage') return fail(400, { message: 'Nothing to approve' });
+		if (content.kind === 'triage' || content.kind === 'packet') return fail(400, { message: 'Nothing to approve' });
 		// The page disables Approve, but a post can still arrive without it; the server rebuilds the
 		// cards from the body and checks every pick itself.
 		const form = await request.formData().catch(() => null);
@@ -146,6 +210,13 @@ export const actions: Actions = {
 		return decide(params.id, { decision: 'approve', choices: picked.choices });
 	},
 	reject: async ({ params, request }) => {
+		const found = await readItem(APPROVAL_QUEUE_STATE, params.id);
+		if (!found) return gone(request);
+		if (found.content.kind === 'packet') {
+			if (found.decided) return fail(409, ALREADY_DECIDED);
+			const note = (await request.formData()).get('note');
+			return decideOnce(params.id, { decision: 'reject', note: typeof note === 'string' ? note : '' });
+		}
 		const item = await readWaiting(params.id);
 		if (item.content.kind === 'triage') return fail(400, { message: 'Nothing to reject' });
 		const note = (await request.formData()).get('note');

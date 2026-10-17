@@ -1,6 +1,8 @@
-import { readFile, readdir, rename, stat, writeFile } from 'node:fs/promises';
+import { createHash, randomUUID } from 'node:crypto';
+import { link, open, readFile, readdir, rename, stat, unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Proposed, Triage } from '#lib/brief.ts';
+import type { Packet } from '#lib/packet.ts';
 
 export type Disposition = Proposed;
 
@@ -13,7 +15,7 @@ export interface SubmittedRow {
 
 export interface ItemMeta {
 	id: string;
-	kind: 'pr' | 'design' | 'triage';
+	kind: 'pr' | 'design' | 'triage' | 'packet';
 	repo: string;
 	title: string;
 	/** The brief's headline, written by the command; absent on an item it wrote before briefs. */
@@ -35,15 +37,41 @@ export interface PrMeta {
 	headRefName: string;
 	baseRefName: string;
 	statusCheckRollup: Array<Record<string, string>>;
+	/** The commit the command fetched the PR at; a packet part's `pr.json` carries it. */
+	head?: string;
+}
+
+/** One part of a packet as the server rebuilds it from the item directory. */
+export interface PacketPart {
+	ref: string;
+	kind: 'pr' | 'design' | 'step';
+	lane: 'ask' | 'routine';
+	/** The preselected verdict of a routine part; empty for a part an ask binds. */
+	verdict: string;
+	/** A PR's head commit. */
+	head?: string;
+	/** A design's `sha256` over the copy the reader saw. */
+	sha256?: string;
+	body?: string;
+	diff?: string;
+	doc?: string;
+	pr?: PrMeta;
 }
 
 export type ItemContent =
 	| { kind: 'pr'; body: string; diff: string; pr?: PrMeta }
 	| { kind: 'design'; doc: string }
+	| { kind: 'packet'; packet: Packet; parts: PacketPart[] }
 	| ({ kind: 'triage' } & Triage);
 
 export type Decision =
-	| { decision: 'approve'; choices?: Array<{ title: string; choice: string }> }
+	| {
+			decision: 'approve';
+			choices?: Array<{ title: string; choice: string }>;
+			/** A packet's per-part verdicts and per-ask answers; the command joins the heads and hashes. */
+			parts?: Array<{ ref: string; verdict: string }>;
+			asks?: Array<{ index: number; choice: string }>;
+	  }
 	| { decision: 'reject'; note: string }
 	| { decision: 'submit'; rows: SubmittedRow[] };
 
@@ -73,14 +101,18 @@ async function itemIds(root: string): Promise<string[]> {
 	}
 }
 
-/** Items with an `item.json` and no `decision.json`, oldest first by `created`, then `id`. */
+/** Items with an `item.json` and no `decision.json`, oldest first by `created`, then `id`. An item whose JSON does not parse is skipped. */
 export async function listWaiting(root: string): Promise<ItemMeta[]> {
 	const waiting: ItemMeta[] = [];
 	for (const id of await itemIds(root)) {
 		const dir = join(root, 'items', id);
-		if (await readJson(join(dir, 'decision.json'))) continue;
-		const meta = await readJson<ItemMeta>(join(dir, 'item.json'));
-		if (meta) waiting.push(meta);
+		try {
+			if (await readJson(join(dir, 'decision.json'))) continue;
+			const meta = await readJson<ItemMeta>(join(dir, 'item.json'));
+			if (meta) waiting.push(meta);
+		} catch (err) {
+			if (!(err instanceof SyntaxError)) throw err;
+		}
 	}
 	return waiting.sort((a, b) => a.created.localeCompare(b.created) || a.id.localeCompare(b.id));
 }
@@ -93,11 +125,15 @@ export async function listDecided(
 	const decided: Array<{ meta: ItemMeta; decision: Decision['decision']; at: number }> = [];
 	for (const id of await itemIds(root)) {
 		const dir = join(root, 'items', id);
-		const decision = await readJson<Decision>(join(dir, 'decision.json'));
-		const meta = await readJson<ItemMeta>(join(dir, 'item.json'));
-		if (!decision || !meta) continue;
-		const at = (await stat(join(dir, 'decision.json'))).mtimeMs;
-		if (at >= since) decided.push({ meta, decision: decision.decision, at });
+		try {
+			const decision = await readJson<Decision>(join(dir, 'decision.json'));
+			const meta = await readJson<ItemMeta>(join(dir, 'item.json'));
+			if (!decision || !meta) continue;
+			const at = (await stat(join(dir, 'decision.json'))).mtimeMs;
+			if (at >= since) decided.push({ meta, decision: decision.decision, at });
+		} catch (err) {
+			if (!(err instanceof SyntaxError)) throw err;
+		}
 	}
 	return decided.sort((a, b) => b.at - a.at).map(({ meta, decision }) => ({ meta, decision }));
 }
@@ -119,12 +155,45 @@ export async function readItem(root: string, id: string): Promise<Item | undefin
 		};
 	} else if (meta.kind === 'design') {
 		content = { kind: 'design', doc: await readFile(join(dir, 'doc.md'), 'utf8') };
-	} else {
+	} else if (meta.kind === 'packet') {
+		content = await readPacket(dir);
+	} else if (meta.kind === 'triage') {
 		const triage = await readJson<Triage>(join(dir, 'triage.json'));
 		// The command validates the file before writing it; a missing or old-shape file renders as empty.
 		content = { kind: 'triage', headline: '', lede: '', rows: [], ...(triage && !Array.isArray(triage) && triage) };
+	} else {
+		return undefined;
 	}
 	return { meta, content, decided: decision !== undefined, ...(decision && { decision }) };
+}
+
+/**
+ * Rebuilds a packet's parts from its item directory, never from a post. Part `k` is the index in
+ * `packet.parts`, so a step, which has no directory, still holds its slot.
+ */
+async function readPacket(dir: string): Promise<ItemContent> {
+	const raw = await readFile(join(dir, 'packet.json'), 'utf8');
+	const packet = JSON.parse(raw) as Packet;
+	const preselected = new Map(packet.routine.map((row) => [row.part.ref, row.verdict]));
+	const parts: PacketPart[] = [];
+	for (const [k, { part, in: lane }] of packet.parts.entries()) {
+		const base = { ref: part.ref, kind: part.kind, lane, verdict: preselected.get(part.ref) ?? '' };
+		const partDir = join(dir, 'parts', String(k));
+		if (part.kind === 'pr') {
+			const pr = await readJson<PrMeta>(join(partDir, 'pr.json'));
+			parts.push({
+				...base,
+				head: pr?.head ?? '',
+				body: await readFile(join(partDir, 'body.md'), 'utf8'),
+				diff: await readFile(join(partDir, 'diff.patch'), 'utf8'),
+				...(pr && { pr })
+			});
+		} else if (part.kind === 'design') {
+			const doc = await readFile(join(partDir, 'doc.md'));
+			parts.push({ ...base, sha256: createHash('sha256').update(doc).digest('hex'), doc: doc.toString() });
+		} else parts.push(base);
+	}
+	return { kind: 'packet', packet, parts };
 }
 
 /** Writes `decision.json` through a temp file in the item directory, so the waiting command never reads a partial file. */
@@ -133,4 +202,30 @@ export async function writeDecision(root: string, id: string, decision: Decision
 	const tmp = join(dir, 'decision.json.tmp');
 	await writeFile(tmp, JSON.stringify(decision));
 	await rename(tmp, join(dir, 'decision.json'));
+}
+
+/**
+ * Writes `decision.json` through a temp file named for this request, synced to disk, then `link`ed
+ * into place. Returns false when a decision already exists, since `link` fails with `EEXIST` rather
+ * than replace it, so two posts never both win.
+ */
+export async function writeDecisionOnce(root: string, id: string, decision: Decision): Promise<boolean> {
+	const dir = join(root, 'items', id);
+	const tmp = join(dir, `decision.json.${randomUUID()}.tmp`);
+	const file = await open(tmp, 'wx');
+	try {
+		await file.writeFile(JSON.stringify(decision));
+		await file.sync();
+	} finally {
+		await file.close();
+	}
+	try {
+		await link(tmp, join(dir, 'decision.json'));
+		return true;
+	} catch (err) {
+		if ((err as NodeJS.ErrnoException).code === 'EEXIST') return false;
+		throw err;
+	} finally {
+		await unlink(tmp);
+	}
 }
