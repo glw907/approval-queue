@@ -86,7 +86,8 @@ stop and the whole row is the target.
 						</tr>
 					</thead>
 					{#each groups as group (group.title)}
-						<tbody>
+						<!-- svelte-ignore a11y_no_redundant_roles: the phone layout sets display:block, which drops table semantics in some browsers, so the roles restore them -->
+						<tbody role="rowgroup">
 							{#each group.rows as row, i (row.id)}
 								<!-- svelte-ignore a11y_no_redundant_roles: the phone layout sets display:block, which drops table semantics in some browsers, so the roles restore them -->
 								<tr role="row" class="board-row">

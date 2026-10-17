@@ -460,7 +460,7 @@ first, which posts as `irreversible=yes`. A withdrawn packet answers 410 with th
 							Cancel <kbd class={KEY}>Esc</kbd>
 						</button>
 						<button class="btn btn-primary" formaction="?/reject" bind:this={sendButton} disabled={desk.held}>
-							<PacketIcon name="undo" />Send rejection <kbd class={KEY}>Ctrl</kbd><kbd class={KEY}>Enter</kbd>
+							<PacketIcon name="undo" />Send rejection <kbd class="{KEY} max-sm:hidden">Ctrl</kbd><kbd class="{KEY} max-sm:hidden">Enter</kbd>
 						</button>
 					{:else if !holding}
 						<button

@@ -115,8 +115,9 @@ the rest through `desk.handlers`.
 
 	function onKeydown(e: KeyboardEvent) {
 		if (e.defaultPrevented) return;
-		// An open modal makes the page behind it inert; Escape closes the dialog natively.
-		if (document.querySelector('dialog[open]')) return;
+		// An open confirm dialog makes the page behind it inert, and Escape closes it natively.
+		// The shortcut sheet is the exception: `keyAction` lets `?` close it.
+		if (document.querySelector('dialog[open]:not(#keys)')) return;
 		if (e.key === 'Escape' && drawerOpen) {
 			setDrawer(false);
 			return;

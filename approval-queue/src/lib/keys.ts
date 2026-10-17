@@ -24,7 +24,11 @@ export interface KeyContext {
 	/** A decision is counting down in the toast. */
 	held: boolean;
 	noteOpen: boolean;
-	/** Approve is locked: a card or an ask has no pick, or a pick sends the PR back. */
+	/**
+	 * Approve is locked: a card has no pick, or a pick sends the PR back. It gates the single key `a`
+	 * on a PR or design page. Ctrl+Enter on a packet ignores it, because the page moves focus to the
+	 * first open ask instead of approving.
+	 */
 	approveLocked: boolean;
 }
 
