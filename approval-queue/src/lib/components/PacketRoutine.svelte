@@ -52,21 +52,26 @@ omits one. Renders nothing for a packet with no routine rows.
 			</span>
 		</div>
 		<div class="mt-2 overflow-x-auto">
-			<table class="table routine-table">
-				<thead>
-					<tr>
-						<th scope="col">Part</th>
-						<th scope="col" class="w-40">Verdict</th>
-						<th scope="col" class="w-60 text-right">Change</th>
+			<!-- svelte-ignore a11y_no_redundant_roles: the phone layout sets display:block, which drops table semantics in some browsers, so the roles restore them -->
+			<table class="table routine-table" role="table">
+				<!-- svelte-ignore a11y_no_redundant_roles: the phone layout sets display:block, which drops table semantics in some browsers, so the roles restore them -->
+				<thead role="rowgroup">
+					<!-- svelte-ignore a11y_no_redundant_roles: the phone layout sets display:block, which drops table semantics in some browsers, so the roles restore them -->
+					<tr role="row">
+						<th role="columnheader" scope="col">Part</th>
+						<th role="columnheader" scope="col" class="w-40">Verdict</th>
+						<th role="columnheader" scope="col" class="w-60 text-right">Change</th>
 					</tr>
 				</thead>
-				<tbody>
+				<!-- svelte-ignore a11y_no_redundant_roles: the phone layout sets display:block, which drops table semantics in some browsers, so the roles restore them -->
+				<tbody role="rowgroup">
 					{#each routine as row (row.ref)}
 						{@const part = detail(row.ref)}
 						{@const flagged = flag(part)}
-						{@const look = VERDICT_LOOK[verdicts[row.ref]]}
-						<tr class={['part-row', verdicts[row.ref] !== row.verdict && 'is-changed']}>
-							<td class="part-cell align-top">
+						{@const look = VERDICT_LOOK[verdicts[row.ref] ?? row.verdict]}
+						<!-- svelte-ignore a11y_no_redundant_roles: the phone layout sets display:block, which drops table semantics in some browsers, so the roles restore them -->
+						<tr role="row" class={['part-row', verdicts[row.ref] !== row.verdict && 'is-changed']}>
+							<td role="cell" class="part-cell align-top">
 								<div class="flex flex-wrap items-center gap-x-2 text-[0.8rem] desk-muted">
 									<span>{refKind(row.ref)}</span><span class="font-mono">{row.ref}</span>
 								</div>
@@ -109,13 +114,13 @@ omits one. Renders nothing for a packet with no routine rows.
 									</div>
 								</details>
 							</td>
-							<td class="verdict-cell align-top">
+							<td role="cell" class="verdict-cell align-top">
 								<span class={['inline-flex items-center gap-1.5 font-semibold', look.ink]}>
 									<PacketIcon name={look.icon} />{look.label}
 								</span>
 								{#if verdicts[row.ref] !== row.verdict}<span class="sr-only">, changed from {VERDICT_LOOK[row.verdict].label}</span>{/if}
 							</td>
-							<td class="change-cell align-top text-right">
+							<td role="cell" class="change-cell align-top text-right">
 								<div class="join override" role="radiogroup" aria-label="Verdict for {row.ref}">
 									{#each overrideOptions(row.kind, row.verdict) as option (option)}
 										<input

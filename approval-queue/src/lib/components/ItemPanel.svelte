@@ -88,10 +88,22 @@ first, which posts as `irreversible=yes`. A withdrawn packet answers 410 with th
 
 	// A packet's asks are answered by label and its routine verdicts start at the session's; the page
 	// keys this component on the item id, so both are read once per item.
-	let answers = $state<Record<number, string | undefined>>({});
+	// A decided packet starts from what was decided, not from the session's defaults.
+	// svelte-ignore state_referenced_locally
+	let answers = $state<Record<number, string | undefined>>(
+		data.kind === 'packet' && data.decision?.decision === 'approve'
+			? Object.fromEntries((data.decision.asks ?? []).map((ask) => [ask.index, ask.choice]))
+			: {}
+	);
 	// svelte-ignore state_referenced_locally
 	let verdicts = $state<Record<string, string>>(
-		data.kind === 'packet' ? Object.fromEntries(data.routine.map((row) => [row.ref, row.verdict])) : {}
+		data.kind === 'packet'
+			? {
+					...Object.fromEntries(data.routine.map((row) => [row.ref, row.verdict])),
+					...(data.decision?.decision === 'approve' &&
+						Object.fromEntries((data.decision.parts ?? []).map((part) => [part.ref, part.verdict])))
+				}
+			: {}
 	);
 	const asks = $derived(data.kind === 'packet' ? data.asks : []);
 	const openAsks = $derived(asks.filter((ask) => answers[ask.index] === undefined));
@@ -116,6 +128,13 @@ first, which posts as `irreversible=yes`. A withdrawn packet answers 410 with th
 	let holdPaused = $state(false);
 	// Where a withdrawn packet's failed post offers to go.
 	let withdrawn = $state<string | null>(null);
+
+	/** An answer or a changed verdict makes an undo or failure note stale, so the bar goes back to its count. */
+	function clearNote() {
+		if (holding) return;
+		barNote = null;
+		withdrawn = null;
+	}
 
 	$effect(() => {
 		desk.page = data.kind;
@@ -172,7 +191,7 @@ first, which posts as `irreversible=yes`. A withdrawn packet answers 410 with th
 
 	/** Approve on a packet: a locked press moves to the first open ask, an irreversible packet asks once more. */
 	async function approvePacket() {
-		if (desk.held) return;
+		if (desk.held || confirmDialog?.open) return;
 		if (openAsks.length) {
 			document.querySelector<HTMLElement>(`#ask-${openAsks[0].index} input[type="radio"]`)?.focus();
 			return;
@@ -219,7 +238,8 @@ first, which posts as `irreversible=yes`. A withdrawn packet answers 410 with th
 		if (data.kind === 'packet') barNote = message;
 		else desk.announce(message);
 		await tick();
-		focusTo?.focus();
+		// The Approve button unmounts for the hold, so the captured submitter can be a detached node.
+		(focusTo?.isConnected ? focusTo : approveButton)?.focus();
 	}
 
 	const decide: SubmitFunction = async ({ cancel, action, submitter }) => {
@@ -321,8 +341,10 @@ first, which posts as `irreversible=yes`. A withdrawn packet answers 410 with th
 				{/if}
 			</p>
 			<PacketBrief {data} />
-			<PacketAsks asks={data.asks} bind:answers decided={data.decided} />
-			<PacketRoutine routine={data.routine} parts={data.parts} bind:verdicts decided={data.decided} />
+			<div onchange={clearNote}>
+				<PacketAsks asks={data.asks} bind:answers decided={data.decided} />
+				<PacketRoutine routine={data.routine} parts={data.parts} bind:verdicts decided={data.decided} />
+			</div>
 		{:else if data.kind === 'pr'}
 			<PrView {data} bind:picks subject={subject() ?? ''} />
 		{:else if data.kind === 'design'}

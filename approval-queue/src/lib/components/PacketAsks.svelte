@@ -118,18 +118,19 @@ and refuses a post that leaves one unanswered. Renders nothing for a packet with
 										name="ask:{ask.index}"
 										value={choice.label}
 										form="decision-form"
+										aria-labelledby="ask-{ask.index}-l{j}"
 										aria-describedby={choice.consequence ? `ask-${ask.index}-c${j}` : undefined}
 										disabled={desk.held || decided}
 										bind:group={answers[ask.index]}
 									/>
 									<span class="flex-1 leading-snug">
-										<span class="block font-medium"><Prose text={choice.label} /></span>
+										<span id="ask-{ask.index}-l{j}" class="block font-medium"><Prose text={choice.label} /></span>
 										{#if choice.consequence}
 											<span id="ask-{ask.index}-c{j}" class="mt-0.5 block text-[0.92rem] desk-muted"><Prose text={choice.consequence} /></span>
 										{/if}
 									</span>
 									{#if picked !== undefined && j === ask.recommended - 1}
-										<span class="badge badge-sm badge-outline rule-badge tone-info gap-1">
+										<span class="badge badge-sm badge-outline rule-badge tone-info gap-1" aria-hidden="true">
 											<PacketIcon name="bulb" class="size-3.5" />Session’s pick
 										</span>
 									{/if}

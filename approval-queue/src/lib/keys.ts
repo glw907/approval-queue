@@ -52,7 +52,8 @@ export function keyAction(key: string, mods: KeyMods, context: KeyContext): KeyA
 		if (held) return null;
 		if (page === 'triage') return 'submit';
 		if (noteOpen) return 'send-rejection';
-		return page === 'packet' && !approveLocked ? 'approve' : null;
+		// Locked, the handler moves focus to the first open ask, matching the button it advertises.
+		return page === 'packet' ? 'approve' : null;
 	}
 
 	if (typing) return null;

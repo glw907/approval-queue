@@ -14,7 +14,13 @@ async function toRow(meta: ItemMeta): Promise<BoardRow> {
 	if (meta.kind !== 'packet') {
 		return { ...base, group: SINGLES, asks: 0, rules: [], repos: 1, irreversible: false, single: KINDS[meta.kind] };
 	}
-	const packet = JSON.parse(await readFile(join(APPROVAL_QUEUE_STATE, 'items', meta.id, 'packet.json'), 'utf8')) as Packet;
+	let packet: Packet;
+	try {
+		packet = JSON.parse(await readFile(join(APPROVAL_QUEUE_STATE, 'items', meta.id, 'packet.json'), 'utf8')) as Packet;
+	} catch {
+		// A withdrawn or damaged packet must not take the board down; it shows by id so it can be found.
+		return { ...base, headline: meta.id, group: SINGLES, asks: 0, rules: [], repos: 1, irreversible: false, single: 'Unreadable' };
+	}
 	const repos = new Set(packet.parts.flatMap(({ part }) => (part.owner ? [`${part.owner}/${part.repo}`] : [])));
 	return {
 		...base,

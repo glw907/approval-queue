@@ -115,6 +115,8 @@ the rest through `desk.handlers`.
 
 	function onKeydown(e: KeyboardEvent) {
 		if (e.defaultPrevented) return;
+		// An open modal makes the page behind it inert; Escape closes the dialog natively.
+		if (document.querySelector('dialog[open]')) return;
 		if (e.key === 'Escape' && drawerOpen) {
 			setDrawer(false);
 			return;

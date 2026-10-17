@@ -73,23 +73,27 @@ stop and the whole row is the target.
 				</div>
 			</div>
 			<div class="mt-4">
-				<table class="table board-table">
-					<thead>
-						<tr>
-							<th scope="col" class="init-col">Initiative</th>
-							<th scope="col">Packet</th>
-							<th scope="col" class="num">Asks</th>
-							<th scope="col" class="num">Waiting</th>
+				<!-- svelte-ignore a11y_no_redundant_roles: the phone layout sets display:block, which drops table semantics in some browsers, so the roles restore them -->
+				<table class="table board-table" role="table">
+					<!-- svelte-ignore a11y_no_redundant_roles: the phone layout sets display:block, which drops table semantics in some browsers, so the roles restore them -->
+					<thead role="rowgroup">
+						<!-- svelte-ignore a11y_no_redundant_roles: the phone layout sets display:block, which drops table semantics in some browsers, so the roles restore them -->
+						<tr role="row">
+							<th role="columnheader" scope="col" class="init-col">Initiative</th>
+							<th role="columnheader" scope="col">Packet</th>
+							<th role="columnheader" scope="col" class="num">Asks</th>
+							<th role="columnheader" scope="col" class="num">Waiting</th>
 						</tr>
 					</thead>
 					{#each groups as group (group.title)}
 						<tbody>
 							{#each group.rows as row, i (row.id)}
-								<tr class="board-row">
-									<th scope="row" class="init-cell align-top">
+								<!-- svelte-ignore a11y_no_redundant_roles: the phone layout sets display:block, which drops table semantics in some browsers, so the roles restore them -->
+								<tr role="row" class="board-row">
+									<th role="rowheader" scope="row" class="init-cell align-top">
 										{#if i === 0}{group.title}{:else}<span class="sr-only">{group.title}</span>{/if}
 									</th>
-									<td class="align-top">
+									<td role="cell" class="align-top">
 										<a class="board-link font-medium" href="/item/{row.id}" data-sveltekit-replacestate>
 											{row.headline}
 										</a>
@@ -102,10 +106,10 @@ stop and the whole row is the target.
 											{/if}
 										</div>
 									</td>
-									<td class="num align-top">
+									<td role="cell" class="num align-top">
 										{#if row.single}<span class="desk-muted">&ndash;</span>{:else}<span class={row.asks ? 'font-semibold' : 'desk-muted'}>{row.asks}</span>{/if}
 									</td>
-									<td class="num align-top">{age(row.created)}</td>
+									<td role="cell" class="num align-top">{age(row.created)}</td>
 								</tr>
 							{/each}
 						</tbody>

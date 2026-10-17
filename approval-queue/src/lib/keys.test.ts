@@ -79,12 +79,12 @@ describe('keyAction', () => {
 		expect(keyAction('a', none, ctx({ page: 'pr', noteOpen: false }))).toBe('approve');
 	});
 
-	it('approves a packet on Mod+Enter only while it is unlocked, and never on a single key', () => {
+	it('approves a packet on Mod+Enter, locked or not, and never on a single key', () => {
 		const mod = { ...none, ctrl: true };
 		const packet = ctx({ page: 'packet' });
 		expect(keyAction('Enter', mod, packet)).toBe('approve');
 		expect(keyAction('Enter', { ...none, meta: true }, packet)).toBe('approve');
-		expect(keyAction('Enter', mod, ctx({ page: 'packet', approveLocked: true }))).toBeNull();
+		expect(keyAction('Enter', mod, ctx({ page: 'packet', approveLocked: true }))).toBe('approve');
 		expect(keyAction('Enter', mod, ctx({ page: 'packet', held: true }))).toBeNull();
 		expect(keyAction('Enter', none, packet)).toBeNull();
 		expect(keyAction('a', none, packet)).toBeNull();

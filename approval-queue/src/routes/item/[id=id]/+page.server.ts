@@ -156,7 +156,8 @@ export const load: PageServerLoad = async ({ params }) => {
 			})),
 			fingerprint: packetFingerprint(parts, packet.asks),
 			irreversible: isIrreversible(packet),
-			irreversibleSteps: packet.steps.filter((s) => s.tag === 'irreversible').map((s) => s.n)
+			irreversibleSteps: packet.steps.filter((s) => s.tag === 'irreversible').map((s) => s.n),
+			decision
 		};
 	}
 	// A decided triage shows the calls that were sent, matched by action so a reordered file never
@@ -214,7 +215,9 @@ export const actions: Actions = {
 		if (!found) return gone(request);
 		if (found.content.kind === 'packet') {
 			if (found.decided) return fail(409, ALREADY_DECIDED);
-			const note = (await request.formData()).get('note');
+			const form = await request.formData().catch(() => null);
+			if (!form) return fail(400, { message: 'Not a form post' });
+			const note = form.get('note');
 			return decideOnce(params.id, { decision: 'reject', note: typeof note === 'string' ? note : '' });
 		}
 		const item = await readWaiting(params.id);
