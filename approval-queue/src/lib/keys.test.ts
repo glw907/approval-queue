@@ -79,6 +79,23 @@ describe('keyAction', () => {
 		expect(keyAction('a', none, ctx({ page: 'pr', noteOpen: false }))).toBe('approve');
 	});
 
+	it('approves a packet on Mod+Enter only while it is unlocked, and never on a single key', () => {
+		const mod = { ...none, ctrl: true };
+		const packet = ctx({ page: 'packet' });
+		expect(keyAction('Enter', mod, packet)).toBe('approve');
+		expect(keyAction('Enter', { ...none, meta: true }, packet)).toBe('approve');
+		expect(keyAction('Enter', mod, ctx({ page: 'packet', approveLocked: true }))).toBeNull();
+		expect(keyAction('Enter', mod, ctx({ page: 'packet', held: true }))).toBeNull();
+		expect(keyAction('Enter', none, packet)).toBeNull();
+		expect(keyAction('a', none, packet)).toBeNull();
+		expect(keyAction('r', none, packet)).toBe('open-note');
+	});
+
+	it('sends a packet rejection on Mod+Enter with the note open, locked or not', () => {
+		const open = ctx({ page: 'packet', noteOpen: true, approveLocked: true });
+		expect(keyAction('Enter', { ...none, ctrl: true }, open)).toBe('send-rejection');
+	});
+
 	it('sends a rejection only with the note open', () => {
 		expect(keyAction('Enter', { ...none, ctrl: true }, base)).toBeNull();
 	});
