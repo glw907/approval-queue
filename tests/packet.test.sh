@@ -179,6 +179,8 @@ reject_shape() {
   assert_eq "$(wc -c <"$root/out")" "0" "$label: stdout"
   assert_eq "$(log_lines)" "$before" "$label: log lines"
 }
+reject_shape "empty decision" ''
+reject_shape "two decisions" "$GOOD $GOOD"
 reject_shape "submit" '{"decision":"submit"}'
 reject_shape "unknown ref" "$(jq -c '.parts[0].ref = "glw907/drafter#99"' <<<"$GOOD")"
 reject_shape "missing part" "$(jq -c 'del(.parts[3])' <<<"$GOOD")"
