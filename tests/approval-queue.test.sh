@@ -209,17 +209,34 @@ refuse "old triage shape" 'old triage shape' bash "$SCRIPT" triage owner/repo T 
 register="${REGISTER:-$HOME/.claude/docs/voice/approval-brief.md}"
 [ -r "$register" ] || { echo "FAIL: brief register not readable at $register (set REGISTER)"; exit 1; }
 n=0
+packets=0
+# A fence closes at a line of its opening width, so a packet's inner three-backtick Evidence fence stays inside it.
 while IFS=$'\t' read -r fence file; do
   n=$((n + 1))
   kind=design
   [ "$fence" != brief-triage ] || kind=triage
-  node approval-queue/src/check-brief.ts "$kind" "$file" >/dev/null 2>"$root/err" \
+  [ "$fence" != packet ] || { kind=packet; packets=$((packets + 1)); }
+  node approval-queue/src/check-brief.ts "$kind" "$file" >"$root/out$n" 2>"$root/err" \
     || { echo "FAIL: register exemplar $n ($fence) fails the check: $(cat "$root/err")"; fail=1; }
+  [ "$kind" != packet ] || cp "$root/out$n" "$root/packet$packets.json"
 done < <(awk -v dir="$root" '
-  /^```brief(-triage)?$/ { fence = substr($0, 4); n++; out = dir "/ex" n; inblock = 1; next }
-  inblock && /^```$/ { inblock = 0; close(out); print fence "\t" out; next }
+  !inblock && /^`+(brief|brief-triage|packet)$/ {
+    match($0, /^`+/); width = RLENGTH; fence = substr($0, width + 1)
+    n++; out = dir "/ex" n; inblock = 1; next }
+  inblock && /^`+$/ && length($0) == width { inblock = 0; close(out); print fence "\t" out; next }
   inblock { print > out }' "$register")
-[ "$n" -ge 3 ] || { echo "FAIL: found only $n register exemplars"; fail=1; }
+[ "$n" -ge 6 ] || { echo "FAIL: found only $n register exemplars"; fail=1; }
+# The three packet shapes, asserted from the parse: two asks, routine only, and a gate-failed ask.
+[ "$packets" = 3 ] || { echo "FAIL: found $packets packet exemplars, want 3"; fail=1; }
+shapes=$(for f in "$root"/packet*.json; do
+  node -e 'const p = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+    const s = [];
+    if (p.asks.length === 2) s.push("two-asks");
+    if (p.asks.length === 0 && p.routine.length > 0) s.push("routine-only");
+    if (p.asks.some((a) => a.rule === "gate-failed")) s.push("gate-failed");
+    console.log(s.join("\n"))' "$f"
+done | sort | tr '\n' ' ')
+assert_eq "$shapes" "gate-failed routine-only two-asks " "register packet shapes"
 
 bash "$SCRIPT" bogus owner/repo T "$root/design.md" >/dev/null 2>&1
 assert_eq "$?" "2" "bad kind: exit code"

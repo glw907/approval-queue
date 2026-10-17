@@ -11,6 +11,7 @@ vi.mock('$app/env/private', () => ({
 	}
 }));
 
+import { seedPacket } from '#lib/fixtures/seed-packet.ts';
 import { actions, load } from './+page.server.ts';
 
 const ID = '20261011T100000-1';
@@ -408,5 +409,154 @@ describe('load', () => {
 
 	it('throws 404 on an unknown id', async () => {
 		await expect(load({ params: { id: ID } } as never)).rejects.toMatchObject({ status: 404 });
+	});
+});
+
+describe('a packet', () => {
+	/** Two asks (#41 bound as gate-failed, one with no part), routine #42 and #43, and step 1. */
+	const PACKET = fixture('packet-baseline.md').replace('glw907/drafter:docs/specs/notes-design.md', 'glw907/drafter#43');
+	const WITHDRAWN = 'This item was withdrawn by its session; nothing was recorded';
+	const noDecision = () => expect(readFile(join(state.root, 'items', ID, 'decision.json'), 'utf8')).rejects.toThrow();
+	const fingerprint = async () => ((await load({ params: { id: ID } } as never)) as { fingerprint: string }).fingerprint;
+
+	/** A complete post: #42 held, #43 approved, both asks answered, the irreversible step confirmed. */
+	async function fields(over: Record<string, string | null> = {}): Promise<[string, string][]> {
+		return Object.entries({
+			fingerprint: await fingerprint(),
+			'part:glw907/drafter#42': 'hold',
+			'part:glw907/drafter#43': 'approve',
+			'part:step:1': 'session',
+			'ask:1': 'Merge anyway',
+			'ask:2': 'Beta',
+			irreversible: 'yes',
+			...over
+		}).filter((e): e is [string, string] => e[1] !== null);
+	}
+
+	beforeEach(() => seedPacket(state.root, ID, PACKET));
+
+	it('load returns the parts, asks, routine rows, fingerprint, and irreversible steps', async () => {
+		const data = (await load({ params: { id: ID } } as never)) as Record<string, any>;
+		expect(data).toMatchObject({ kind: 'packet', decided: false, irreversible: true, irreversibleSteps: [2] });
+		expect(data.fingerprint).toMatch(/^[0-9a-f]{64}$/);
+		expect(data.asks.map((a: any) => [a.index, a.rule, a.part, a.choices.length])).toEqual([
+			[1, 'gate-failed', 'glw907/drafter#41', 3],
+			[2, 'owner-call', null, 2]
+		]);
+		expect(data.routine.map((r: any) => [r.ref, r.verdict])).toEqual([
+			['glw907/drafter#42', 'approve'],
+			['glw907/drafter#43', 'approve'],
+			['step:1', 'session']
+		]);
+		expect(data.parts.map((p: any) => [p.ref, p.lane, p.head])).toEqual([
+			['glw907/drafter#41', 'ask', 'aaa111'],
+			['glw907/drafter#42', 'routine', 'bbb222'],
+			['glw907/drafter#43', 'routine', 'ccc333'],
+			['step:1', 'routine', undefined]
+		]);
+	});
+
+	it('check 2: an approve with ask 2 unanswered returns 400 and writes nothing', async () => {
+		expect(await call('approve', await fields({ 'ask:2': null }))).toMatchObject({ status: 400 });
+		await noDecision();
+	});
+
+	it('check 3, server half: #42 is held and #43 approved, every part once, with no head or hash', async () => {
+		const result = await call('approve', await fields());
+		expect(result).toEqual({ next: null });
+		expect(await decision()).toEqual({
+			decision: 'approve',
+			parts: [
+				{ ref: 'glw907/drafter#41', verdict: 'approve' },
+				{ ref: 'glw907/drafter#42', verdict: 'hold' },
+				{ ref: 'glw907/drafter#43', verdict: 'approve' },
+				{ ref: 'step:1', verdict: 'session' }
+			],
+			asks: [
+				{ index: 1, choice: 'Merge anyway' },
+				{ index: 2, choice: 'Beta' }
+			]
+		});
+	});
+
+	it('a held ask-bound part is written held', async () => {
+		await call('approve', await fields({ 'ask:1': 'Hold' }));
+		expect((await decision()).parts[0]).toEqual({ ref: 'glw907/drafter#41', verdict: 'hold' });
+	});
+
+	it.each([
+		['an unanswered ask', { 'ask:1': null }],
+		['a label the ask does not hold', { 'ask:2': 'Stable soon' }],
+		['a missing part', { 'part:glw907/drafter#42': null }],
+		['an unknown ref', { 'part:glw907/drafter#99': 'approve' }],
+		['a verdict outside the kind', { 'part:step:1': 'hold' }],
+		['a stale fingerprint', { fingerprint: 'stale' }],
+		['a missing irreversible confirmation', { irreversible: null }]
+	])('refuses %s with 400 and writes nothing', async (_name, over) => {
+		expect(await call('approve', await fields(over))).toMatchObject({ status: 400 });
+		await noDecision();
+	});
+
+	it('a second post returns 409 and leaves the first decision', async () => {
+		const post = await fields();
+		await call('approve', post);
+		expect(await call('approve', post)).toMatchObject({ status: 409, data: { message: 'Already decided' } });
+		expect((await decision()).parts[1]).toEqual({ ref: 'glw907/drafter#42', verdict: 'hold' });
+	});
+
+	it('two posts racing write one decision and answer the other 409', async () => {
+		const post = await fields();
+		const results = await Promise.all([call('approve', post), call('approve', post)]);
+		expect(results.map((r) => (r as { status?: number }).status ?? 200).sort()).toEqual([200, 409]);
+	});
+
+	it('a reject carries no parts and no asks', async () => {
+		await call('reject', [['note', 'not now'], ['fingerprint', await fingerprint()]]);
+		expect(await decision()).toEqual({ decision: 'reject', note: 'not now' });
+		expect(await call('reject', [['note', 'again']])).toMatchObject({ status: 409 });
+	});
+
+	describe('a withdrawn item', () => {
+		beforeEach(() => rm(join(state.root, 'items', ID, 'item.json')));
+
+		it('answers an approve from the open page with the withdrawn message and the board', async () => {
+			expect(await call('approve', [['fingerprint', 'abc']])).toMatchObject({
+				status: 410,
+				data: { message: WITHDRAWN, board: '/' }
+			});
+			await noDecision();
+		});
+
+		it('answers a reject from the open page the same way', async () => {
+			expect(await call('reject', [['fingerprint', 'abc']])).toMatchObject({ status: 410, data: { message: WITHDRAWN } });
+		});
+
+		it('still 404s a post that never came from a packet page', async () => {
+			await expect(call('approve')).rejects.toMatchObject({ status: 404 });
+		});
+	});
+
+	it('a reject that is not a form post answers 400 and writes nothing', async () => {
+		const request = new Request('http://127.0.0.1:7907/', { method: 'POST', body: '{}', headers: { 'content-type': 'application/json' } });
+		expect(await actions.reject({ request, params: { id: ID } } as never)).toMatchObject({ status: 400 });
+		await noDecision();
+	});
+
+	it('load returns the recorded decision for a decided packet, so the page shows what was chosen', async () => {
+		await call('approve', await fields());
+		const data = (await load({ params: { id: ID } } as never)) as Record<string, any>;
+		expect(data.decided).toBe(true);
+		expect(data.decision).toMatchObject({
+			decision: 'approve',
+			parts: expect.arrayContaining([{ ref: 'glw907/drafter#42', verdict: 'hold' }]),
+			asks: [
+				{ index: 1, choice: 'Merge anyway' },
+				{ index: 2, choice: 'Beta' }
+			]
+		});
+	});
+
+	it('refuses submit, which is the triage action', async () => {
+		expect(await call('submit')).toMatchObject({ status: 400 });
 	});
 });

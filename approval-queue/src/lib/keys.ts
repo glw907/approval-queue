@@ -16,7 +16,7 @@ export type KeyAction =
 	| 'submit';
 
 export interface KeyContext {
-	page: 'pr' | 'design' | 'triage';
+	page: 'pr' | 'design' | 'triage' | 'packet';
 	/** The event target is a field that takes text. */
 	typing: boolean;
 	singleKeys: boolean;
@@ -24,7 +24,11 @@ export interface KeyContext {
 	/** A decision is counting down in the toast. */
 	held: boolean;
 	noteOpen: boolean;
-	/** Approve is disabled: a card has no pick, or a pick sends the PR back. */
+	/**
+	 * Approve is locked: a card has no pick, or a pick sends the PR back. It gates the single key `a`
+	 * on a PR or design page. Ctrl+Enter on a packet ignores it, because the page moves focus to the
+	 * first open ask instead of approving.
+	 */
 	approveLocked: boolean;
 }
 
@@ -51,7 +55,9 @@ export function keyAction(key: string, mods: KeyMods, context: KeyContext): KeyA
 	if (key === 'Enter' && (mods.ctrl || mods.meta)) {
 		if (held) return null;
 		if (page === 'triage') return 'submit';
-		return noteOpen ? 'send-rejection' : null;
+		if (noteOpen) return 'send-rejection';
+		// Locked, the handler moves focus to the first open ask, matching the button it advertises.
+		return page === 'packet' ? 'approve' : null;
 	}
 
 	if (typing) return null;
@@ -66,7 +72,7 @@ export function keyAction(key: string, mods: KeyMods, context: KeyContext): KeyA
 	if (key === 'k') return 'queue-prev';
 	if (key === 'z') return held ? 'undo' : null;
 	if (held) return null;
-	if (page !== 'triage' && key === 'a') return noteOpen || approveLocked ? null : 'approve';
+	if (page !== 'triage' && page !== 'packet' && key === 'a') return noteOpen || approveLocked ? null : 'approve';
 	if (page !== 'triage' && key === 'r') return 'open-note';
 	if (page === 'pr' && key === '/') return 'focus-filter';
 	if (page === 'triage' && key in MOVES) return MOVES[key];

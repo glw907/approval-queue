@@ -9,18 +9,39 @@ the rest through `desk.handlers`.
 	import { afterNavigate, invalidate } from '$app/navigation';
 	import { page } from '$app/state';
 	import { onMount, tick } from 'svelte';
+	import { age, SINGLES } from '#lib/board.ts';
 	import { desk } from '#lib/desk.svelte.ts';
 	import { keyAction } from '#lib/keys.ts';
 
 	let { children, data } = $props();
 
-	const KINDS = { pr: 'PR', design: 'Design', triage: 'Triage' };
+	const KINDS = { pr: 'PR', design: 'Design', triage: 'Triage', packet: 'Packet' };
 	const OUTCOMES = { approve: 'Approved', reject: 'Rejected', submit: 'Submitted' };
 
 	let drawerOpen = $state(false);
 	let sheet: HTMLDialogElement;
 	let focusedId = $state<string | null>(null);
 	const currentId = $derived(page.params.id);
+
+	/** The queue by initiative, then lead repo, with every item that is not a packet under "Single items" last. */
+	const sidebar = $derived.by(() => {
+		const initiativeOf = (item: (typeof data.queue)[number]) =>
+			item.kind !== 'packet'
+				? SINGLES
+				: item.initiativeTitle || (item.initiative && item.initiative !== 'none' ? item.initiative : 'No initiative');
+		const groups = new Map<string, Map<string, typeof data.queue>>();
+		for (const item of data.queue) {
+			const repos = groups.get(initiativeOf(item)) ?? new Map<string, typeof data.queue>();
+			repos.set(item.repo, [...(repos.get(item.repo) ?? []), item]);
+			groups.set(initiativeOf(item), repos);
+		}
+		return [...groups]
+			.map(([title, repos]) => ({
+				title,
+				repos: [...repos].sort(([a], [b]) => a.localeCompare(b))
+			}))
+			.sort((a, b) => Number(a.title === SINGLES) - Number(b.title === SINGLES));
+	});
 
 	onMount(() => {
 		const poll = setInterval(() => invalidate('desk:queue'), 2000);
@@ -52,13 +73,6 @@ the rest through `desk.handlers`.
 	function label(item: { repo: string; number?: number }) {
 		const name = item.repo.split('/').pop();
 		return item.number === undefined ? name : `${name} #${item.number}`;
-	}
-
-	function age(created: string) {
-		const minutes = Math.max(0, Math.round((Date.now() - Date.parse(created)) / 60000));
-		if (minutes < 60) return `${minutes}m`;
-		if (minutes < 1440) return `${Math.round(minutes / 60)}h`;
-		return `${Math.round(minutes / 1440)}d`;
 	}
 
 	function toggleSheet() {
@@ -101,6 +115,9 @@ the rest through `desk.handlers`.
 
 	function onKeydown(e: KeyboardEvent) {
 		if (e.defaultPrevented) return;
+		// An open confirm dialog makes the page behind it inert, and Escape closes it natively.
+		// The shortcut sheet is the exception: `keyAction` lets `?` close it.
+		if (document.querySelector('dialog[open]:not(#keys)')) return;
 		if (e.key === 'Escape' && drawerOpen) {
 			setDrawer(false);
 			return;
@@ -169,36 +186,48 @@ the rest through `desk.handlers`.
 		></label>
 		<nav id="queue-nav" aria-label="Queue" class="flex min-h-full w-72 flex-col bg-base-200">
 			<div class="px-4 pt-5 pb-2">
-				<p class="font-semibold">Design & PR Approvals</p>
+				<a href="/" data-sveltekit-replacestate class="font-semibold hover:text-primary">Design & PR Approvals</a>
 				<p class="text-sm text-(--color-muted)" aria-live="polite">{data.queue.length} waiting</p>
 			</div>
-			<ul class="menu w-full gap-1 p-2 text-sm">
-				{#each data.queue as item (item.id)}
-					<li>
-						<a
-							href="/item/{item.id}"
-							data-q
-							class={{
-								'menu-active bg-base-300 text-base-content': item.id === currentId,
-								'menu-focus': item.id === focusedId
-							}}
-							aria-current={item.id === currentId ? 'page' : undefined}
-							onfocus={() => (focusedId = item.id)}
-							onblur={() => (focusedId = null)}
-						>
-							<div class="w-full">
-								<div class={['flex justify-between gap-2 text-xs', item.id === currentId ? 'text-base-content/75' : 'text-(--color-muted)']}>
-									<span>{KINDS[item.kind]} · {label(item)}</span>
-									<span class="tabular-nums">{age(item.created)}</span>
-								</div>
-								<div class="mt-0.5 leading-snug">{item.headline ?? item.title}</div>
-							</div>
-						</a>
-					</li>
-				{:else}
-					<li class="menu-disabled px-3 py-2 text-sm text-(--color-muted)">Nothing waiting.</li>
-				{/each}
-			</ul>
+			{#each sidebar as group, g (group.title)}
+				<section aria-labelledby="nav-{g}" class="px-2">
+					<h2 id="nav-{g}" class="px-3 pt-2.5 pb-1 text-sm font-semibold">{group.title}</h2>
+					<ul class="menu menu-sm w-full gap-1 p-0">
+						{#each group.repos as [repo, items] (repo)}
+							<li>
+								<h3 class="menu-title font-mono">{repo}</h3>
+								<ul>
+									{#each items as item (item.id)}
+										<li>
+											<a
+												href="/item/{item.id}"
+												data-q
+												class={{
+													'menu-active bg-base-300 text-base-content': item.id === currentId,
+													'menu-focus': item.id === focusedId
+												}}
+												aria-current={item.id === currentId ? 'page' : undefined}
+												onfocus={() => (focusedId = item.id)}
+												onblur={() => (focusedId = null)}
+											>
+												<div class="w-full">
+													<div class="leading-snug">{item.headline ?? item.title}</div>
+													<div class={['mt-0.5 flex justify-between gap-2 text-xs', item.id === currentId ? 'text-base-content/75' : 'text-(--color-muted)']}>
+														<span>{item.kind === 'packet' ? KINDS[item.kind] : `${KINDS[item.kind]} · ${label(item)}`}</span>
+														<span class="tabular-nums">{age(item.created)}</span>
+													</div>
+												</div>
+											</a>
+										</li>
+									{/each}
+								</ul>
+							</li>
+						{/each}
+					</ul>
+				</section>
+			{:else}
+				<p class="px-5 py-2 text-sm text-(--color-muted)">Nothing waiting.</p>
+			{/each}
 			{#if data.decided.length}
 				<div class="px-4 py-3">
 					<h2 class="text-sm font-semibold text-(--color-muted)">Decided this session</h2>

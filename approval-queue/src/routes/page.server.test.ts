@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { access, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -10,6 +11,7 @@ vi.mock('$app/env/private', () => ({
 	}
 }));
 
+import { seedPacket } from '#lib/fixtures/seed-packet.ts';
 import { load as layoutLoad } from './+layout.server.ts';
 import { load } from './+page.server.ts';
 
@@ -24,15 +26,68 @@ beforeEach(async () => {
 });
 afterEach(() => rm(state.root, { recursive: true, force: true }));
 
+const PACKET = readFileSync(new URL('../../../tests/fixtures/e2e-packet.md', import.meta.url), 'utf8');
+
+const board = (sort?: string) =>
+	load({ depends() {}, cookies: { get: () => sort } } as never) as Promise<{
+		empty: false;
+		sort: string;
+		rows: Array<{ id: string; group: string; asks: number; rules: string[]; repos: number; irreversible: boolean; single?: string }>;
+	}>;
+
 describe('/', () => {
-	it('redirects to the oldest waiting item', async () => {
-		await seed('b', '2026-10-11T10:01:00Z');
+	it('lists a seeded packet under its initiative, with its asks and repos', async () => {
+		await seedPacket(state.root, 'p1', PACKET, { initiative: 'drafter-ui', initiativeTitle: 'Drafter UI' });
+		const data = await board();
+		expect(data.rows).toMatchObject([{ id: 'p1', group: 'Drafter UI', asks: 2, repos: 1 }]);
+		expect(data.rows[0].rules).toContain('gate-failed');
+	});
+
+	it('marks a packet with an irreversible step, and only that packet', async () => {
+		await seedPacket(state.root, 'p1', PACKET, { initiative: 'drafter-ui', initiativeTitle: 'Drafter UI' });
+		await seedPacket(state.root, 'p2', PACKET.replace(/^1\. \[session\]/m, '1. [irreversible]'), {
+			initiative: 'drafter-ui',
+			initiativeTitle: 'Drafter UI',
+			created: '2026-10-11T11:00:00Z'
+		});
+		const { rows } = await board();
+		expect(Object.fromEntries(rows.map((r) => [r.id, r.irreversible]))).toEqual({ p1: false, p2: true });
+	});
+
+	it('shows an item that is not a packet under Single items, with no redirect', async () => {
 		await seed('a', '2026-10-11T10:00:00Z');
-		await expect(load({} as never)).rejects.toMatchObject({ status: 307, location: '/item/a' });
+		expect((await board()).rows).toMatchObject([{ id: 'a', group: 'Single items', asks: 0, single: 'Design' }]);
+	});
+
+	it.each([
+		['a packet.json that is not JSON', (dir: string) => writeFile(join(dir, 'packet.json'), '{nope')],
+		['a packet.json withdrawn mid-load', (dir: string) => rm(join(dir, 'packet.json'))]
+	])('names an unreadable packet in Single items instead of failing the board: %s', async (_name, damage) => {
+		await seedPacket(state.root, 'p1', PACKET, { initiative: 'drafter-ui', initiativeTitle: 'Drafter UI' });
+		await seedPacket(state.root, 'p2', PACKET, { created: '2026-10-11T11:00:00Z' });
+		await damage(join(state.root, 'items', 'p2'));
+		const { rows } = await board();
+		expect(rows).toMatchObject([
+			{ id: 'p1', group: 'Drafter UI' },
+			{ id: 'p2', headline: 'p2', group: 'Single items', asks: 0, irreversible: false, single: 'Unreadable' }
+		]);
+	});
+
+	it('reads the sort from the cookie, asks first by default', async () => {
+		await seed('a', '2026-10-11T10:00:00Z');
+		expect((await board()).sort).toBe('asks');
+		expect((await board('oldest')).sort).toBe('oldest');
+		expect((await board('nonsense')).sort).toBe('asks');
+	});
+
+	it('depends on desk:queue, so the poll refreshes the board', async () => {
+		const keys: string[] = [];
+		await load({ depends: (key: string) => keys.push(key), cookies: { get: () => undefined } } as never);
+		expect(keys).toEqual(['desk:queue']);
 	});
 
 	it('returns the empty state with nothing waiting', async () => {
-		expect(await load({} as never)).toEqual({ empty: true });
+		expect(await board()).toEqual({ empty: true });
 	});
 });
 

@@ -3,7 +3,7 @@
 
 The approval hand-over lived only in pass-core's Close section, so a PR opened outside a pass missed
 it. After a Bash call whose command runs `gh pr create`, the hook finds the new PR's URL in the
-tool response and returns `hookSpecificOutput.additionalContext` naming the `approval-queue` command
+tool response and returns `hookSpecificOutput.additionalContext` naming the packet hand-over
 for that PR (https://code.claude.com/docs/en/hooks, "PostToolUse decision control"). Every input
 the script cannot parse, and every call that opened no PR, exits 0 silently.
 """
@@ -15,11 +15,12 @@ import sys
 PREFILTER = re.compile(r"gh\s+pr\s+create")
 PR_URL = re.compile(r"https://github\.com/([\w.-]+/[\w.-]+)/pull/(\d+)")
 CONTEXT = (
-    "You opened PR #{number} in {repo}. Put it on Geoff's Design & PR Approvals now: run "
-    '`approval-queue pr {repo} "<the PR title>" {number}` as a background Bash command and wait for '
-    "the decision it prints as JSON. On an approve, merge with `gh pr merge {number} --repo {repo} "
-    "--merge --match-head-commit <head>`, taking <head> from the decision, run as its own Bash "
-    "command. The PR body must open with a `## Brief` written to ~/.claude/docs/voice/approval-brief.md; "
+    "You opened PR #{number} in {repo}. Put it in your hand-over packet for Geoff's Design & PR Approvals "
+    "through the `approval-packet` skill: it names the PR by its ref `{repo}#{number}` and hands the packet "
+    "over with `approval-queue packet <initiative> <file>`, then waits for the decision it prints as JSON. "
+    "On an approve, merge each approved PR with `gh pr merge <number> --repo <repo> --merge "
+    "--match-head-commit <head>`, taking <head> from that part of the decision, each as its own Bash command. "
+    "The PR body must open with a `## Brief` written to ~/.claude/docs/voice/approval-brief.md; "
     "the command refuses a PR without one. Skip the approval queue only where pass-core's Close says the PR "
     "is not yours to hand over: an executor whose launch prompt gives the hand-over to the conductor, or an "
     "ordinary-class pass that merges its own PR."

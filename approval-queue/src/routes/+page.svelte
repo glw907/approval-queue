@@ -1,125 +1,226 @@
 <!-- @component
-The empty state, shown when `/` finds nothing waiting. It counts 30 seconds with Keep focused,
-then calls `window.close()`, which works only while the tab holds one history entry; every
-navigation in the desk replaces its entry for that reason. The saved `desk.autoClose` setting
-turns the count off. An item that arrives while the page is open replaces it.
+The home page: the board of waiting packets under their initiatives, or the empty state when
+nothing waits. The sort comes from the server's cookie read, so the first render is already in
+order; picking a sort writes the cookie and reorders here, and the 2-second poll refreshes the
+rows without moving the reader. Row links replace the history entry, so the empty state's
+`window.close()` keeps working. Each row's one link stretches over the row, so a row is one tab
+stop and the whole row is the target.
 -->
 <script lang="ts">
-	import { goto } from '$app/navigation';
-	import { onMount, tick } from 'svelte';
-	import { desk } from '#lib/desk.svelte.ts';
-	import { startHold } from '#lib/hold.ts';
+	import { age, boardGroups, SORT_COOKIE, type Sort } from '#lib/board.ts';
+	import EmptyState from '#lib/components/EmptyState.svelte';
+	import PacketIcon from '#lib/components/PacketIcon.svelte';
 
 	let { data } = $props();
 
-	const SECONDS = 30;
+	let picked = $state<Sort | null>(null);
+	const sort = $derived<Sort>(picked ?? (data.empty ? 'asks' : data.sort));
+	const groups = $derived(data.empty ? [] : boardGroups(data.rows, sort));
+	const total = $derived(data.empty ? 0 : data.rows.reduce((n, r) => n + r.asks, 0));
 
-	let phase = $state<'counting' | 'kept' | 'off' | 'closing'>('counting');
-	let secs = $state(SECONDS);
-	let autoClose = $state(true);
-	let keep = $state<HTMLButtonElement>();
-	let hold: { cancel: () => void } | null = null;
-
-	async function stop(message: string, next: 'kept' | 'off') {
-		hold?.cancel();
-		hold = null;
-		phase = next;
-		desk.announce(message);
-		// Keep unmounts as the count ends, so focus would otherwise fall to the body.
-		await tick();
-		if (document.activeElement === document.body) document.getElementById('main')?.focus();
+	function pick(next: Sort) {
+		picked = next;
+		document.cookie = `${SORT_COOKIE}=${next}; path=/; max-age=31536000; samesite=lax`;
 	}
 
-	function start() {
-		secs = SECONDS;
-		phase = 'counting';
-		desk.announce(
-			`Nothing waiting. This tab closes in ${SECONDS} seconds. Press Escape or Keep this tab open to stop it.`
-		);
-		hold = startHold(SECONDS * 1000, {
-			tick: (left) => (secs = left),
-			fire: () => {
-				phase = 'closing';
-				window.close();
-			}
-		});
-		// A script focus draws no ring when the last focus was not a keyboard focus, and the ring is the cue.
-		keep?.focus({ focusVisible: true });
-	}
-
-	onMount(() => {
-		try {
-			autoClose = localStorage.getItem('desk.autoClose') !== 'off';
-		} catch {
-			// Without storage the setting stays on.
-		}
-		if (autoClose) start();
-		else phase = 'off';
-		return () => hold?.cancel();
-	});
-
-	$effect(() => {
-		const [oldest] = data.queue;
-		if (oldest) goto(`/item/${oldest.id}`, { replace: true });
-	});
-
-	function saveAutoClose() {
-		try {
-			localStorage.setItem('desk.autoClose', autoClose ? 'on' : 'off');
-		} catch {
-			// The toggle still holds for this page.
-		}
-		if (!autoClose && phase === 'counting') stop('Auto-close is off. This tab stays open.', 'off');
-	}
-
-	function onKeydown(e: KeyboardEvent) {
-		if (e.key === 'Escape' && phase === 'counting') stop('This tab stays open.', 'kept');
-	}
+	const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
+	const scent = (row: { asks: number; rules: string[]; repos: number; single?: string }) =>
+		row.single
+			? row.single
+			: [
+					row.asks ? row.rules.map((rule) => rule.replaceAll('-', ' ')).join(', ') : 'routine only',
+					plural(row.repos, 'repo')
+				].join(' · ');
 </script>
 
-<svelte:head><title>Nothing waiting · Design & PR Approvals</title></svelte:head>
-<svelte:document onkeydown={onKeydown} />
+<svelte:head>
+	{#if !data.empty}<title>Waiting for you · Design & PR Approvals</title>{/if}
+</svelte:head>
 
-<main id="main" tabindex="-1" class="relative isolate flex flex-1 items-start px-5 pt-16 lg:px-8">
-	<div class="max-w-[60ch]">
-		<h1 class="desk-title text-[1.6rem] leading-tight"><i class="site-benchmark"></i>Nothing waiting</h1>
-		<p class="mt-2">
-			Every waiting session has its answer.
-			{#if phase === 'counting'}
-				This tab closes in
-				<span class="countdown font-semibold">
-					<span style="--value:{secs};" aria-hidden="true">{secs}</span>
-				</span>
-				<span class="sr-only">{secs}</span> s.
-			{:else if phase === 'closing'}
-				Closing this tab.
-			{:else if phase === 'off'}
-				Auto-close is off. This tab stays open.
-			{:else}
-				This tab stays open.
-			{/if}
-		</p>
-		<div class="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2">
-			{#if phase === 'counting'}
-				<button
-					type="button"
-					class="btn btn-sm btn-ghost -ml-3"
-					bind:this={keep}
-					onclick={() => stop('This tab stays open.', 'kept')}
-				>
-					Keep this tab open <kbd class="kbd kbd-xs desk-kbd">Esc</kbd>
-				</button>
-			{/if}
-			<label class="flex cursor-pointer items-center gap-2 text-sm">
-				<input
-					type="checkbox"
-					class="toggle toggle-sm toggle-primary"
-					bind:checked={autoClose}
-					onchange={saveAutoClose}
-				/>
-				Close when empty
-			</label>
+{#if data.empty}
+	<EmptyState />
+{:else}
+	<main id="main" tabindex="-1" class="flex-1 px-5 pt-6 pb-8 lg:px-12">
+		<div class="max-w-4xl">
+			<div class="flex flex-wrap items-end justify-between gap-x-6 gap-y-3">
+				<div>
+					<h1 class="desk-title text-[1.75rem] leading-tight">Waiting for you</h1>
+					<p class="desk-muted mt-1">
+						<span class="tabular-nums">{plural(data.rows.length, 'item')}</span>,
+						<span class="tabular-nums">{plural(total, 'ask')}</span>. The order changes only when you pick a sort.
+					</p>
+				</div>
+				<div class="flex items-center gap-3">
+					<span id="sort-label" class="text-sm font-semibold">Sort</span>
+					<div class="join rounded-field border border-base-300 bg-base-100" role="radiogroup" aria-labelledby="sort-label">
+						<input
+							type="radio"
+							name="sort"
+							class="join-item btn btn-sm"
+							aria-label="Asks first"
+							checked={sort === 'asks'}
+							onchange={() => pick('asks')}
+						/>
+						<input
+							type="radio"
+							name="sort"
+							class="join-item btn btn-sm"
+							aria-label="Oldest first"
+							checked={sort === 'oldest'}
+							onchange={() => pick('oldest')}
+						/>
+					</div>
+				</div>
+			</div>
+			<div class="mt-4">
+				<!-- svelte-ignore a11y_no_redundant_roles: the phone layout sets display:block, which drops table semantics in some browsers, so the roles restore them -->
+				<table class="table board-table" role="table">
+					<!-- svelte-ignore a11y_no_redundant_roles: the phone layout sets display:block, which drops table semantics in some browsers, so the roles restore them -->
+					<thead role="rowgroup">
+						<!-- svelte-ignore a11y_no_redundant_roles: the phone layout sets display:block, which drops table semantics in some browsers, so the roles restore them -->
+						<tr role="row">
+							<th role="columnheader" scope="col" class="init-col">Initiative</th>
+							<th role="columnheader" scope="col">Packet</th>
+							<th role="columnheader" scope="col" class="num">Asks</th>
+							<th role="columnheader" scope="col" class="num">Waiting</th>
+						</tr>
+					</thead>
+					{#each groups as group (group.title)}
+						<!-- svelte-ignore a11y_no_redundant_roles: the phone layout sets display:block, which drops table semantics in some browsers, so the roles restore them -->
+						<tbody role="rowgroup">
+							{#each group.rows as row, i (row.id)}
+								<!-- svelte-ignore a11y_no_redundant_roles: the phone layout sets display:block, which drops table semantics in some browsers, so the roles restore them -->
+								<tr role="row" class="board-row">
+									<th role="rowheader" scope="row" class="init-cell align-top">
+										{#if i === 0}{group.title}{:else}<span class="sr-only">{group.title}</span>{/if}
+									</th>
+									<td role="cell" class="align-top">
+										<a class="board-link font-medium" href="/item/{row.id}" data-sveltekit-replacestate>
+											{row.headline}
+										</a>
+										<div class="desk-muted mt-0.5 flex flex-wrap items-center gap-x-2 text-[0.8rem]">
+											<span>{scent(row)}</span>
+											{#if row.irreversible}
+												<span class="tone-error inline-flex items-center gap-1 font-semibold">
+													<PacketIcon name="lock" class="size-3.5" />Irreversible
+												</span>
+											{/if}
+										</div>
+									</td>
+									<td role="cell" class="num align-top">
+										{#if row.single}<span class="desk-muted">&ndash;</span>{:else}<span class={row.asks ? 'font-semibold' : 'desk-muted'}>{row.asks}</span>{/if}
+									</td>
+									<td role="cell" class="num align-top">{age(row.created)}</td>
+								</tr>
+							{/each}
+						</tbody>
+					{/each}
+				</table>
+			</div>
 		</div>
-		<p class="desk-muted mt-8 text-sm">New items open in this tab.</p>
-	</div>
-</main>
+	</main>
+{/if}
+
+<style>
+	.board-table {
+		font-size: 1rem;
+	}
+	.board-table th,
+	.board-table td {
+		padding-block: 6px;
+	}
+	.board-table thead th {
+		color: var(--color-muted);
+		font-size: 0.875rem;
+		font-weight: 600;
+	}
+	.init-col {
+		width: 11rem;
+	}
+	.num {
+		text-align: right;
+		font-variant-numeric: tabular-nums;
+		white-space: nowrap;
+		width: 5rem;
+	}
+	.init-cell {
+		color: var(--color-base-content);
+		font-weight: 600;
+	}
+	.board-row {
+		position: relative;
+	}
+	.board-row:hover {
+		background-color: var(--color-base-200);
+	}
+	/* The link stretches over its row: the whole row is the target and takes the focus ring. */
+	.board-link::after {
+		content: '';
+		position: absolute;
+		inset: 0;
+	}
+	.board-link:focus-visible {
+		outline: none;
+	}
+	.board-link:focus-visible::after {
+		outline: 2px solid var(--color-primary);
+		outline-offset: -2px;
+		border-radius: var(--radius-field);
+	}
+	.board-link:hover {
+		color: var(--color-primary);
+		text-decoration: underline;
+		text-underline-offset: 3px;
+	}
+	/* A heavier rule between initiatives than between rows, at the 3:1 field-border token. */
+	.board-table tbody + tbody > tr:first-child > :global(*) {
+		border-top: 2px solid var(--site-field-border);
+	}
+
+	/* Phone: the initiative takes its own line above its first row. */
+	@media (max-width: 639.98px) {
+		.board-table,
+		.board-table thead,
+		.board-table tbody {
+			display: block;
+		}
+		.init-col {
+			display: none;
+		}
+		.board-table thead tr,
+		.board-row {
+			display: grid;
+			grid-template-columns: minmax(0, 1fr) 3rem 4.5rem;
+			column-gap: 8px;
+			align-items: start;
+		}
+		.board-table th,
+		.board-table td {
+			padding-inline: 0;
+			border-bottom: 0;
+		}
+		.board-table thead tr,
+		.board-table tbody tr:not(:last-child) {
+			border-bottom: 1px solid color-mix(in oklab, var(--color-base-content) 5%, transparent);
+		}
+		.num {
+			width: auto;
+		}
+		.board-row > .init-cell {
+			grid-column: 1 / -1;
+			padding-block: 8px 0;
+		}
+		.board-row > .init-cell:has(.sr-only) {
+			padding: 0;
+		}
+		.board-row > td {
+			padding-top: 4px;
+		}
+		.board-table tbody + tbody > tr:first-child > :global(td) {
+			border-top: 0;
+		}
+		.board-table tbody + tbody > tr:first-child > :global(.init-cell) {
+			padding-top: 12px;
+		}
+	}
+</style>

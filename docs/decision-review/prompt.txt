@@ -1,0 +1,23 @@
+You are running the monthly decision review for the approval-queue app, on this host only. Queue state lives per host, so review the host you are on and no other.
+
+Read these files in the state directory (`${XDG_STATE_HOME:-$HOME/.local/state}/approval-queue/`):
+
+- `decisions.jsonl`: one line per decided part, plus one per ask with no part.
+- `refusals.jsonl`: one line per packet the command refused.
+- every `items/*/packet.md` still on disk, for word counts and for parts that repeat across packets.
+
+Limit the review to lines dated in the month just ended. Take the month from the first argument you were given, or the previous calendar month if none.
+
+Report these five items, with counts and the refs behind each:
+
+1. The override rate per ask rule and per routine verdict: the share of lines whose `overridden` is true.
+2. Asks Geoff always answered with the recommendation, as candidates to move to routine. Name a rule only when it has at least five asks in the month and none was overridden.
+3. Routine parts Geoff overrode, as candidates to become asks.
+4. Packets refused for more than three asks, and parts that appeared in more than one packet.
+5. Packets over the brief's word target, per the register at `~/.claude/docs/voice/approval-brief.md`.
+
+Then send your proposed edits to the ask rules, the register, or `pass-core` as a packet under the `approval-packets` initiative, through the `approval-packet` skill. Each proposal is an ask. A rule changes only through a ruling Geoff approves, so edit nothing yourself.
+
+Last, add one line for this host and month to `docs/decision-review/log.md` in the approval-queue repo, in the shape that file sets out. Add the line in a quiet month too, with zero counts, so a lost log costs at most one month of history.
+
+Report the five items and the packet's id in your reply. Do not summarize the log's lines back; Geoff reads the packet.
