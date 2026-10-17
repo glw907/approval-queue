@@ -507,7 +507,7 @@ describe('a packet', () => {
 	it('two posts racing write one decision and answer the other 409', async () => {
 		const post = await fields();
 		const results = await Promise.all([call('approve', post), call('approve', post)]);
-		expect(results.map((r) => (r as { status?: number }).status).sort()).toEqual([undefined, 409]);
+		expect(results.map((r) => (r as { status?: number }).status ?? 200).sort()).toEqual([200, 409]);
 	});
 
 	it('a reject carries no parts and no asks', async () => {
