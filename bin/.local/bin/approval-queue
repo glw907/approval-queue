@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # approval-queue: put one item (a PR, a design, a triage list) in front of Geoff in the Design & PR Approvals app
-# and print his decision as JSON on stdout. Build, server, and Firefox output go to server.log.
+# and print his decision as JSON on stdout. Build, server, and browser output go to server.log.
 set -euo pipefail
 
 usage="usage: approval-queue <pr|design|triage> <repo> <title> <source>
@@ -239,7 +239,7 @@ if [ -n "$(find "$seen" -newermt '-5 seconds' 2>/dev/null)" ]; then
   done
 fi
 if [ -z "$shown" ]; then
-  setsid -f firefox --new-tab "$base/item/$id" >>"$log" 2>&1
+  setsid -f xdg-open "$base/item/$id" >>"$log" 2>&1
   touch "$seen"
 fi
 exec 9>&-

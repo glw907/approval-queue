@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # approval-queue.test.sh: prove the approval-queue command against this worktree's own copy, with
-# curl, firefox, setsid, and gh stubbed on PATH. Never starts the app or opens a browser.
+# curl, xdg-open, setsid, and gh stubbed on PATH. Never starts the app or opens a browser.
 set -uo pipefail
 cd "$(dirname "$0")/.."
 SCRIPT="$(pwd)/bin/.local/bin/approval-queue"
@@ -20,9 +20,9 @@ cat >"$stubs/curl" <<'STUB'
 case "$*" in *"/item/"*) [ -z "${STUB_ITEM_FAILS:-}" ] || exit 22 ;; esac
 exit 0
 STUB
-cat >"$stubs/firefox" <<'STUB'
+cat >"$stubs/xdg-open" <<'STUB'
 #!/usr/bin/env bash
-echo "$*" >>"$STUB_DIR/firefox.record"
+echo "$*" >>"$STUB_DIR/open.record"
 STUB
 cat >"$stubs/setsid" <<'STUB'
 #!/usr/bin/env bash
@@ -72,7 +72,7 @@ wait_for() {
 # run_kind <kind> <source> <content files>
 run_kind() {
   local kind=$1 source=$2 files=$3 dir id f want i
-  rm -rf "$state/items" "$state/tab.seen" "$root/firefox.record"
+  rm -rf "$state/items" "$state/tab.seen" "$root/open.record"
   bash "$SCRIPT" "$kind" owner/repo "A title" "$source" >"$root/out" 2>"$root/err" &
   bgpid=$!
   wait_for "$state/items/*/item.json" || return
@@ -97,8 +97,8 @@ run_kind() {
     assert_eq "$(jq 'has("head")' "$dir/item.json")" "false" "$kind: no head"
     [ "$kind" != design ] || assert_eq "$(jq -r .file "$dir/item.json")" "design.md" "design: file"
   fi
-  wait_for "$root/firefox.record" || return
-  assert_eq "$(cat "$root/firefox.record")" "--new-tab http://127.0.0.1:7907/item/$id" "$kind: firefox args"
+  wait_for "$root/open.record" || return
+  assert_eq "$(cat "$root/open.record")" "http://127.0.0.1:7907/item/$id" "$kind: xdg-open args"
   [ -e "$state/tab.seen" ] || { echo "FAIL: $kind: opening a tab did not stamp tab.seen"; fail=1; }
   printf '{"decision":"approve"}\n' >"$dir/decision.json.tmp"
   mv "$dir/decision.json.tmp" "$dir/decision.json"
@@ -121,7 +121,7 @@ run_kind triage "$root/triage.json" "triage.json"
 # hand_over <label>: runs a design handover with tab.seen as the caller left it, decides it once
 # item.json lands, and prints how many tabs the command opened.
 hand_over() {
-  rm -rf "$state/items" "$root/firefox.record"
+  rm -rf "$state/items" "$root/open.record"
   bash "$SCRIPT" design owner/repo T "$root/design.md" >/dev/null 2>&1 &
   bgpid=$!
   wait_for "$state/items/*/item.json" || return
@@ -131,7 +131,7 @@ hand_over() {
   sleep 1
   printf '{"decision":"approve"}\n' >"$dir/decision.json"
   wait "$bgpid"; bgpid=""
-  if [ -e "$root/firefox.record" ]; then wc -l <"$root/firefox.record"; else echo 0; fi
+  if [ -e "$root/open.record" ]; then wc -l <"$root/open.record"; else echo 0; fi
 }
 
 # A live tab, polling every half second here, takes the item: no new tab.
@@ -146,14 +146,14 @@ touch -d '-1 minute' "$state/tab.seen"
 assert_eq "$(hand_over)" "1" "stale tab.seen: tabs opened"
 
 # Two handovers at once with no tab open: the first opens one, the second hands its item to it.
-rm -rf "$state/items" "$state/tab.seen" "$root/firefox.record"
+rm -rf "$state/items" "$state/tab.seen" "$root/open.record"
 bash "$SCRIPT" design owner/repo T1 "$root/design.md" >/dev/null 2>&1 &
 p1=$!
 bash "$SCRIPT" design owner/repo T2 "$root/design.md" >/dev/null 2>&1 &
 p2=$!
 # The opened tab polls like a real one, so a command that queued its item after the first
 # stamp of tab.seen still finds the tab inside its 5-second wait.
-wait_for "$root/firefox.record"
+wait_for "$root/open.record"
 ( while :; do touch "$state/tab.seen"; sleep 0.5; done ) &
 poller=$!
 for _ in $(seq 50); do [ "$(ls "$state"/items/*/item.json 2>/dev/null | wc -l)" = 2 ] && break; sleep 0.1; done
@@ -161,13 +161,13 @@ sleep 1
 for d in "$state"/items/*/; do printf '{"decision":"approve"}\n' >"$d/decision.json"; done
 wait "$p1" "$p2"
 kill "$poller"; wait "$poller" 2>/dev/null
-assert_eq "$(wc -l <"$root/firefox.record" 2>/dev/null)" "1" "concurrent: tabs opened"
+assert_eq "$(wc -l <"$root/open.record" 2>/dev/null)" "1" "concurrent: tabs opened"
 
 # TERM to a waiting command: exit 143, no item.json.
-rm -rf "$state/items" "$state/tab.seen" "$root/firefox.record"
+rm -rf "$state/items" "$state/tab.seen" "$root/open.record"
 bash "$SCRIPT" design owner/repo T "$root/design.md" >/dev/null 2>&1 &
 bgpid=$!
-if wait_for "$root/firefox.record"; then
+if wait_for "$root/open.record"; then
   kill -TERM "$bgpid"
   for _ in $(seq 50); do kill -0 "$bgpid" 2>/dev/null || break; sleep 0.1; done
   if kill -0 "$bgpid" 2>/dev/null; then

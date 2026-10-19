@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # packet.test.sh: prove the packet half of the approval-queue command against this worktree's own
-# copy, with curl, firefox, setsid, and gh stubbed on PATH. The decision handling is the merge
+# copy, with curl, xdg-open, setsid, and gh stubbed on PATH. The decision handling is the merge
 # authorization path, so most of this file pins what the command prints and logs for a decision.
 # Never starts the app, opens a browser, or touches the live queue state.
 set -uo pipefail
@@ -28,9 +28,9 @@ cat >"$stubs/curl" <<'STUB'
 echo "$*" >>"$STUB_DIR/curl.record"
 exit 0
 STUB
-cat >"$stubs/firefox" <<'STUB'
+cat >"$stubs/xdg-open" <<'STUB'
 #!/usr/bin/env bash
-echo "$*" >>"$STUB_DIR/firefox.record"
+echo "$*" >>"$STUB_DIR/open.record"
 STUB
 cat >"$stubs/setsid" <<'STUB'
 #!/usr/bin/env bash
@@ -92,7 +92,7 @@ wait_for() {
 # queue <command args>: starts the command in the background and sets dir to its item directory.
 dir=""
 queue() {
-  rm -rf "$state/items" "$root/firefox.record"
+  rm -rf "$state/items" "$root/open.record"
   bash "$SCRIPT" "$@" >"$root/out" 2>"$root/err" &
   bgpid=$!
   dir=""
@@ -224,7 +224,7 @@ decide "$GOOD"
 refuse() {
   local label=$1 want=$2 initiative=$3 got
   shift 3
-  rm -rf "$state/items" "$root/firefox.record" "$state/refusals.jsonl"
+  rm -rf "$state/items" "$root/open.record" "$state/refusals.jsonl"
   timeout 20 bash "$SCRIPT" packet "$@" >"$root/out" 2>"$root/err"
   assert_eq "$?" "2" "$label: exit code"
   grep -qF -- "$want" "$root/err" || { echo "FAIL: $label: message lacks '$want': $(cat "$root/err")"; fail=1; }
@@ -318,12 +318,12 @@ grep -q "glw907/drafter#42.*$(basename "$refuse_dir")" "$root/err2" || { echo "F
 decide '{"decision":"approve"}'
 
 # --check runs the checks and queues nothing: no item, no tab, no app start.
-rm -rf "$state/items" "$state/tab.seen" "$state/start.lock" "$root/firefox.record" "$root/curl.record"
+rm -rf "$state/items" "$state/tab.seen" "$state/start.lock" "$root/open.record" "$root/curl.record"
 timeout 20 bash "$SCRIPT" packet --check drafter "$PACKET" >"$root/out" 2>"$root/err"
 assert_eq "$?" "0" "--check: exit code"
 assert_eq "$(wc -c <"$root/out")" "0" "--check: stdout"
 ! compgen -G "$state/items/*" >/dev/null || { echo "FAIL: --check: left an item directory"; fail=1; }
-[ ! -e "$root/firefox.record" ] && [ ! -e "$state/tab.seen" ] || { echo "FAIL: --check: opened a tab"; fail=1; }
+[ ! -e "$root/open.record" ] && [ ! -e "$state/tab.seen" ] || { echo "FAIL: --check: opened a tab"; fail=1; }
 [ ! -e "$root/curl.record" ] || { echo "FAIL: --check: reached for the app"; fail=1; }
 [ ! -e "$state/start.lock" ] || { echo "FAIL: --check: took the app start lock"; fail=1; }
 mkpr 43 ccc333 MERGED pass
