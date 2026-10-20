@@ -39,8 +39,15 @@ exec "$@"
 STUB
 # gh answers by PR number from $STUB_DIR/pr-<n>.json. A pr-<n>.moving file makes every view report
 # a head that differs from the last, so the command sees the head move on each fetch.
+# A pr-<n>.toolarge file makes `gh pr diff` refuse as GitHub does past 300 files, and `gh api` then
+# answers from pr-<n>.files.json.
 cat >"$stubs/gh" <<'STUB'
 #!/usr/bin/env bash
+if [ "$1" = api ]; then
+  n=${3#*/pulls/}; n=${n%%/*}
+  echo "gh $*" >>"$STUB_DIR/gh.record"
+  cat "$STUB_DIR/pr-$n.files.json"; exit 0
+fi
 n=$3
 f="$STUB_DIR/pr-$n.json"
 [ -e "$f" ] || { echo "no pull request $n" >&2; exit 1; }
@@ -51,7 +58,12 @@ case "$2" in
       c=$(($(cat "$STUB_DIR/pr-$n.calls" 2>/dev/null || echo 0) + 1)); echo "$c" >"$STUB_DIR/pr-$n.calls"
       jq -c --arg h "moved$c" '.headRefOid = $h' "$f"
     else jq -c . "$f"; fi ;;
-  diff) echo "diff --git a/pr$n b/pr$n" ;;
+  diff)
+    if [ -e "$STUB_DIR/pr-$n.toolarge" ]; then
+      echo "could not find pull request diff: HTTP 406: Sorry, the diff exceeded the maximum number of files (300)." >&2
+      echo "PullRequest.diff too_large" >&2; exit 1
+    fi
+    echo "diff --git a/pr$n b/pr$n" ;;
 esac
 STUB
 chmod +x "$stubs"/*
@@ -213,6 +225,18 @@ assert_eq "$(cat "$dir/parts/1/diff.patch")" "diff --git a/pr42 b/pr42" "item: p
 [ -s "$dir/parts/1/body.md" ] && cmp -s "$PACKET" "$dir/packet.md" || { echo "FAIL: item: body or packet.md missing"; fail=1; }
 assert_eq "$(jq -r .headline "$dir/packet.json")" "$(jq -r .headline "$dir/item.json")" "item: packet.json parse"
 decide "$GOOD"
+
+# A PR too large for `gh pr diff` gets its diff from the file list: a rename with no patch keeps
+# its header and rename lines, and a changed file carries its patch.
+touch "$root/pr-42.toolarge"
+printf '%s\n' '[{"filename":"docs/plans/a.md","previous_filename":"docs/old/a.md","status":"renamed"}]' \
+  '[{"filename":"b.md","status":"modified","patch":"@@ -1 +1 @@\n-x\n+y"}]' >"$root/pr-42.files.json"
+queue packet drafter "$PACKET"
+assert_eq "$(cat "$dir/parts/1/diff.patch")" "$(printf '%s\n' 'diff --git a/docs/old/a.md b/docs/plans/a.md' \
+  'rename from docs/old/a.md' 'rename to docs/plans/a.md' 'diff --git a/b.md b/b.md' '--- a/b.md' '+++ b/b.md' \
+  '@@ -1 +1 @@' '-x' '+y')" "too-large diff: built from the file list"
+decide "$GOOD"
+rm "$root/pr-42.toolarge"
 
 # A packet with initiative none queues with no initiative title.
 queue packet none "$PACKET"

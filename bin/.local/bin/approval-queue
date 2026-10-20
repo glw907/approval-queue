@@ -50,6 +50,23 @@ check_brief() {
   headline=$(jq -r '.headline' <<<"$out")
 }
 
+# pr_diff <owner/repo> <n> <file>: saves PR n's diff into file. GitHub refuses a diff of more than
+# 300 files (HTTP 406, too_large), so that one refusal falls back to the PR's file list, which
+# carries each file's patch for up to 3,000 files. A rename with no content change has no patch.
+pr_diff() {
+  local r=$1 n=$2 out=$3 err
+  if err=$(gh pr diff "$n" -R "$r" 2>&1 >"$out" </dev/null); then return 0; fi
+  case $err in
+    *too_large*) ;;
+    *) printf '%s\n' "$err" >&2; return 1 ;;
+  esac
+  gh api --paginate "repos/$r/pulls/$n/files?per_page=100" </dev/null | jq -rs '
+    add | .[] | (.previous_filename // .filename) as $old
+    | "diff --git a/\($old) b/\(.filename)",
+      (if .status == "renamed" then "rename from \($old)", "rename to \(.filename)" else empty end),
+      (if .patch then "--- a/\($old)", "+++ b/\(.filename)", .patch else empty end)' >"$out"
+}
+
 # fetch_pr <dir> <owner/repo> <n>: saves PR n's metadata, body, and diff into dir. The diff must be
 # the diff of the head the decision pins, so a head that moved while fetching is fetched again, and
 # a third move exits 1.
@@ -58,7 +75,7 @@ fetch_pr() {
   mkdir -p "$d"
   for try in 1 2 3; do
     view=$(gh pr view "$n" -R "$r" --json body,headRefOid,number,url,headRefName,baseRefName,statusCheckRollup,state </dev/null)
-    gh pr diff "$n" -R "$r" >"$d/diff.patch" </dev/null
+    pr_diff "$r" "$n" "$d/diff.patch"
     again=$(gh pr view "$n" -R "$r" --json headRefOid </dev/null | jq -r '.headRefOid')
     if [ "$again" = "$(jq -r '.headRefOid' <<<"$view")" ]; then
       jq -r '.body' <<<"$view" >"$d/body.md"
@@ -184,7 +201,7 @@ case "$kind" in
     jq 'del(.body, .headRefOid)' <<<"$view" >"$item/pr.json"
     head=$(jq -r '.headRefOid' <<<"$view")
     number=$(jq -r '.number' <<<"$view")
-    gh pr diff "$source" -R "$repo" >"$item/diff.patch"
+    pr_diff "$repo" "$source" "$item/diff.patch"
     ;;
   design) check_brief "$source"; mkdir -p "$item"; cp "$source" "$item/doc.md"; file=$(basename "$source") ;;
   triage) check_brief "$source"; mkdir -p "$item"; cp "$source" "$item/triage.json" ;;
