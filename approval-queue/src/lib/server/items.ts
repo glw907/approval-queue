@@ -124,7 +124,12 @@ export type Decision =
 			commit?: string;
 			blob?: string;
 	  }
-	| { decision: 'reject'; note: string }
+	| {
+			decision: 'reject';
+			note: string;
+			/** A document review's calls made before it was sent back, so the decided item shows them. */
+			calls?: Array<{ id: string; choice: string }>;
+	  }
 	| { decision: 'submit'; rows: SubmittedRow[] };
 
 export interface Item {

@@ -22,6 +22,18 @@ const marked = new Marked({
 	}
 });
 
+// A pane row is a link itself, and a link may not hold another, so a row's label keeps each link's text only.
+const unlinked = new Marked({
+	renderer: {
+		html({ text }) {
+			return escape(text);
+		},
+		link({ tokens }) {
+			return this.parser.parseInline(tokens);
+		}
+	}
+});
+
 /** Renders markdown to HTML with every raw HTML token, block and inline, escaped. */
 export function render(source: string): string {
 	return marked.parse(source, { async: false });
@@ -30,4 +42,9 @@ export function render(source: string): string {
 /** Renders one line of markdown without a wrapping paragraph, for headlines, list items, and card text. */
 export function renderInline(source: string): string {
 	return marked.parseInline(source, { async: false });
+}
+
+/** Renders one line of markdown as `renderInline` does, with each link reduced to its text, for a label inside a link. */
+export function renderLabel(source: string): string {
+	return unlinked.parseInline(source, { async: false });
 }

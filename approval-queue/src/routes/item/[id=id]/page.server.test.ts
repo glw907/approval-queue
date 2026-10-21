@@ -804,4 +804,9 @@ describe('a change', () => {
 		await call('reject', [['note', 'Keep the old text.']]);
 		expect(await decision()).toEqual({ decision: 'reject', note: 'Keep the old text.' });
 	});
+
+	it('reject records the calls made so far, leaving out an unknown call or label', async () => {
+		await call('reject', [['note', ''], ['call:Q1', 'Keep it'], ['call:L1', 'x']]);
+		expect(await decision()).toEqual({ decision: 'reject', note: '', calls: [{ id: 'Q1', choice: 'Keep it' }] });
+	});
 });

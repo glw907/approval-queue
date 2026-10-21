@@ -3,11 +3,11 @@ import { error, fail } from '@sveltejs/kit';
 import { parseBrief, type Brief } from '#lib/brief.ts';
 import { cardsFor, decideCards, fingerprint, readChoices, type Card } from '#lib/cards.ts';
 import { fileGroups } from '#lib/diff.ts';
-import { render, renderInline } from '#lib/markdown.ts';
+import { render, renderInline, renderLabel } from '#lib/markdown.ts';
 import { checksSummary, reviewSection, reviewVerdict, technicalNotes, withoutBrief } from '#lib/pr-summary.ts';
 import { nextItem } from '#lib/queue.ts';
 import { frontMatter, placeNotes } from '#lib/editor/notes.ts';
-import { buildBlueprintApprove, buildChangeApprove, commitText, isClean, queued } from '#lib/server/blueprint.ts';
+import { buildBlueprintApprove, buildChangeApprove, commitText, isClean, queued, sentBackCalls } from '#lib/server/blueprint.ts';
 import { buildApprove, isIrreversible, packetFingerprint } from '#lib/server/packet-decision.ts';
 import {
 	listWaiting,
@@ -238,6 +238,8 @@ export const load: PageServerLoad = async ({ params }) => {
 		// The text each row shows, rendered once here; `rows` keeps the file's own text for the post.
 		html: content.rows.map((row) => ({
 			action: renderInline(row.action),
+			/** The action again without its links, for the pane row that links to it. */
+			label: renderLabel(row.action),
 			why: renderInline(row.why),
 			detail: row.detail === undefined ? null : renderInline(row.detail)
 		}))
@@ -309,8 +311,10 @@ export const actions: Actions = {
 		}
 		if (found.content.kind === 'blueprint' || found.content.kind === 'page' || found.content.kind === 'change') {
 			if (found.decided) return fail(409, ALREADY_DECIDED);
-			const note = (await request.formData().catch(() => null))?.get('note');
-			return decideOnce(params.id, { decision: 'reject', note: typeof note === 'string' ? note : '' });
+			const form = await request.formData().catch(() => null);
+			const note = form?.get('note');
+			const calls = form ? sentBackCalls(found.content.notes, form) : [];
+			return decideOnce(params.id, { decision: 'reject', note: typeof note === 'string' ? note : '', ...(calls.length && { calls }) });
 		}
 		const item = await readWaiting(params.id);
 		if (item.content.kind === 'triage') return fail(400, { message: 'Nothing to reject' });

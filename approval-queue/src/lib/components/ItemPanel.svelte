@@ -216,10 +216,10 @@ for that save first, and closing the tab then asks before leaving.
 		return { ok: false, message: result.type === 'error' ? result.error.message : 'unexpected answer' };
 	}
 
-	/** A decided item's calls as choice indexes, so its notes show what was chosen. */
+	/** A decided item's calls as choice indexes, approved or sent back, so its notes show what was chosen. */
 	function answeredCalls(notes: PlacedNote[]): Record<string, number> {
 		const decision = 'decision' in data ? data.decision : undefined;
-		if (decision?.decision !== 'approve') return {};
+		if (decision?.decision !== 'approve' && decision?.decision !== 'reject') return {};
 		const out: Record<string, number> = {};
 		for (const call of decision.calls ?? []) {
 			const at = notes.find((n) => n.id === call.id)?.choices?.findIndex((c) => c.label === call.choice) ?? -1;
@@ -389,6 +389,10 @@ for that save first, and closing the tab then asks before leaving.
 		};
 	});
 
+	const STILL_SAVING = 'Your edits are still saving, so this item stays open until they land.';
+	/** Where the reader goes once the save that held a navigation lands; null while none is held. */
+	let leaveAfterSave: (() => void) | null = null;
+
 	beforeNavigate((navigation) => {
 		if (hold) {
 			if (navigation.willUnload) {
@@ -404,9 +408,23 @@ for that save first, and closing the tab then asks before leaving.
 		navigation.cancel();
 		if (navigation.willUnload || !navigation.to) return;
 		const to = navigation.to.url;
+		// The cancel put a Back or Forward back in place, so the same step is taken again, not a new entry.
+		const delta = navigation.type === 'popstate' ? navigation.delta : 0;
+		const waiting = leaveAfterSave !== null;
+		// A second press while the save runs only changes where the reader goes once it lands.
+		leaveAfterSave = () => (delta ? history.go(delta) : void goto(to));
+		if (waiting) return;
+		const stalled = setTimeout(() => {
+			desk.toast = STILL_SAVING;
+			desk.announce(STILL_SAVING);
+		}, 3000);
 		void review.flush().then(() => {
+			clearTimeout(stalled);
+			if (desk.toast === STILL_SAVING) desk.toast = null;
+			const leave = leaveAfterSave;
+			leaveAfterSave = null;
 			if (review.saveFailed) desk.announce(`${review.saveStatus}. You are still on this item.`);
-			else void goto(to);
+			else leave?.();
 		});
 	});
 
@@ -590,7 +608,7 @@ for that save first, and closing the tab then asks before leaving.
 			if (result.type === 'success') {
 				desk.drafts.delete(data.meta.id);
 				try {
-					for (const key of Object.keys(localStorage)) if (remember && key.startsWith(remember)) localStorage.removeItem(key);
+					for (const key of Object.keys(localStorage)) if (remember && (key === remember || key.startsWith(`${remember}.`))) localStorage.removeItem(key);
 				} catch {
 					// The remembered choices are a convenience; a stale entry is ignored once the item is decided.
 				}
@@ -748,7 +766,7 @@ for that save first, and closing the tab then asks before leaving.
 					items={rows.map((row, i) => ({
 						href: `#item-${i}`,
 						label: row.action,
-						labelHtml: html[i]?.action,
+						labelHtml: html[i]?.label,
 						what: row.disposition === row.proposed ? `${TRIAGE_WORD[row.disposition]}, as proposed` : `${TRIAGE_WORD[row.disposition]}, your change`,
 						dot: 'call'
 					}))}

@@ -144,6 +144,18 @@ export function buildBlueprintApprove(notes: readonly Note[], form: Fields, head
 	};
 }
 
+/**
+ * The calls a send-back posted with one of their own choice labels, so the sent-back item shows
+ * them as made. Open calls and unknown ids are left out rather than refused: a send-back needs none.
+ */
+export function sentBackCalls(notes: readonly Note[], form: Fields): Array<{ id: string; choice: string }> {
+	return notes.filter(isCall).flatMap((note) => {
+		const label = form.get(`call:${note.id}`);
+		const picked = typeof label === 'string' ? note.choices?.find((c) => c.label === label) : undefined;
+		return picked ? [{ id: note.id, choice: picked.label }] : [];
+	});
+}
+
 /** Builds the approve decision of a change review: its calls only, since the documents take no edits. */
 export function buildChangeApprove(notes: readonly Note[], form: Fields): BlueprintApprove {
 	const answered = answerCalls(notes, form);
