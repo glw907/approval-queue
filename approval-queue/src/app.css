@@ -44,6 +44,15 @@ main[tabindex='-1']:focus {
 html.desk-no-sk .desk-sk {
 	display: none;
 }
+/* A key hint inside a white field takes the muted ink at full strength, which keeps it at AA. */
+.input .desk-kbd {
+	opacity: 1;
+	color: var(--color-muted);
+}
+/* The pad is the bar's height plus 72px; this sets the toast 8px above the bar's own card. */
+.desk-toast {
+	bottom: max(1rem, calc(var(--desk-bar-pad, 9rem) - 96px));
+}
 
 /* A focused control stays clear of the sticky bar and the toast; ItemPanel sets the pad. */
 html {

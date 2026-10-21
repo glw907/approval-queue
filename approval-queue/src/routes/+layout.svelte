@@ -36,6 +36,79 @@ drawers, and the sheet act on it here, and the open screen acts on the rest thro
 			.sort((a, b) => Number(a.title === SINGLES) - Number(b.title === SINGLES));
 	});
 
+	type SheetRow = { keys: string[]; text: string; single?: boolean };
+	const CTRL_ENTER = ['Ctrl', 'Enter'];
+	/** The shortcut sheet: the keys that work anywhere, then the open screen's own, as its handlers bind them. */
+	const sheetSections = $derived.by(() => {
+		const anywhere: SheetRow[] = [
+			{ keys: ['j'], text: 'Next item in the queue', single: true },
+			{ keys: ['k'], text: 'Previous item in the queue', single: true },
+			{ keys: ['z'], text: 'Undo the last decision, until the next item loads', single: true },
+			{ keys: ['?'], text: 'Show or hide this sheet', single: true },
+			{ keys: ['Esc'], text: 'Close the sheet, a panel, or the note' }
+		];
+		if (!currentId) return [{ title: 'Anywhere', rows: anywhere }];
+		const sendBack: SheetRow = { keys: ['r'], text: 'Send back, with the note field focused', single: true };
+		const approveOr = (what: string): SheetRow => ({ keys: CTRL_ENTER, text: `${what}, or send back once the note is open` });
+		const screens: Record<typeof desk.page, { title: string; rows: SheetRow[] }> = {
+			packet: {
+				title: 'On a packet',
+				rows: [{ keys: ['F8'], text: 'Next open ask' }, approveOr('Approve the packet'), sendBack]
+			},
+			pr: {
+				title: 'On a pull request',
+				rows: [
+					{ keys: ['a'], text: 'Approve and merge', single: true },
+					{ keys: ['F8'], text: 'Next open decision' },
+					approveOr('Approve and merge'),
+					sendBack,
+					{ keys: ['/'], text: 'Filter files by path', single: true }
+				]
+			},
+			design: {
+				title: 'On a design',
+				rows: [
+					{ keys: ['a'], text: 'Approve the design', single: true },
+					{ keys: ['F8'], text: 'Next open decision' },
+					approveOr('Approve the design'),
+					sendBack
+				]
+			},
+			blueprint: { title: 'On a blueprint', rows: editorRows('Approve the plan') },
+			page: { title: 'On a page', rows: editorRows('Approve the page') },
+			change: {
+				title: 'On a change',
+				rows: [
+					{ keys: ['F8'], text: 'Next call for you' },
+					approveOr('Approve the change'),
+					sendBack,
+					{ keys: ['/'], text: 'Filter the code files by path', single: true }
+				]
+			},
+			triage: {
+				title: 'On a triage',
+				rows: [
+					{ keys: ['↑', '↓'], text: 'Move between rows' },
+					{ keys: ['1', '2', '3'], text: 'Do now, do later, or don’t do the focused row', single: true },
+					{ keys: CTRL_ENTER, text: 'Submit your calls' }
+				]
+			}
+		};
+		return [{ title: 'Anywhere', rows: anywhere }, screens[desk.page]];
+
+		function editorRows(approve: string): SheetRow[] {
+			return [
+				{ keys: ['F8'], text: 'Next call for you' },
+				{ keys: ['Ctrl', 'Z'], text: 'Undo' },
+				{ keys: ['Ctrl', 'Shift', 'Z'], text: 'Redo' },
+				{ keys: ['Ctrl', 'S'], text: 'Save now (it also saves as you pause)' },
+				approveOr(approve),
+				{ keys: ['?'], text: 'This list, outside the editor', single: true },
+				sendBack
+			];
+		}
+	});
+
 	onMount(() => {
 		const poll = setInterval(() => invalidate('desk:queue'), 2000);
 		try {
@@ -43,12 +116,13 @@ drawers, and the sheet act on it here, and the open screen acts on the rest thro
 		} catch {
 			// The page works without storage; the switch just stays on.
 		}
-		// A drawer left open across a resize would leave the page behind it inert for no reason.
-		const wide = matchMedia('(min-width: 1260px)');
-		wide.addEventListener('change', closeDrawers);
+		// A drawer left open across a resize would leave the page behind it inert for no reason: the
+		// pane stops being a drawer at 1260px and the rail at 1024px.
+		const wide = [matchMedia('(min-width: 1260px)'), matchMedia('(min-width: 1024px)')];
+		for (const m of wide) m.addEventListener('change', closeDrawers);
 		return () => {
 			clearInterval(poll);
-			wide.removeEventListener('change', closeDrawers);
+			for (const m of wide) m.removeEventListener('change', closeDrawers);
 		};
 	});
 
@@ -99,6 +173,8 @@ drawers, and the sheet act on it here, and the open screen acts on the rest thro
 		// An open confirm dialog makes the page behind it inert, and Escape closes it natively.
 		// The shortcut sheet is the exception: `keyAction` lets `?` close it.
 		if (document.querySelector('dialog[open]:not(#keys)')) return;
+		// Escape closes the open sheet natively; the drawer under it stays for the next Escape.
+		if (e.key === 'Escape' && desk.sheetOpen) return;
 		if (e.key === 'Escape' && (desk.railOpen || desk.paneOpen)) {
 			closeDrawers();
 			return;
@@ -174,7 +250,7 @@ drawers, and the sheet act on it here, and the open screen acts on the rest thro
 			<ul class="rail-list">
 				{#each data.decided as { meta, decision } (meta.id)}
 					<li class="dq">
-						<span title={meta.headline ?? meta.title}>{meta.headline ?? `${KINDS[meta.kind]} ${label(meta)}`}</span>
+						<span title={meta.headline ?? meta.title}>{meta.headline ?? meta.title}</span>
 						<span>{OUTCOMES[decision]}</span>
 					</li>
 				{/each}
@@ -239,71 +315,23 @@ drawers, and the sheet act on it here, and the open screen acts on the rest thro
 			</span>
 		</label>
 		<div class="mt-3 grid gap-x-8 gap-y-4 text-sm sm:grid-cols-2">
-			<section>
-				<h3 class="desk-muted mb-1 font-semibold">Anywhere</h3>
-				<table class="table table-xs">
-					<tbody>
-						<tr><td><kbd class="kbd kbd-xs desk-kbd desk-sk">j</kbd></td><td>Next item in the queue</td></tr>
-						<tr><td><kbd class="kbd kbd-xs desk-kbd desk-sk">k</kbd></td><td>Previous item in the queue</td></tr>
-						<tr>
-							<td><kbd class="kbd kbd-xs desk-kbd desk-sk">z</kbd></td>
-							<td>Undo the last decision, until the next item loads</td>
-						</tr>
-						<tr><td><kbd class="kbd kbd-xs desk-kbd desk-sk">?</kbd></td><td>Show or hide this sheet</td></tr>
-						<tr><td><kbd class="kbd kbd-xs desk-kbd">F8</kbd></td><td>Next open call</td></tr>
-						<tr><td><kbd class="kbd kbd-xs desk-kbd">Esc</kbd></td><td>Close the sheet, a panel, or the note</td></tr>
-					</tbody>
-				</table>
-			</section>
-			<section>
-				<h3 class="desk-muted mb-1 font-semibold">PR and design</h3>
-				<table class="table table-xs">
-					<tbody>
-						<tr><td><kbd class="kbd kbd-xs desk-kbd desk-sk">a</kbd></td><td>Approve</td></tr>
-						<tr>
-							<td><kbd class="kbd kbd-xs desk-kbd desk-sk">r</kbd></td>
-							<td>Send back, with the note field focused</td>
-						</tr>
-						<tr>
-							<td class="whitespace-nowrap">
-								<kbd class="kbd kbd-xs desk-kbd">Ctrl</kbd> <kbd class="kbd kbd-xs desk-kbd">Enter</kbd>
-							</td>
-							<td>Send back with the note</td>
-						</tr>
-						<tr>
-							<td><kbd class="kbd kbd-xs desk-kbd desk-sk">/</kbd></td>
-							<td>Filter files by path (PR only)</td>
-						</tr>
-					</tbody>
-				</table>
-			</section>
-			<section>
-				<h3 class="desk-muted mb-1 font-semibold">Triage</h3>
-				<table class="table table-xs">
-					<tbody>
-						<tr>
-							<td class="whitespace-nowrap">
-								<kbd class="kbd kbd-xs desk-kbd">↑</kbd> <kbd class="kbd kbd-xs desk-kbd">↓</kbd>
-							</td>
-							<td>Move between rows</td>
-						</tr>
-						<tr>
-							<td class="whitespace-nowrap">
-								<kbd class="kbd kbd-xs desk-kbd desk-sk">1</kbd>
-								<kbd class="kbd kbd-xs desk-kbd desk-sk">2</kbd>
-								<kbd class="kbd kbd-xs desk-kbd desk-sk">3</kbd>
-							</td>
-							<td>Do now, do later, or don’t do the focused row</td>
-						</tr>
-						<tr>
-							<td class="whitespace-nowrap">
-								<kbd class="kbd kbd-xs desk-kbd">Ctrl</kbd> <kbd class="kbd kbd-xs desk-kbd">Enter</kbd>
-							</td>
-							<td>Submit your calls</td>
-						</tr>
-					</tbody>
-				</table>
-			</section>
+			{#each sheetSections as section (section.title)}
+				<section>
+					<h3 class="desk-muted mb-1 font-semibold">{section.title}</h3>
+					<table class="table table-xs">
+						<tbody>
+							{#each section.rows as row (row.text)}
+								<tr>
+									<td class="whitespace-nowrap">
+										{#each row.keys as key, i (i)}<kbd class={['kbd kbd-xs desk-kbd', row.single && 'desk-sk', i > 0 && 'ms-1']}>{key}</kbd>{/each}
+									</td>
+									<td>{row.text}</td>
+								</tr>
+							{/each}
+						</tbody>
+					</table>
+				</section>
+			{/each}
 		</div>
 		<div class="modal-action mt-4">
 			<form method="dialog">
@@ -317,7 +345,8 @@ drawers, and the sheet act on it here, and the open screen acts on the rest thro
 <div class="sr-only" role="status" aria-live="polite" id="sr-status">{desk.status}</div>
 
 {#if desk.toast !== null}
-	<div class="toast toast-center bottom-24 z-40">
+	<!-- Just above the decision bar, whose height ItemPanel publishes as the pad, so the toast never covers it. -->
+	<div class="toast toast-center desk-toast z-40">
 		<div
 			class={['alert border border-base-300 text-sm', desk.toastError ? 'alert-error' : 'alert-info']}
 		>

@@ -8,6 +8,8 @@ label per row. Renders `empty` instead when there are no items.
 		/** An in-page anchor, `#ask-1`; following it closes the pane drawer. */
 		href: string;
 		label: string;
+		/** The label as inline HTML the server rendered from Markdown, shown in place of `label`. */
+		labelHtml?: string;
 		/** The line under the label. */
 		what?: string;
 		/** `call` is open and amber, `fix` is a correction, `done` is settled. */
@@ -39,10 +41,12 @@ label per row. Renders `empty` instead when there are no items.
 				<a href={item.href} class={[item.sub && 'l3']}>
 					{#if numbered}
 						<span class="n">{item.n}</span><span class="t">{item.label}</span>
-						{#if item.mark}<span class="mk" aria-label="open call"></span>{/if}
+						{#if item.mark}<span class="mk" role="img" aria-label="open call"></span>{/if}
 					{:else}
 						{#if item.dot}<span class="dot {item.dot}" aria-hidden="true"></span>{/if}
-						<span>{item.label}{#if item.what}<span class="what">{item.what}</span>{/if}</span>
+						<span
+							>{#if item.labelHtml}{@html item.labelHtml}{:else}{item.label}{/if}{#if item.what}<span class="what">{item.what}</span>{/if}</span
+						>
 					{/if}
 				</a>
 			</li>

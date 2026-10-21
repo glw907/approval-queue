@@ -37,3 +37,16 @@ export function closeDrawers() {
 	setDrawer('pane', false);
 	setDrawer('rail', false);
 }
+
+/**
+ * Closes every drawer at once and leaves focus alone, for a link that moves focus to its own
+ * target: the page behind must stop being inert before that target can take focus, and handing
+ * focus back to the drawer's opener afterward would undo the move.
+ */
+export function closeDrawersForLink() {
+	if (!desk.railOpen && !desk.paneOpen) return;
+	desk.railOpen = false;
+	desk.paneOpen = false;
+	opener = null;
+	sync();
+}

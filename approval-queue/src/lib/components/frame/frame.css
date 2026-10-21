@@ -290,6 +290,19 @@ html {
 .place .linkbtn {
 	margin-left: auto;
 }
+.place .open {
+	margin-left: auto;
+	white-space: nowrap;
+}
+.place .open + .linkbtn {
+	margin-left: 0;
+}
+.place .next-call {
+	color: var(--cairn-warning-ink);
+}
+.place .nothing-open {
+	color: var(--cairn-success-ink);
+}
 .linkbtn {
 	font: inherit;
 	color: var(--color-primary);
@@ -355,6 +368,15 @@ a {
 .rv-list a:hover,
 .rv-contents a.cur {
 	background: var(--color-base-300);
+}
+.rv-contents a.cur {
+	font-weight: 600;
+}
+/* Muted ink on base-300 measures 4.44:1, so a row on that fill takes a darker mix of it. */
+.rv-list a:hover .what,
+.rv-contents a:hover .n,
+.rv-contents a.cur .n {
+	color: color-mix(in oklab, var(--color-muted) 80%, var(--color-base-content));
 }
 .rv-list .dot {
 	flex: none;

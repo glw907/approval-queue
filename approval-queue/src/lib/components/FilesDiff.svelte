@@ -43,16 +43,15 @@ the filter for as long as it is mounted.
 		`${totals.files} ${plural(totals.files, 'file', 'files')}, +${count(totals.adds)} −${count(totals.dels)}.`
 	);
 
-	$effect(() => {
-		desk.handlers = {
-			...desk.handlers,
+	$effect(() =>
+		desk.register({
 			'focus-filter': async () => {
 				filesOpen = true;
 				await tick();
 				filter?.focus();
 			}
-		};
-	});
+		})
+	);
 
 	function toggleAll() {
 		for (const g of shown) groupOpen[g.name] = !allOpen;

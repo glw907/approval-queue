@@ -27,8 +27,8 @@ export interface KeyContext {
 	noteOpen: boolean;
 	/**
 	 * Approve is locked: a card has no pick, or a pick sends the PR back. It gates the single key `a`
-	 * on a PR or design page. Ctrl+Enter on a packet ignores it, because the page moves focus to the
-	 * first open ask instead of approving.
+	 * on a PR or design page. Ctrl+Enter ignores it, because a locked approve moves focus to the
+	 * first open ask, card, or call instead of approving.
 	 */
 	approveLocked: boolean;
 }
@@ -58,7 +58,7 @@ export function keyAction(key: string, mods: KeyMods, context: KeyContext): KeyA
 		if (page === 'triage') return 'submit';
 		if (noteOpen) return 'send-rejection';
 		// Locked, the handler moves to the first open ask or call, matching the button it advertises.
-		return page === 'packet' || page === 'blueprint' || page === 'page' || page === 'change' ? 'approve' : null;
+		return 'approve';
 	}
 
 	// F8 is a function key, so like Ctrl+Enter it works from a field and ignores the single-key switch.
@@ -78,7 +78,7 @@ export function keyAction(key: string, mods: KeyMods, context: KeyContext): KeyA
 	if (held) return null;
 	if ((page === 'pr' || page === 'design') && key === 'a') return noteOpen || approveLocked ? null : 'approve';
 	if (page !== 'triage' && key === 'r') return 'open-note';
-	if (page === 'pr' && key === '/') return 'focus-filter';
+	if ((page === 'pr' || page === 'change') && key === '/') return 'focus-filter';
 	if (page === 'triage' && key in MOVES) return MOVES[key];
 	return null;
 }

@@ -62,7 +62,7 @@ fragment, since the editor renders only the lines near the viewport.
 	}
 </script>
 
-<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions: a delegated click on the links, which already fire click on Enter -->
 <div class="contents-wrap" onclick={follow}>
 	<PaneSection title="Calls for you"><PaneList items={callItems} empty="No calls in this review." /></PaneSection>
 	{#if fixItems.length}<PaneSection title="Corrected by the fact check"><PaneList items={fixItems} /></PaneSection>{/if}

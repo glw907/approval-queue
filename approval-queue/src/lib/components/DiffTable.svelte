@@ -9,12 +9,18 @@ rather than scroll, so the table never widens the page. It matches the PR screen
 </script>
 
 <table class="desk-diff" aria-label="Diff of {file.path}">
+	<thead class="sr-only">
+		<tr><th scope="col">Old line</th><th scope="col">New line</th><th scope="col">Change</th><th scope="col">Code</th></tr>
+	</thead>
 	<tbody>
 		{#each file.rows as row, i (i)}
 			<tr class={row.kind}>
 				<td class="ln">{row.kind === 'add' || row.kind === 'hunk' ? '' : (row.oldLine ?? '')}</td>
 				<td class="ln">{row.kind === 'del' || row.kind === 'hunk' ? '' : (row.newLine ?? '')}</td>
-				<td class="sg">{row.kind === 'add' ? '+' : row.kind === 'del' ? '−' : ''}</td>
+				<td class="sg">
+					{#if row.kind === 'add'}<span aria-hidden="true">+</span><span class="sr-only">added</span>
+					{:else if row.kind === 'del'}<span aria-hidden="true">−</span><span class="sr-only">removed</span>{/if}
+				</td>
 				<td class="cd">{row.text}</td>
 			</tr>
 		{/each}

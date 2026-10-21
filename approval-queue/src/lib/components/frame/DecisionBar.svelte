@@ -15,7 +15,10 @@ buttons and sets `hideStatus`, which keeps the status line for screen readers on
 		note?: Snippet;
 		/** The send-back button; omitted on a screen with nothing to send back. */
 		reject?: Snippet;
-		/** The state line: a lead sentence and an optional second line. */
+		/**
+		 * The state line: a lead sentence and an optional second line. The screen puts `role="status"`
+		 * on the lead alone, so a count that changes as the reader types is not read aloud each time.
+		 */
 		status: Snippet;
 		/** The state line is read aloud only, because `hold` carries the visible text. */
 		hideStatus?: boolean;
@@ -31,7 +34,7 @@ buttons and sets `hideStatus`, which keeps the status line for screen readers on
 {@render note?.()}
 <div class="bar">
 	{@render reject?.()}
-	<div id={statusId} class={['state', hideStatus && 'sr-only']} role="status">{@render status()}</div>
+	<div id={statusId} class={['state', hideStatus && 'sr-only']}>{@render status()}</div>
 	{@render hold?.()}
 	{@render approve?.()}
 </div>

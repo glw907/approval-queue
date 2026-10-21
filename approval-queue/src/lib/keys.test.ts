@@ -31,9 +31,10 @@ describe('keyAction', () => {
 		expect(keyAction('F8', none, ctx({ sheetOpen: true }))).toBeNull();
 	});
 
-	it('opens the note on r, and focuses the filter on / for a PR only', () => {
+	it('opens the note on r, and focuses the filter on / for a PR or a change only', () => {
 		expect(keyAction('r', none, ctx({ page: 'design' }))).toBe('open-note');
 		expect(keyAction('/', none, base)).toBe('focus-filter');
+		expect(keyAction('/', none, ctx({ page: 'change' }))).toBe('focus-filter');
 		expect(keyAction('/', none, ctx({ page: 'design' }))).toBeNull();
 	});
 
@@ -98,7 +99,7 @@ describe('keyAction', () => {
 		expect(keyAction('r', none, packet)).toBe('open-note');
 	});
 
-	it.each(['blueprint', 'page', 'change'] as const)(
+	it.each(['blueprint', 'page', 'change', 'pr', 'design'] as const)(
 		'approves a %s review on Mod+Enter from the editor, locked or not, and never on a single key',
 		(page) => {
 			const mod = { ...none, ctrl: true };
@@ -106,7 +107,7 @@ describe('keyAction', () => {
 			expect(keyAction('Enter', mod, editing)).toBe('approve');
 			expect(keyAction('Enter', mod, ctx({ page, approveLocked: true }))).toBe('approve');
 			expect(keyAction('Enter', mod, ctx({ page, held: true }))).toBeNull();
-			expect(keyAction('a', none, ctx({ page }))).toBeNull();
+			if (page !== 'pr' && page !== 'design') expect(keyAction('a', none, ctx({ page }))).toBeNull();
 			expect(keyAction('F8', none, editing)).toBe('next-call');
 		}
 	);
@@ -116,8 +117,9 @@ describe('keyAction', () => {
 		expect(keyAction('Enter', { ...none, ctrl: true }, open)).toBe('send-rejection');
 	});
 
-	it('sends a rejection only with the note open', () => {
-		expect(keyAction('Enter', { ...none, ctrl: true }, base)).toBeNull();
+	it('sends a rejection on Mod+Enter only with the note open, and approves otherwise', () => {
+		expect(keyAction('Enter', { ...none, ctrl: true }, ctx({ noteOpen: true }))).toBe('send-rejection');
+		expect(keyAction('Enter', { ...none, ctrl: true }, base)).toBe('approve');
 	});
 
 	it('ignores every decision key while a decision is held', () => {

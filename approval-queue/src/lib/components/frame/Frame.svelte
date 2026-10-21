@@ -5,13 +5,17 @@ screen supplies the work (`children`, led by an optional `FrameHeader`), the pan
 the bar; the frame supplies the place bar and the drawer. Below 1260px the pane is a modal drawer
 opened from the place bar, so a screen's pane content must read the same in both places.
 
+A link into the work from the pane closes the drawer before any handler of the screen's runs, so
+the work is no longer inert when that handler moves focus. A plain fragment link that no handler
+took moves focus to its target itself, rather than leaving it on the pane.
+
 The frame owns `<main id="main">` and `#decision`, which the layout's focus handling and the
 screen's bar-height observer look up by id.
 -->
 <script lang="ts">
 	import type { Snippet } from 'svelte';
 	import { desk } from '#lib/desk.svelte.ts';
-	import { closeDrawers, setDrawer } from './drawers.ts';
+	import { closeDrawers, closeDrawersForLink, setDrawer } from './drawers.ts';
 
 	interface Props {
 		/** The Survey header, `FrameHeader`; a screen that has not adopted it leaves it out. */
@@ -20,17 +24,32 @@ screen's bar-height observer look up by id.
 		children: Snippet;
 		/** The review pane's sections, built from `PaneSection` and `PaneList`. */
 		pane: Snippet;
-		/** The decision bar's form; omitted for a decided item, which shows `decided` instead. */
+		/** The decision bar: the form for a waiting item, or a bar that only says it is decided. */
 		bar: Snippet;
 		/** What the place bar names, the item the reader is on. */
 		where: string;
 		/** The pane's name, on its drawer and on the button that opens it. */
 		paneLabel?: string;
+		/** The place bar's own control before the pane button, such as a link to the next open call. */
+		place?: Snippet;
 	}
 
-	let { header, children, pane, bar, where, paneLabel = 'Review pane' }: Props = $props();
+	let { header, children, pane, bar, where, paneLabel = 'Review pane', place }: Props = $props();
 
 	let paneButton = $state<HTMLButtonElement>();
+
+	const fragmentLink = (e: Event) =>
+		e.target instanceof Element ? e.target.closest<HTMLAnchorElement>('a[href^="#"]') : null;
+
+	/** Focuses a plain link's target once no screen handler took the click. */
+	function focusTarget(e: MouseEvent) {
+		const link = fragmentLink(e);
+		if (!link || e.defaultPrevented) return;
+		const target = document.getElementById(decodeURIComponent(link.hash.slice(1)));
+		if (!target) return;
+		if (!target.matches('a[href], button, input, select, textarea, [tabindex]')) target.tabIndex = -1;
+		target.focus({ preventScroll: true });
+	}
 </script>
 
 <div class="frame">
@@ -39,6 +58,7 @@ screen's bar-height observer look up by id.
 			{@render header?.()}
 			<div class="place">
 				<span class="where"><b>{where}</b></span>
+				{#if place}<span class="open">{@render place()}</span>{/if}
 				<button
 					type="button"
 					class="linkbtn"
@@ -54,14 +74,14 @@ screen's bar-height observer look up by id.
 			</div>
 		</div>
 	</main>
-	<!-- A link into the work closes the drawer, so the target is not left behind a scrim. -->
 	<aside
 		id="review"
 		class={['review', desk.paneOpen && 'open']}
 		aria-label={paneLabel}
 		role={desk.paneOpen ? 'dialog' : undefined}
 		aria-modal={desk.paneOpen ? 'true' : undefined}
-		onclick={(e) => e.target instanceof Element && e.target.closest('a[href^="#"]') && closeDrawers()}
+		onclickcapture={(e) => fragmentLink(e) && closeDrawersForLink()}
+		onclick={focusTarget}
 	>
 		<div class="rv-sticky">
 			<button type="button" class="drawer-x" aria-label="Close the {paneLabel.toLowerCase()}" onclick={closeDrawers}>

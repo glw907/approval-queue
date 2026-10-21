@@ -36,6 +36,21 @@ class Desk {
 	 */
 	drafts = new Map<string, Row[]>();
 
+	/**
+	 * Adds key handlers and returns the function that removes them again, so a component that
+	 * registers from an effect can unregister in its teardown without clearing another's.
+	 */
+	register(handlers: Partial<Record<KeyAction, () => void>>): () => void {
+		this.handlers = { ...this.handlers, ...handlers };
+		return () => {
+			const kept = { ...this.handlers };
+			for (const [action, fn] of Object.entries(handlers) as Array<[KeyAction, () => void]>) {
+				if (kept[action] === fn) delete kept[action];
+			}
+			this.handlers = kept;
+		};
+	}
+
 	/** Blanks the region first so a repeated message is read again. */
 	announce(message: string) {
 		this.status = '';
