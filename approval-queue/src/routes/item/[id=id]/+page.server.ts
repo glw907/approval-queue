@@ -1,3 +1,4 @@
+import { join } from 'node:path';
 import { APPROVAL_QUEUE_STATE } from '$app/env/private';
 import { error, fail } from '@sveltejs/kit';
 import { parseBrief, type Brief } from '#lib/brief.ts';
@@ -6,16 +7,31 @@ import { fileGroups } from '#lib/diff.ts';
 import { render, renderInline, renderLabel } from '#lib/markdown.ts';
 import { checksSummary, reviewSection, reviewVerdict, technicalNotes, withoutBrief } from '#lib/pr-summary.ts';
 import { nextItem } from '#lib/queue.ts';
+import { anchorAt, place, type Anchor, type Comment, type Thread } from '#lib/editor/comments.ts';
 import { frontMatter, placeNotes } from '#lib/editor/notes.ts';
-import { buildBlueprintApprove, buildChangeApprove, commitText, isClean, queued, sentBackCalls } from '#lib/server/blueprint.ts';
+import {
+	buildBlueprintApprove,
+	buildChangeApprove,
+	commitText,
+	isClean,
+	queued,
+	queuedItem,
+	sentBackCalls
+} from '#lib/server/blueprint.ts';
 import { buildApprove, isIrreversible, packetFingerprint } from '#lib/server/packet-decision.ts';
 import {
+	carried,
 	listWaiting,
+	readComments,
 	readItem,
+	readReplies,
+	writeComments,
 	writeDecision,
 	writeDecisionOnce,
+	type CommentStore,
 	type Decision,
 	type Disposition,
+	type Item,
 	type SubmittedRow
 } from '#lib/server/items.ts';
 import type { Actions, PageServerLoad } from './$types';
@@ -69,6 +85,99 @@ function detailRows(brief: Brief | null) {
 		summaryHtml: renderInline(d.summary),
 		bodyHtml: render(d.body.startsWith(d.summary) ? d.body.slice(d.summary.length).trim() : d.body)
 	}));
+}
+
+const itemDir = (id: string) => join(APPROVAL_QUEUE_STATE, 'items', id);
+
+/** Each comment with where its anchor falls in the document now, or null when its text is gone. */
+const placeComments = (doc: string, comments: readonly Comment[]) =>
+	comments.map((c) => ({ ...c, placed: place(doc, c.anchor) }));
+
+/** Each of the author's replies, placed, with Geoff's own reply to it (empty for none) and whether he resolved it. */
+function placeThreads(doc: string, threads: readonly Thread[], store: CommentStore) {
+	const mine = new Map(store.threads.map((t) => [t.id, t]));
+	return threads.map((t) => ({
+		...t,
+		placed: place(doc, t.anchor),
+		reply: mine.get(t.id)?.reply ?? '',
+		resolved: mine.get(t.id)?.resolved === true
+	}));
+}
+
+const OPS = ['add', 'edit', 'delete', 'reply', 'resolve', 'reopen'] as const;
+type Op = (typeof OPS)[number];
+
+type Built = { ok: true; anchor: Anchor } | { ok: false; status: 400 | 409; message: string };
+
+/**
+ * Builds a new comment's anchor from the item as the server reads it now, never from posted text.
+ * A blueprint or page anchors into the file committed at HEAD, which must still be the posted blob;
+ * a change anchors into the named document as queued at its head.
+ */
+function commentAnchor(item: Item, form: FormData): Built {
+	const from = form.get('from');
+	const to = form.get('to');
+	const { content } = item;
+	let doc: string;
+	let commit: string;
+	let file: string | undefined;
+	if (content.kind === 'blueprint' || content.kind === 'page') {
+		if (content.missing) return { ok: false, status: 409, message: `${content.file} is no longer committed in its worktree` };
+		if (form.get('blob') !== content.blob) {
+			return { ok: false, status: 409, message: 'The file changed since your last save; reload the page' };
+		}
+		doc = content.doc;
+		commit = content.commit;
+	} else if (content.kind === 'change') {
+		const named = content.docs.find((d) => d.path === form.get('file'));
+		if (!named) return { ok: false, status: 400, message: 'Name a document this change carries' };
+		doc = named.doc;
+		commit = item.meta.head ?? '';
+		file = named.path;
+	} else return { ok: false, status: 400, message: 'Not a document item' };
+	if (typeof from !== 'string' || typeof to !== 'string' || !/^\d+$/.test(from) || !/^\d+$/.test(to)) {
+		return { ok: false, status: 400, message: 'Not a range' };
+	}
+	const [a, b] = [Number(from), Number(to)];
+	if (a >= b || b > doc.length) return { ok: false, status: 400, message: 'The range is outside the document' };
+	return { ok: true, anchor: anchorAt(doc, a, b, commit, file) };
+}
+
+type Applied = { ok: true; id: string; store: CommentStore } | { ok: false; message: string };
+
+/**
+ * Applies one comment op to a copy of the store. `add` takes the next id; `edit` and `delete` act on
+ * Geoff's comments, and `reply`, `resolve`, and `reopen` on the author's threads. An empty reply
+ * removes Geoff's reply, and a thread entry left with neither a reply nor a resolution is dropped.
+ */
+function applyOp(store: CommentStore, replies: readonly Thread[], op: Op, id: string, text: string, anchor?: Anchor): Applied {
+	const comments = [...store.comments];
+	const threads = store.threads.map((t) => ({ ...t }));
+	let next = store.next;
+	const at = comments.findIndex((c) => c.id === id);
+	if (op === 'add' || op === 'edit') {
+		if (!text.trim()) return { ok: false, message: 'Write the comment first' };
+		if (op === 'add') {
+			if (!anchor) return { ok: false, message: 'Not a range' };
+			id = `C${next++}`;
+			comments.push({ id, text, anchor });
+		} else if (at === -1) return { ok: false, message: `Unknown comment ${id}` };
+		else comments[at] = { ...comments[at], text };
+	} else if (op === 'delete') {
+		if (at === -1) return { ok: false, message: `Unknown comment ${id}` };
+		comments.splice(at, 1);
+	} else {
+		if (!replies.some((t) => t.id === id)) return { ok: false, message: `Unknown thread ${id}` };
+		let entry = threads.find((t) => t.id === id);
+		if (!entry) threads.push((entry = { id }));
+		if (op === 'reply') {
+			if (text.trim()) entry.reply = text;
+			else delete entry.reply;
+		} else if (op === 'resolve') entry.resolved = true;
+		else delete entry.resolved;
+	}
+	const kept = threads.filter((t) => t.reply !== undefined || t.resolved);
+	return { ok: true, id, store: { comments, threads: kept, next } };
 }
 
 export const load: PageServerLoad = async ({ params }) => {
@@ -136,6 +245,8 @@ export const load: PageServerLoad = async ({ params }) => {
 			.map((g) => ({ ...g, files: g.files.filter((f) => !docPaths.has(f.path)) }))
 			.filter((g) => g.files.length);
 		const codeFiles = code.flatMap((g) => g.files);
+		const store = await readComments(APPROVAL_QUEUE_STATE, params.id);
+		const replies = await readReplies(APPROVAL_QUEUE_STATE, params.id);
 		return {
 			meta,
 			decided,
@@ -154,7 +265,16 @@ export const load: PageServerLoad = async ({ params }) => {
 					content.notes.filter((n) => n.file === d.path),
 					d.kind
 				),
-				file: files.find((f) => f.path === d.path) ?? null
+				file: files.find((f) => f.path === d.path) ?? null,
+				comments: placeComments(
+					d.doc,
+					store.comments.filter((c) => c.anchor.file === d.path)
+				),
+				threads: placeThreads(
+					d.doc,
+					replies.filter((t) => t.anchor.file === d.path),
+					store
+				)
 			})),
 			groups: code,
 			totals: {
@@ -168,6 +288,7 @@ export const load: PageServerLoad = async ({ params }) => {
 	if (content.kind === 'blueprint' || content.kind === 'page') {
 		const front = frontMatter(content.original);
 		const pr = /^([^/#\s]+\/[^/#\s]+)#(\d+)$/.exec(content.pr ?? '');
+		const store = await readComments(APPROVAL_QUEUE_STATE, params.id);
 		return {
 			meta,
 			decided,
@@ -184,6 +305,9 @@ export const load: PageServerLoad = async ({ params }) => {
 			track: front.track ?? '',
 			// Anchors resolve against the file as it is now, so a note follows a line an earlier save moved.
 			notes: placeNotes(content.doc, content.notes, content.kind),
+			// Comments and threads re-place by quote and context against the file as it is now, like the notes.
+			comments: placeComments(content.doc, store.comments),
+			threads: placeThreads(content.doc, await readReplies(APPROVAL_QUEUE_STATE, params.id), store),
 			decision
 		};
 	}
@@ -263,26 +387,36 @@ export const actions: Actions = {
 			const form = await request.formData().catch(() => null);
 			if (!form) return fail(400, { message: 'Not a form post' });
 			const { worktree, file } = found.content;
-			// Behind every save already queued, so the HEAD it reads is the one the decision names and no
-			// later save can commit after it: a save on a decided item answers 404.
-			return queued(worktree, file, async () => {
-				const now = await readItem(APPROVAL_QUEUE_STATE, params.id);
-				if (!now) error(404, 'Not found');
-				const { content } = now;
-				if (now.decided) return fail(409, ALREADY_DECIDED);
-				if (content.kind !== 'blueprint' && content.kind !== 'page') return fail(400, { message: 'Not a document item' });
-				if (content.missing) return fail(409, { message: `${content.file} is no longer committed in its worktree` });
-				const clean = await isClean(content.worktree, content.file);
-				const built = buildBlueprintApprove(content.notes, form, { ...content, text: content.doc, clean });
-				return built.ok ? decideOnce(params.id, built.decision) : fail(400, { message: built.message });
-			});
+			// Behind every save and comment already queued, so the HEAD it reads is the one the decision
+			// names and the comments it reads are all of them: a later save or comment answers 404.
+			return queuedItem(itemDir(params.id), () =>
+				queued(worktree, file, async () => {
+					const now = await readItem(APPROVAL_QUEUE_STATE, params.id);
+					if (!now) error(404, 'Not found');
+					const { content } = now;
+					if (now.decided) return fail(409, ALREADY_DECIDED);
+					if (content.kind !== 'blueprint' && content.kind !== 'page') return fail(400, { message: 'Not a document item' });
+					if (content.missing) return fail(409, { message: `${content.file} is no longer committed in its worktree` });
+					const clean = await isClean(content.worktree, content.file);
+					const built = buildBlueprintApprove(content.notes, form, { ...content, text: content.doc, clean });
+					if (!built.ok) return fail(400, { message: built.message });
+					return decideOnce(params.id, { ...built.decision, ...carried(await readComments(APPROVAL_QUEUE_STATE, params.id)) });
+				})
+			);
 		}
 		if (found.content.kind === 'change') {
 			if (found.decided) return fail(409, ALREADY_DECIDED);
 			const form = await request.formData().catch(() => null);
 			if (!form) return fail(400, { message: 'Not a form post' });
-			const built = buildChangeApprove(found.content.notes, form);
-			return built.ok ? decideOnce(params.id, built.decision) : fail(400, { message: built.message });
+			return queuedItem(itemDir(params.id), async () => {
+				const now = await readItem(APPROVAL_QUEUE_STATE, params.id);
+				if (!now) error(404, 'Not found');
+				if (now.decided) return fail(409, ALREADY_DECIDED);
+				if (now.content.kind !== 'change') return fail(400, { message: 'Not a change item' });
+				const built = buildChangeApprove(now.content.notes, form);
+				if (!built.ok) return fail(400, { message: built.message });
+				return decideOnce(params.id, { ...built.decision, ...carried(await readComments(APPROVAL_QUEUE_STATE, params.id)) });
+			});
 		}
 		const item = await readWaiting(params.id);
 		const { content } = item;
@@ -314,7 +448,18 @@ export const actions: Actions = {
 			const form = await request.formData().catch(() => null);
 			const note = form?.get('note');
 			const calls = form ? sentBackCalls(found.content.notes, form) : [];
-			return decideOnce(params.id, { decision: 'reject', note: typeof note === 'string' ? note : '', ...(calls.length && { calls }) });
+			// Behind every comment already queued, so the send-back carries all of them.
+			return queuedItem(itemDir(params.id), async () => {
+				const now = await readItem(APPROVAL_QUEUE_STATE, params.id);
+				if (!now) error(404, 'Not found');
+				if (now.decided) return fail(409, ALREADY_DECIDED);
+				return decideOnce(params.id, {
+					decision: 'reject',
+					note: typeof note === 'string' ? note : '',
+					...(calls.length && { calls }),
+					...carried(await readComments(APPROVAL_QUEUE_STATE, params.id))
+				});
+			});
 		}
 		const item = await readWaiting(params.id);
 		if (item.content.kind === 'triage') return fail(400, { message: 'Nothing to reject' });
@@ -337,6 +482,47 @@ export const actions: Actions = {
 			return commitText(worktree, file, text, base);
 		});
 		return saved.ok ? { blob: saved.blob, commit: saved.commit } : fail(saved.status, { message: saved.message });
+	},
+	/**
+	 * Adds, edits, or deletes one of Geoff's comments on a blueprint, page, or change, or replies to,
+	 * resolves, or reopens one of the author's threads, and answers the stored comments and threads.
+	 * Runs on the item's queue, and on the file's queue too for a blueprint or page, so a decision
+	 * either carries the comment or was written first and the comment answers 404.
+	 */
+	comment: async ({ params, request }) => {
+		const { content } = await readWaiting(params.id);
+		if (content.kind !== 'blueprint' && content.kind !== 'page' && content.kind !== 'change') {
+			return fail(400, { message: 'Not a document item' });
+		}
+		if (content.kind !== 'change' && content.missing) {
+			return fail(409, { message: `${content.file} is no longer committed in its worktree` });
+		}
+		const form = await request.formData().catch(() => null);
+		const op = form?.get('op');
+		if (!form || typeof op !== 'string' || !(OPS as readonly string[]).includes(op)) return fail(400, { message: 'Not a comment op' });
+		const field = (name: string) => {
+			const value = form.get(name);
+			// A form post sends every line break as CRLF; the stored text keeps LF, as the editor does.
+			return typeof value === 'string' ? value.replace(/\r\n/g, '\n') : '';
+		};
+		const step = async () => {
+			const now = await readWaiting(params.id);
+			let anchor: Anchor | undefined;
+			if (op === 'add') {
+				const built = commentAnchor(now, form);
+				if (!built.ok) return fail(built.status, { message: built.message });
+				anchor = built.anchor;
+			}
+			const store = await readComments(APPROVAL_QUEUE_STATE, params.id);
+			const replies = await readReplies(APPROVAL_QUEUE_STATE, params.id);
+			const applied = applyOp(store, replies, op as Op, field('id'), field('text'), anchor);
+			if (!applied.ok) return fail(400, { message: applied.message });
+			await writeComments(APPROVAL_QUEUE_STATE, params.id, applied.store);
+			return { id: applied.id, comments: applied.store.comments, threads: applied.store.threads };
+		};
+		return queuedItem(itemDir(params.id), () =>
+			content.kind === 'change' ? step() : queued(content.worktree, content.file, step)
+		);
 	},
 	submit: async ({ params, request }) => {
 		const item = await readWaiting(params.id);

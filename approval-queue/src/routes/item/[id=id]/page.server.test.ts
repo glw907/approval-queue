@@ -27,6 +27,7 @@ import {
 	seedRepo
 } from '#lib/fixtures/seed-blueprint.ts';
 import { seedPacket } from '#lib/fixtures/seed-packet.ts';
+import { anchorAt, type Thread } from '#lib/editor/comments.ts';
 import { queued } from '#lib/server/blueprint.ts';
 import { actions, load } from './+page.server.ts';
 
@@ -629,7 +630,9 @@ describe('a blueprint', () => {
 			],
 			waived: [],
 			commit: git(repo, 'rev-parse', 'HEAD'),
-			blob: saved.blob
+			blob: saved.blob,
+			comments: [],
+			threads: []
 		});
 		expect(await call('approve', answered(saved.blob))).toMatchObject({ status: 409 });
 	});
@@ -643,7 +646,7 @@ describe('a blueprint', () => {
 
 	it('reject writes the note', async () => {
 		await call('reject', [['note', 'Fold the event section in.']]);
-		expect(await decision()).toEqual({ decision: 'reject', note: 'Fold the event section in.' });
+		expect(await decision()).toEqual({ decision: 'reject', note: 'Fold the event section in.', comments: [], threads: [] });
 	});
 
 	it('a save on a decided item answers 404 and commits nothing', async () => {
@@ -749,7 +752,9 @@ describe('a page', () => {
 			],
 			waived: [{ id: 'D1', choice: "Keep the author's wording", reason: "Kept the author's wording" }],
 			commit: git(repo, 'rev-parse', 'HEAD'),
-			blob: base
+			blob: base,
+			comments: [],
+			threads: []
 		});
 		expect(await call('approve', answered(base))).toMatchObject({ status: 409 });
 		await expect(call('save', [['text', PAGE_DOC], ['base', base]])).rejects.toMatchObject({ status: 404 });
@@ -764,7 +769,7 @@ describe('a page', () => {
 
 	it('reject writes the note', async () => {
 		await call('reject', [['note', 'Say what the table measures.']]);
-		expect(await decision()).toEqual({ decision: 'reject', note: 'Say what the table measures.' });
+		expect(await decision()).toEqual({ decision: 'reject', note: 'Say what the table measures.', comments: [], threads: [] });
 	});
 });
 
@@ -789,7 +794,7 @@ describe('a change', () => {
 
 	it('approve records only the calls, and a second post answers 409', async () => {
 		await call('approve', [['call:Q1', 'Keep it']]);
-		expect(await decision()).toEqual({ decision: 'approve', calls: [{ id: 'Q1', choice: 'Keep it' }] });
+		expect(await decision()).toEqual({ decision: 'approve', calls: [{ id: 'Q1', choice: 'Keep it' }], comments: [], threads: [] });
 		expect(await call('approve', [['call:Q1', 'Keep it']])).toMatchObject({ status: 409 });
 	});
 
@@ -802,11 +807,297 @@ describe('a change', () => {
 	it('reject writes the note, and save is refused', async () => {
 		expect(await call('save', [['text', 'x'], ['base', 'y']])).toMatchObject({ status: 400 });
 		await call('reject', [['note', 'Keep the old text.']]);
-		expect(await decision()).toEqual({ decision: 'reject', note: 'Keep the old text.' });
+		expect(await decision()).toEqual({ decision: 'reject', note: 'Keep the old text.', comments: [], threads: [] });
 	});
 
 	it('reject records the calls made so far, leaving out an unknown call or label', async () => {
 		await call('reject', [['note', ''], ['call:Q1', 'Keep it'], ['call:L1', 'x']]);
-		expect(await decision()).toEqual({ decision: 'reject', note: '', calls: [{ id: 'Q1', choice: 'Keep it' }] });
+		expect(await decision()).toEqual({
+			decision: 'reject',
+			note: '',
+			calls: [{ id: 'Q1', choice: 'Keep it' }],
+			comments: [],
+			threads: []
+		});
+	});
+});
+
+const COMMENTS_DOC = fixture('comments/comments.blueprint.md');
+const COMMENTS_NOTES = fixture('comments/notes.json');
+const SOIL = 'Dry soil at that depth means the plant needs water.';
+const ROW = 'The pot has no drainage hole, so the roots sit in water.';
+const span = (doc: string, text: string): [string, string][] => [
+	['from', String(doc.indexOf(text))],
+	['to', String(doc.indexOf(text) + text.length)]
+];
+const stored = async (id = ID) => JSON.parse(await readFile(join(state.root, 'items', id, 'comments.json'), 'utf8'));
+const loaded = async (id = ID) => (await load({ params: { id } } as never)) as Record<string, any>;
+
+/** A `--replies` file's threads, anchored into `doc` at `commit`. */
+async function seedReplies(doc: string, commit: string, file?: string, id = ID): Promise<Thread[]> {
+	const thread = (tid: string, status: Thread['status'], quote: string): Thread => {
+		const from = doc.indexOf(quote);
+		return { id: tid, status, text: `Reply to ${tid}.`, quote, anchor: anchorAt(doc, from, from + quote.length, commit, file) };
+	};
+	const threads = [thread('C1', 'done', SOIL), thread('C2', 'kept', ROW)];
+	await writeFile(join(state.root, 'items', id, 'replies.json'), JSON.stringify(threads));
+	return threads;
+}
+
+describe('comments on a blueprint', () => {
+	let repo: string;
+	let base: string;
+	let head: string;
+	beforeEach(async () => {
+		repo = await mkdtemp(join(tmpdir(), 'approval-queue-route-comments-'));
+		base = await seedRepo(repo, COMMENTS_DOC);
+		head = git(repo, 'rev-parse', 'HEAD');
+		await seedBlueprintItem(state.root, ID, repo, base, COMMENTS_NOTES);
+	});
+	afterEach(() => rm(repo, { recursive: true, force: true }));
+
+	const add = (text: string, quote = SOIL, blob = base, doc = COMMENTS_DOC) =>
+		call('comment', [['op', 'add'], ['text', text], ['blob', blob], ...span(doc, quote)]);
+	const answered: [string, string][] = [['call:D1', "Keep the author's wording"]];
+
+	it('add anchors the comment into the file committed at the posted blob, and load places it', async () => {
+		const answer = await add('Say how deep a knuckle is.\r\nIn centimetres.');
+		const from = COMMENTS_DOC.indexOf(SOIL);
+		const comment = { id: 'C1', text: 'Say how deep a knuckle is.\nIn centimetres.', anchor: anchorAt(COMMENTS_DOC, from, from + SOIL.length, head) };
+		expect(answer).toEqual({ id: 'C1', comments: [comment], threads: [] });
+		expect(await stored()).toEqual({ comments: [comment], threads: [], next: 2 });
+		expect(comment.anchor.quote).toBe(SOIL);
+		expect((await loaded()).comments).toEqual([{ ...comment, placed: { from, to: from + SOIL.length } }]);
+	});
+
+	it('load re-places a comment after a save moves its text, and shows a deleted one as unplaced', async () => {
+		await add('One.');
+		await add('Two.', ROW);
+		const moved = COMMENTS_DOC.replace('## Check the soil\n', '## Check the soil\n\nA new paragraph.\n').replace(ROW, 'Gone.');
+		await call('save', [['text', moved], ['base', base]]);
+		const [soil, row] = (await loaded()).comments;
+		expect(moved.slice(soil.placed.from, soil.placed.to)).toBe(SOIL);
+		expect(soil.placed.from).not.toBe(soil.anchor.from);
+		expect(row.placed).toBeNull();
+	});
+
+	it('add against a stale blob answers 409, and against a range outside the file 400', async () => {
+		const saved = (await call('save', [['text', `${COMMENTS_DOC}more\n`], ['base', base]])) as { blob: string };
+		expect(await add('Late.')).toMatchObject({ status: 409 });
+		expect(await call('comment', [['op', 'add'], ['text', 'x'], ['blob', saved.blob], ['from', '5'], ['to', '5']])).toMatchObject({ status: 400 });
+		expect(await call('comment', [['op', 'add'], ['text', 'x'], ['blob', saved.blob], ['from', '0'], ['to', '99999']])).toMatchObject({ status: 400 });
+		expect(await add('   ', SOIL, saved.blob)).toMatchObject({ status: 400 });
+		expect(await call('comment', [['op', 'nope']])).toMatchObject({ status: 400 });
+		expect(await add('Fresh.', SOIL, saved.blob)).toMatchObject({ id: 'C1' });
+	});
+
+	it('add on a file no longer committed answers 409', async () => {
+		git(repo, 'rm', '-q', SAMPLE_FILE);
+		git(repo, 'commit', '-q', '-m', 'Remove the blueprint');
+		expect(await add('Gone.')).toMatchObject({ status: 409 });
+	});
+
+	it('every op on a decided item answers 404 and writes nothing', async () => {
+		await add('Before.');
+		await call('approve', [...answered, ['blob', base]]);
+		const before = await stored();
+		for (const fields of [
+			[['op', 'add'], ['text', 'After.'], ['blob', base], ...span(COMMENTS_DOC, SOIL)],
+			[['op', 'edit'], ['id', 'C1'], ['text', 'x']],
+			[['op', 'delete'], ['id', 'C1']]
+		] as [string, string][][]) {
+			await expect(call('comment', fields)).rejects.toMatchObject({ status: 404 });
+		}
+		expect(await stored()).toEqual(before);
+	});
+
+	it('edit and delete act on a comment, and a deleted id is never reused', async () => {
+		await add('One.');
+		await add('Two.', ROW);
+		expect(await call('comment', [['op', 'edit'], ['id', 'C1'], ['text', 'One, edited.']])).toMatchObject({ id: 'C1' });
+		expect(await call('comment', [['op', 'delete'], ['id', 'C2']])).toMatchObject({ id: 'C2' });
+		expect(await add('Three.', ROW)).toMatchObject({ id: 'C3' });
+		expect((await stored()).comments.map((c: { id: string; text: string }) => [c.id, c.text])).toEqual([
+			['C1', 'One, edited.'],
+			['C3', 'Three.']
+		]);
+		expect(await call('comment', [['op', 'edit'], ['id', 'C2'], ['text', 'x']])).toMatchObject({ status: 400 });
+		expect(await call('comment', [['op', 'delete'], ['id', 'C9']])).toMatchObject({ status: 400 });
+		expect(await call('comment', [['op', 'edit'], ['id', 'C1'], ['text', ' ']])).toMatchObject({ status: 400 });
+	});
+
+	it('on a re-queued item, a new comment takes an id past every thread, and load places each thread', async () => {
+		const threads = await seedReplies(COMMENTS_DOC, head);
+		expect(await add('New.')).toMatchObject({ id: 'C3' });
+		const data = await loaded();
+		expect(data.threads).toEqual(
+			threads.map((t) => ({ ...t, placed: { from: t.anchor.from, to: t.anchor.to }, reply: '', resolved: false }))
+		);
+	});
+
+	it('reply, resolve, and reopen act on a thread, and an empty reply removes Geoff’s', async () => {
+		await seedReplies(COMMENTS_DOC, head);
+		await call('comment', [['op', 'reply'], ['id', 'C1'], ['text', 'Thanks.']]);
+		await call('comment', [['op', 'resolve'], ['id', 'C2']]);
+		expect((await stored()).threads).toEqual([{ id: 'C1', reply: 'Thanks.' }, { id: 'C2', resolved: true }]);
+		expect((await loaded()).threads.map((t: { reply: string; resolved: boolean }) => [t.reply, t.resolved])).toEqual([
+			['Thanks.', false],
+			['', true]
+		]);
+		await call('comment', [['op', 'reopen'], ['id', 'C2']]);
+		await call('comment', [['op', 'reply'], ['id', 'C1'], ['text', '']]);
+		expect((await stored()).threads).toEqual([]);
+		await add('Mine.');
+		expect(await call('comment', [['op', 'reply'], ['id', 'C3'], ['text', 'x']])).toMatchObject({ status: 400 });
+		expect(await call('comment', [['op', 'resolve'], ['id', 'C7']])).toMatchObject({ status: 400 });
+	});
+
+	it('approve carries the comments and only the threads Geoff replied to', async () => {
+		await seedReplies(COMMENTS_DOC, head);
+		await add('New.');
+		await call('comment', [['op', 'reply'], ['id', 'C2'], ['text', 'Fair.']]);
+		await call('comment', [['op', 'resolve'], ['id', 'C1']]);
+		await call('approve', [...answered, ['blob', base]]);
+		const written = await decision();
+		expect(written).toMatchObject({ decision: 'approve', commit: head, blob: base, threads: [{ id: 'C2', reply: 'Fair.' }] });
+		expect(written.comments).toEqual((await stored()).comments);
+		expect(written.comments.map((c: { id: string }) => c.id)).toEqual(['C3']);
+	});
+
+	it('reject carries the comments and replies with the note and the calls made', async () => {
+		await seedReplies(COMMENTS_DOC, head);
+		await add('New.');
+		await call('comment', [['op', 'reply'], ['id', 'C1'], ['text', 'Not quite.']]);
+		await call('reject', [['note', ''], ...answered]);
+		expect(await decision()).toEqual({
+			decision: 'reject',
+			note: '',
+			calls: [{ id: 'D1', choice: "Keep the author's wording" }],
+			comments: (await stored()).comments,
+			threads: [{ id: 'C1', reply: 'Not quite.' }]
+		});
+	});
+
+	describe('a comment posted while a decision waits on the file’s queue', () => {
+		// A step held open on the file's queue stands in for a save mid-commit, so the order is fixed.
+		let release = () => {};
+		let held: Promise<void>;
+		beforeEach(() => {
+			held = queued(repo, SAMPLE_FILE, () => new Promise<void>((r) => (release = r)));
+		});
+		const tick = () => new Promise((r) => setTimeout(r, 50));
+
+		it('is refused with 404 when the decision was queued first, never dropped', async () => {
+			const approve = Promise.resolve(call('approve', [...answered, ['blob', base]]));
+			await tick();
+			const comment = Promise.resolve(add('Raced.'));
+			await tick();
+			release();
+			await held;
+			await approve;
+			await expect(comment).rejects.toMatchObject({ status: 404 });
+			expect((await decision()).comments).toEqual([]);
+		});
+
+		it('is carried when it was queued first', async () => {
+			const comment = Promise.resolve(add('First.'));
+			await tick();
+			const reject = Promise.resolve(call('reject', [['note', 'n']]));
+			await tick();
+			await expect(decision()).rejects.toThrow();
+			release();
+			await held;
+			expect(await comment).toMatchObject({ id: 'C1' });
+			await reject;
+			expect((await decision()).comments.map((c: { text: string }) => c.text)).toEqual(['First.']);
+		});
+	});
+
+	it('a CRLF file anchors in LF, so the quote is the line the editor shows', async () => {
+		const crlf = COMMENTS_DOC.replace(/\n/g, '\r\n');
+		await writeFile(join(repo, SAMPLE_FILE), crlf);
+		git(repo, 'commit', '-q', '-am', 'Use CRLF');
+		const blob = git(repo, 'rev-parse', `HEAD:${SAMPLE_FILE}`);
+		const answer = (await add('Hm.', SOIL, blob)) as { comments: Array<{ anchor: { quote: string; from: number; suffix: string } }> };
+		const [{ anchor }] = answer.comments;
+		expect(anchor.quote).toBe(SOIL);
+		expect(anchor.from).toBe(COMMENTS_DOC.indexOf(SOIL));
+		expect(anchor.suffix).not.toContain('\r');
+	});
+});
+
+describe('comments on a page', () => {
+	let repo: string;
+	let base: string;
+	beforeEach(async () => {
+		repo = await mkdtemp(join(tmpdir(), 'approval-queue-route-page-comments-'));
+		base = await seedPageRepo(repo);
+		await seedPageItem(state.root, ID, repo, base);
+	});
+	afterEach(() => rm(repo, { recursive: true, force: true }));
+
+	const quote = 'Every image is resized on every build';
+
+	it('approve and reject both carry the comments, anchored at the commit HEAD names', async () => {
+		await call('comment', [['op', 'add'], ['text', 'Why?'], ['blob', base], ...span(PAGE_DOC, quote)]);
+		const [comment] = (await stored()).comments;
+		expect(comment.anchor).toMatchObject({ quote, commit: git(repo, 'rev-parse', 'HEAD') });
+		expect(comment.anchor).not.toHaveProperty('file');
+		await call('reject', [['note', 'See the comment.']]);
+		expect(await decision()).toEqual({ decision: 'reject', note: 'See the comment.', comments: [comment], threads: [] });
+
+		await seedPageItem(state.root, '20261011T100000-2', repo, base);
+		const two = '20261011T100000-2';
+		await call('comment', [['op', 'add'], ['text', 'Why?'], ['blob', base], ...span(PAGE_DOC, quote)], two);
+		await call('approve', [['call:D1', "Keep the author's wording"], ['call:Q1', 'Keep it'], ['blob', base]], two);
+		const approved = JSON.parse(await readFile(join(state.root, 'items', two, 'decision.json'), 'utf8'));
+		expect(approved).toMatchObject({ decision: 'approve', blob: base, comments: [comment], threads: [] });
+	});
+});
+
+describe('comments on a change', () => {
+	beforeEach(() => seedChangeItem(state.root, ID));
+	const docOf = (k: number) => fixture(`change/head/${CHANGE_DOCS[k].path}`);
+	const quote = 'The engine, installed by the setup command';
+	const addTo = (k: number, text = 'Why?') =>
+		call('comment', [['op', 'add'], ['text', text], ['file', CHANGE_DOCS[k].path], ...span(docOf(k), quote)]);
+
+	it('add anchors into the named document at the change’s head, and load places it on that document only', async () => {
+		const answer = (await addTo(1)) as { comments: Array<{ anchor: Record<string, unknown> }> };
+		const from = docOf(1).indexOf(quote);
+		expect(answer.comments[0].anchor).toEqual(anchorAt(docOf(1), from, from + quote.length, PAGE_HEAD, CHANGE_DOCS[1].path));
+		const data = await loaded();
+		expect(data.docs.map((d: { comments: unknown[] }) => d.comments.length)).toEqual([0, 1, 0]);
+		expect(data.docs[1].comments[0].placed).toEqual({ from, to: from + quote.length });
+	});
+
+	it('add naming no document the change carries answers 400, and needs no blob', async () => {
+		expect(await call('comment', [['op', 'add'], ['text', 'x'], ['file', 'docs/other.md'], ['from', '0'], ['to', '3']])).toMatchObject({ status: 400 });
+		expect(await call('comment', [['op', 'add'], ['text', 'x'], ['from', '0'], ['to', '3']])).toMatchObject({ status: 400 });
+	});
+
+	it('load places each thread on the document its anchor names', async () => {
+		const doc = docOf(1);
+		const from = doc.indexOf(quote);
+		const thread: Thread = { id: 'C1', status: 'answered', text: 'It is.', quote, anchor: anchorAt(doc, from, from + quote.length, PAGE_HEAD, CHANGE_DOCS[1].path) };
+		await writeFile(join(state.root, 'items', ID, 'replies.json'), JSON.stringify([thread]));
+		const data = await loaded();
+		expect(data.docs[1].threads).toEqual([{ ...thread, placed: { from, to: from + quote.length }, reply: '', resolved: false }]);
+		expect(data.docs[0].threads).toEqual([]);
+		expect(await addTo(1)).toMatchObject({ id: 'C2' });
+	});
+
+	it('approve and reject both carry the comments', async () => {
+		await addTo(1);
+		const { comments } = await stored();
+		await call('approve', [['call:Q1', 'Keep it']]);
+		expect(await decision()).toEqual({ decision: 'approve', calls: [{ id: 'Q1', choice: 'Keep it' }], comments, threads: [] });
+		await expect(addTo(1)).rejects.toMatchObject({ status: 404 });
+
+		await seedChangeItem(state.root, '20261011T100000-2');
+		const two = '20261011T100000-2';
+		await call('comment', [['op', 'add'], ['text', 'Why?'], ['file', CHANGE_DOCS[1].path], ...span(docOf(1), quote)], two);
+		await call('reject', [['note', 'n']], two);
+		expect(JSON.parse(await readFile(join(state.root, 'items', two, 'decision.json'), 'utf8'))).toEqual({ decision: 'reject', note: 'n', comments, threads: [] });
 	});
 });
