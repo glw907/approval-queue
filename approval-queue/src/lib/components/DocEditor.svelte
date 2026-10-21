@@ -283,11 +283,20 @@ text drops a box left empty. Below 1260px a tap on a highlight opens the drawer 
 	.cm-host :global(.cm-l-h1) {
 		padding-top: 4px;
 	}
+	/* CodeMirror measures a line's or block widget's box without its margins, so a vertical margin
+	   would skew its height map and land a click a line below the text clicked; space and rules
+	   above go inside the box instead. */
 	.cm-host :global(.cm-l-h2) {
-		padding-top: 26px !important;
-		border-top: 1px dashed var(--rule);
-		margin-top: 10px;
+		position: relative;
+		padding-top: 37px !important;
 		border-radius: 0;
+	}
+	.cm-host :global(.cm-l-h2::before) {
+		content: '';
+		position: absolute;
+		top: 10px;
+		inset-inline: 0;
+		border-top: 1px dashed var(--rule);
 	}
 	.cm-host :global(.cm-l-h3) {
 		padding-top: 14px !important;
@@ -363,9 +372,15 @@ text drops a box left empty. Below 1260px a tap on a highlight opens the drawer 
 		color: color-mix(in oklab, var(--color-muted) 60%, var(--color-base-content));
 	}
 	.cm-host :global(.cm-gone) {
-		height: 0;
+		position: relative;
+		height: 6px;
+	}
+	.cm-host :global(.cm-gone::before) {
+		content: '';
+		position: absolute;
+		top: 2px;
+		inset-inline: 0;
 		border-top: 2px dotted color-mix(in oklab, var(--color-primary) 55%, transparent);
-		margin: 2px 0;
 	}
 	/* The Comment button at a selection, where the margin is a drawer. */
 	.cm-host :global(.cm-tooltip.cm-tooltip) {
