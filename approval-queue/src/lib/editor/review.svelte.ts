@@ -569,7 +569,10 @@ export class DocReview {
 		await tick();
 		const area = document.getElementById('comment-box');
 		if (!(area instanceof HTMLTextAreaElement)) return;
-		area.focus();
+		// Beside the page a new card is placed after this, level with its text, which is already in
+		// view; scrolling to it here would scroll to where it waits unplaced.
+		area.focus({ preventScroll: true });
+		if (!wide()) area.scrollIntoView({ block: 'nearest' });
 		area.setSelectionRange(area.value.length, area.value.length);
 	}
 

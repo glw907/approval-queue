@@ -215,6 +215,7 @@ text drops a box left empty. Below 1260px a tap on a highlight opens the drawer 
 		.marks + .esaved {
 			flex-basis: 100%;
 			margin-left: 0;
+			text-align: left;
 		}
 	}
 	.esaved.failed {

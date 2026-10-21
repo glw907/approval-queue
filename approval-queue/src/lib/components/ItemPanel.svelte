@@ -332,6 +332,23 @@ for that save first, and closing the tab then asks before leaving.
 			: `${capital(plural(openCalls.length, 'call'))} ${openCalls.length === 1 ? 'is' : 'are'} open.`
 	);
 	/**
+	 * After a send-back, what the author did with Geoff's comments: "You sent it back with four
+	 * comments. The author made two changes, answered one comment, and explained why one passage stays."
+	 */
+	const repliesLine = $derived.by(() => {
+		const threads = docReviews.flatMap((r) => r.threads);
+		if (!threads.length) return '';
+		const count = (s: string) => threads.filter((t) => t.status === s).length;
+		const [done, answered, kept] = [count('done'), count('answered'), count('kept')];
+		const parts = [
+			done ? `made ${plural(done, 'change')}` : '',
+			answered ? `answered ${plural(answered, 'comment')}` : '',
+			kept ? `explained why ${plural(kept, 'passage')} ${kept === 1 ? 'stays' : 'stay'}` : ''
+		].filter(Boolean);
+		const list = parts.length < 3 ? parts.join(' and ') : `${parts.slice(0, -1).join(', ')}, and ${parts.at(-1)}`;
+		return `You sent it back with ${plural(threads.length, 'comment')}. The author ${list}.`;
+	});
+	/**
 	 * The lede of a blueprint or page: the open calls, what the file describes, then what the author did
 	 * with the fact check. A blueprint's type name is hyphenated as a modifier ("symptom-row page").
 	 */
@@ -352,7 +369,7 @@ for that save first, and closing the tab then asks before leaving.
 						? `The author disputed ${found === 1 ? 'the one finding' : `all ${word(found)} findings`} from the fact check.`
 						: `Of the fact check’s ${word(found)} findings, the author fixed ${word(fixed)} and disputed ${word(disputed)}.`;
 		const question = asked ? `The author ${check ? 'also ' : ''}has ${asked === 1 ? 'a question' : `${word(asked)} questions`} for you.` : '';
-		return [what, check, question, callsLine].filter(Boolean).join(' ');
+		return [what, repliesLine, check, question, callsLine].filter(Boolean).join(' ');
 	});
 	/** The change's lede: the open calls, then what the change edits. */
 	const changeLede = $derived.by(() => {

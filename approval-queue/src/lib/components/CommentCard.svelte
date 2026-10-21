@@ -25,7 +25,7 @@ With comments read only, as on a decided item, the card shows no actions.
 
 	const STATUS = {
 		done: { head: 'Done.', line: 'The author made the change.', tone: 'tone-success' },
-		kept: { head: 'Kept.', line: 'The author left it as it was and gave a reason.', tone: '' },
+		kept: { head: 'Kept.', line: 'The author left it as it was and gave a reason.', tone: 'tone-ink' },
 		answered: { head: 'Answered.', line: 'The author answered your question.', tone: 'tone-info' }
 	};
 
@@ -103,7 +103,7 @@ With comments read only, as on a decided item, the card shows no actions.
 	{:else}
 		<div role="group" class={['note', 'cmt', current && 'cur']} id="thread-{t.id}" tabindex="-1" aria-label="{s.head} {s.line}">
 			<p class="nh"><span class={['kind', s.tone]}>{s.head}</span><span class="outcome">{s.line}</span></p>
-			{#if card.gone}{@render gone(t.quote)}{/if}
+			{#if card.gone}{@render gone(t.quote)}{:else}<p class="quote">You commented on: {t.quote}</p>{/if}
 			<div class="side"><b>The author:</b> {@render inline(t.text)}</div>
 			{#if open}
 				{@render editor('Reply to the author', 'Reply to the author', 'Reply')}
