@@ -4,14 +4,14 @@
 
 ## Medium
 
+- [ ] **#2** A damaged `packet.json` makes that packet's page and actions answer 500 `#improvement` `#approval-queue` `#initiative:approval-packets` *(2026-10-17)*
+  `readPacket` in `approval-queue/src/lib/server/items.ts` throws on a file that does not parse, so the item's page, approve, and reject return 500. The board and the listings now skip it. Answer 404 or the withdrawn message instead, and name the item on the board (the design's "skips an unreadable item and names it"). The same page's `reject` for a non-packet item and its `submit` action also read `request.formData()` with no catch, so a post that is not a form answers 500 instead of 400.
+
 - [ ] **#15** Let Geoff defer an item without rejecting it `#feature` `#approval-queue` *(2026-10-21)*
   Today the only way to say "not now" is a reject, which tells the session the work is wrong, or leaving the item waiting while its session blocks. Add a defer outcome: the session gets `{"decision":"defer"}` and is free to end, and the item stays on the board, marked deferred, until Geoff decides it or the session withdraws it. A decided deferral needs a way back to a session, which ties to how a decision outlives its waiting command.
 
 - [ ] **#14** Lead a resent item with what changed since the send-back `#feature` `#approval-queue` *(2026-10-21)*
   When a session resends an item after a send-back (#13), the app should show the item against the version Geoff sent back. It already records that version's PR head or blob. The change belongs in the top-line narrative and the title. The title marks the item as a revision, and the headline and lede summarize what the revision changed in answer to each call, well enough to approve or send back from the summary alone. The diff since the send-back sits one level down, ahead of the full diff, for Geoff to open only when he wants the detail. The summary is the session's claim, so the brief checks should test it against that diff.
-
-- [ ] **#2** A damaged `packet.json` makes that packet's page and actions answer 500 `#improvement` `#approval-queue` `#initiative:approval-packets` *(2026-10-17)*
-  `readPacket` in `approval-queue/src/lib/server/items.ts` throws on a file that does not parse, so the item's page, approve, and reject return 500. The board and the listings now skip it. Answer 404 or the withdrawn message instead, and name the item on the board (the design's "skips an unreadable item and names it"). The same page's `reject` for a non-packet item and its `submit` action also read `request.formData()` with no catch, so a post that is not a form answers 500 instead of 400.
 
 - [ ] **#13** Give a send-back structured instructions the session can act on `#feature` `#approval-queue` *(2026-10-21)*
   A reject returns only `{"decision":"reject","note"}`, so the session has to work out from free text what to change. LangChain's Agent Inbox has a "respond" outcome that sends the agent a reply it continues from. Add the same here: a send-back carrying the calls Geoff made, each with its anchor (part, file and line, or ask) and his instruction, in the decision JSON. The session then revises and queues the item again. PR #4 already records a send-back's calls, but only for display.
