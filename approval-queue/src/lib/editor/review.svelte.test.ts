@@ -1,7 +1,7 @@
 import type { EditorView } from '@codemirror/view';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PlacedNote } from './notes.ts';
-import { DocReview, type ReviewInit, type SaveResult } from './review.svelte.ts';
+import { DocReview, type CommentAnswer, type ReviewInit, type SaveResult } from './review.svelte.ts';
 
 const KEY = 'desk.calls.test';
 
@@ -106,7 +106,7 @@ describe('DocReview remembered choices', () => {
 describe('DocReview comments', () => {
 	const anchor = (from: number, to: number) => ({ quote: 'x', prefix: '', suffix: '', from, to, commit: 'c' });
 	const doc = 'One line.\nTwo line.';
-	const make = () =>
+	const make = (comment?: ReviewInit['comment']) =>
 		new DocReview({
 			doc,
 			original: doc,
@@ -120,7 +120,8 @@ describe('DocReview comments', () => {
 			threads: [
 				{ id: 'T1', status: 'done', text: 'Fixed', quote: 'One', anchor: anchor(0, 3), placed: { from: 0, to: 3 }, reply: '', resolved: false },
 				{ id: 'T2', status: 'kept', text: 'Kept', quote: 'line', anchor: anchor(4, 8), placed: { from: 4, to: 8 }, reply: 'Fine', resolved: true }
-			]
+			],
+			comment
 		});
 
 	it('orders the cards by where their text starts and sets a gone one at its clamped offset', () => {
@@ -141,5 +142,26 @@ describe('DocReview comments', () => {
 		const r = make();
 		r.commentable = true;
 		expect(r.canComment).toBe(false);
+	});
+
+	it('posts one comment op at a time, so a second press sends nothing, and settles once it lands', async () => {
+		vi.stubGlobal('document', { getElementById: () => null });
+		let answer: (a: CommentAnswer) => void = () => {};
+		const poster = vi.fn(() => new Promise<CommentAnswer>((resolve) => (answer = resolve)));
+		const r = make(poster);
+		r.commentable = true;
+		const first = r.resolveThread('T1', true);
+		await r.resolveThread('T1', true);
+		let settled = false;
+		const waiting = r.settled().then(() => (settled = true));
+		await Promise.resolve();
+		expect(poster).toHaveBeenCalledTimes(1);
+		expect(settled).toBe(false);
+		answer({ ok: true, id: 'T1', comments: [], threads: [{ id: 'T1', resolved: true }] });
+		await first;
+		await waiting;
+		expect(settled).toBe(true);
+		expect(r.threads.find((t) => t.id === 'T1')?.resolved).toBe(true);
+		vi.unstubAllGlobals();
 	});
 });

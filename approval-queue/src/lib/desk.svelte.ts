@@ -38,10 +38,19 @@ class Desk {
 	/** Approve is disabled, so the `a` key must not post it either. */
 	approveLocked = $state(false);
 	page = $state<'pr' | 'design' | 'triage' | 'packet' | 'blueprint' | 'page' | 'change'>('design');
-	/** A plain toast's text; null hides it. A held decision's toast is `held`'s, and takes its place. */
-	toast = $state<string | null>(null);
+	#toast = $state<string | null>(null);
 	/** What the plain toast's Undo button does; null shows no button. */
 	toastUndo = $state.raw<(() => void) | null>(null);
+
+	/** A plain toast's text; null hides it. A held decision's toast is `held`'s, and takes its place. */
+	get toast(): string | null {
+		return this.#toast;
+	}
+	/** Setting the text drops any Undo, which belongs only to the toast `flash` showed it with. */
+	set toast(text: string | null) {
+		this.#toast = text;
+		this.toastUndo = null;
+	}
 	#toastTimer: ReturnType<typeof setTimeout> | undefined;
 	/** The live region's text. */
 	status = $state('');
@@ -78,9 +87,7 @@ class Desk {
 		this.announce(text);
 		this.#toastTimer = setTimeout(
 			() => {
-				if (this.toast !== text) return;
-				this.toast = null;
-				this.toastUndo = null;
+				if (this.toast === text) this.toast = null;
 			},
 			undo ? 6000 : 3200
 		);

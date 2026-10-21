@@ -51,19 +51,20 @@ With comments read only, as on a decided item, the card shows no actions.
 
 {#snippet editor(label: string, placeholder: string, save: string)}
 	{#if open}
-		<label class="sr-only" for="comment-box">{label}</label>
-		<textarea
-			id="comment-box"
-			class="textarea desk-field"
-			{placeholder}
-			bind:value={open.text}
-			onfocus={() => (desk.commentOpen = true)}
-			onblur={() => (desk.commentOpen = false)}
-		></textarea>
-		<div class="dacts">
-			<button type="button" class="btn btn-primary btn-sm" onclick={() => void review.saveBox()}>{save}</button>
-			<button type="button" class="btn btn-ghost btn-sm" onclick={() => void review.cancelBox()}>Cancel</button>
-			<span class="hint"><kbd class="kbd kbd-xs desk-kbd">Ctrl</kbd><kbd class="kbd kbd-xs desk-kbd">Enter</kbd> saves</span>
+		<!-- Focus anywhere in the box, its Save and Cancel included, gives Ctrl+Enter and Escape to the comment. -->
+		<div
+			onfocusin={() => (desk.commentOpen = true)}
+			onfocusout={(e) => {
+				if (!(e.relatedTarget instanceof Node && e.currentTarget.contains(e.relatedTarget))) desk.commentOpen = false;
+			}}
+		>
+			<label class="sr-only" for="comment-box">{label}</label>
+			<textarea id="comment-box" class="textarea desk-field" {placeholder} bind:value={open.text}></textarea>
+			<div class="dacts">
+				<button type="button" class="btn btn-primary btn-sm" onclick={() => void review.saveBox()}>{save}</button>
+				<button type="button" class="btn btn-ghost btn-sm" onclick={() => void review.cancelBox()}>Cancel</button>
+				<span class="hint"><kbd class="kbd kbd-xs desk-kbd">Ctrl</kbd><kbd class="kbd kbd-xs desk-kbd">Enter</kbd> saves</span>
+			</div>
 		</div>
 	{/if}
 {/snippet}

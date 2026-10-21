@@ -2,7 +2,7 @@ import type { EditorView } from '@codemirror/view';
 import { tick } from 'svelte';
 import { setDrawer } from '#lib/components/frame/drawers.ts';
 import { desk } from '#lib/desk.svelte.ts';
-import type { Comment, ReplyStatus, Thread } from './comments.ts';
+import { anchorAt, place, type Anchor, type Comment, type ReplyStatus, type Thread } from './comments.ts';
 import { WIDE_MARGIN } from './margin.ts';
 import { isCall, outline, type Heading, type PlacedNote, type Range } from './notes.ts';
 import {
@@ -92,6 +92,7 @@ export type MarginCard =
 
 export const OPEN_FIRST = 'Save or cancel the comment you have open first';
 export const SELECT_FIRST = 'Select the text you want to comment on first';
+export const RESTORE_GONE = 'The comment was not restored: the text you commented on is gone.';
 
 /** The review whose comment box is open, across every document on the screen, since only one box opens at a time. */
 export const boxes = $state<{ open: DocReview | null }>({ open: null });
@@ -200,7 +201,8 @@ export class DocReview {
 	private dirty = false;
 	private inFlight: Promise<void> | null = null;
 	private savedOnce = false;
-	private posting = false;
+	/** The comment op on its way, from its first await to its answer; null when none is. */
+	private op: Promise<unknown> | null = null;
 	private mouseSelecting = false;
 
 	constructor(init: ReviewInit) {
@@ -302,6 +304,26 @@ export class DocReview {
 	/** An edit is waiting for its pause, being saved, or not yet sent. */
 	get pending(): boolean {
 		return this.dirty || this.timer !== null || this.inFlight !== null;
+	}
+
+	/** Resolves once the comment op on its way, if any, has its answer, so a decision never reads the comments before it lands. */
+	async settled(): Promise<void> {
+		await this.op?.catch(() => {});
+	}
+
+	/**
+	 * Runs one comment op at a time. One asked for while another is on its way is dropped and gives
+	 * null, so a second press of Save or Delete during a slow save posts nothing twice.
+	 */
+	private async exclusive<T>(run: () => Promise<T>): Promise<T | null> {
+		if (this.op) return null;
+		const op = run();
+		this.op = op;
+		try {
+			return await op;
+		} finally {
+			this.op = null;
+		}
 	}
 
 	/** New comments can be made and saved ones changed. */
@@ -501,7 +523,15 @@ export class DocReview {
 		if (!hit) return false;
 		this.setCurrentCard(hit[0]);
 		jumpTo(view, hit[1][0]);
+		desk.announce(`Comment ${all.indexOf(hit) + 1} of ${all.length}, on: ${this.quoteOf(hit[0], hit[1])}`);
 		return true;
+	}
+
+	/** The text a comment or thread is on as it reads now, or its original quote once that text is gone. */
+	private quoteOf(key: string, r: Range): string {
+		if (r[1] > r[0]) return this.text.slice(r[0], r[1]);
+		const id = key.slice(key.indexOf(':') + 1);
+		return (key.startsWith('thread:') ? this.threads : this.comments).find((x) => x.id === id)?.quote ?? '';
 	}
 
 	/** Moves the caret to the first or last comment, for a screen walking several documents. */
@@ -520,7 +550,8 @@ export class DocReview {
 	pointerDown(inText: boolean) {
 		this.mouseSelecting = inText;
 		this.dragging = inText;
-		if (inText) this.dropEmptyBox();
+		// The empty box may be another document's, on a screen of several, and it would refuse this one's.
+		if (inText) boxes.open?.dropEmptyBox();
 	}
 
 	/** A mouse release ends a selection made with the mouse, which opens a comment box where the margin is beside the page. */
@@ -583,7 +614,7 @@ export class DocReview {
 	}
 
 	/** A click back into the text drops a new box that holds nothing, leaving the click's own caret. */
-	private dropEmptyBox() {
+	dropEmptyBox() {
 		if (this.box?.kind !== 'new' || this.box.text.trim() || !this.view) return;
 		this.closeBox();
 		setCommentRange(this.view, 'draft', null);
@@ -595,11 +626,13 @@ export class DocReview {
 	async cancelBox() {
 		const box = this.box;
 		const view = this.view;
-		if (!box || !view) return;
+		// A save on its way would land after the cancel and keep the comment, so the box waits for it.
+		if (!box || !view || this.op) return;
 		this.closeBox();
 		if (box.kind !== 'new') {
-			if (wide()) view.focus();
-			else document.getElementById(cardId(`${box.kind === 'edit' ? 'comment' : 'thread'}:${box.id}`))?.focus();
+			// The card's own first button is where its box was opened from, beside the page or in the drawer.
+			await tick();
+			this.focusCard(`${box.kind === 'edit' ? 'comment' : 'thread'}:${box.id}`);
 			return;
 		}
 		setCommentRange(view, 'draft', null);
@@ -640,18 +673,39 @@ export class DocReview {
 
 	/** Posts an op and takes its answer, or shows why it was refused; returns the answer when it went through. */
 	private async send(fields: Record<string, string>) {
-		this.posting = true;
-		try {
-			const answer = await this.post(fields);
-			if (!answer.ok) {
-				desk.flash(`The comment was not saved: ${answer.message}`);
-				return null;
-			}
-			this.resync(answer);
-			return answer;
-		} finally {
-			this.posting = false;
+		const answer = await this.post(fields);
+		if (!answer.ok) {
+			desk.flash(`The comment was not saved: ${answer.message}`);
+			return null;
 		}
+		this.resync(answer);
+		return answer;
+	}
+
+	/** Puts focus on a card's first button, or on the card when it has none. */
+	private focusCard(key: string) {
+		const card = document.getElementById(cardId(key));
+		(card?.querySelector<HTMLElement>('button') ?? card)?.focus();
+	}
+
+	/**
+	 * Puts focus where a removed card was, since its focused button went with it. Beside the page that
+	 * is the next card's first button, else the previous card's, else the editor; in the drawer, the
+	 * next card, else the drawer's close button.
+	 */
+	private async focusAfterRemoving(keys: string[], at: number) {
+		await tick();
+		const after = keys.slice(at + 1);
+		const near = wide() ? [...after, ...keys.slice(0, at).reverse()] : after;
+		for (const key of near) {
+			const card = document.getElementById(cardId(key));
+			if (!card) continue;
+			if (wide()) this.focusCard(key);
+			else card.focus();
+			return;
+		}
+		if (wide()) this.view?.focus();
+		else document.getElementById(this.margin)?.querySelector<HTMLElement>('.drawer-x')?.focus();
 	}
 
 	/**
@@ -670,8 +724,7 @@ export class DocReview {
 			}
 			fields.blob = this.blob;
 		}
-		this.posting = true;
-		const answer = await this.post(fields).finally(() => (this.posting = false));
+		const answer = await this.post(fields);
 		if (!answer.ok) {
 			desk.flash(`The comment was not saved: ${answer.message}`);
 			return null;
@@ -691,32 +744,28 @@ export class DocReview {
 	async saveBox() {
 		const box = this.box;
 		const view = this.view;
-		if (!box || !view || this.posting) return;
+		if (!box || !view || this.op) return;
 		const text = box.text.trim();
-		let key: string;
-		if (box.kind === 'new') {
-			if (!text) return this.cancelBox();
-			const range = commentRanges(view).draft;
-			if (!range) return;
-			const id = await this.add(text, range, true);
-			if (!id) return;
-			key = `comment:${id}`;
-		} else if (box.kind === 'edit') {
-			if (!text) return this.cancelBox();
-			if (!(await this.send({ op: 'edit', id: box.id, text }))) return;
-			key = `comment:${box.id}`;
-		} else {
-			if (!(await this.send({ op: 'reply', id: box.id, text }))) return;
-			key = `thread:${box.id}`;
-		}
+		if (!text && box.kind !== 'reply') return this.cancelBox();
+		const key = await this.exclusive(async () => {
+			if (box.kind === 'new') {
+				const range = commentRanges(view).draft;
+				const id = range ? await this.add(text, range, true) : null;
+				return id && `comment:${id}`;
+			}
+			if (box.kind === 'edit') return (await this.send({ op: 'edit', id: box.id, text })) && `comment:${box.id}`;
+			return (await this.send({ op: 'reply', id: box.id, text })) && `thread:${box.id}`;
+		});
+		if (!key) return;
 		this.closeBox();
 		this.syncRanges();
 		this.setCurrentCard(key);
 		desk.announce(box.kind === 'reply' ? 'Reply saved' : 'Comment saved');
 		await tick();
-		// In the drawer the editor sits behind the scrim, so focus stays on the saved card.
-		if (wide()) view.focus();
-		else document.getElementById(cardId(key))?.querySelector<HTMLElement>('button')?.focus();
+		// A new comment was started from the text beside the page; an edit or a reply from its card's
+		// button, and in the drawer the editor sits behind the scrim, so focus goes to the saved card.
+		if (wide() && box.kind === 'new') view.focus();
+		else this.focusCard(key);
 	}
 
 	/** Opens a saved comment's box to change its text. */
@@ -729,14 +778,34 @@ export class DocReview {
 		await this.focusBox();
 	}
 
-	/** Deletes a saved comment; the toast's Undo adds it again on the same text, under a new id. */
+	/**
+	 * Deletes a saved comment. The toast's Undo adds it again under a new id, on its text as found by
+	 * quote and context when Undo is pressed, since edits made meanwhile may have moved it. A comment
+	 * whose text is already gone has nothing to come back on, so its toast offers no Undo.
+	 */
 	async deleteComment(id: string) {
+		const key = `comment:${id}`;
 		const c = this.comments.find((x) => x.id === id);
-		const range = this.ranges[`comment:${id}`];
-		if (!c || !range || refuseOpenBox()) return;
-		if (!(await this.send({ op: 'delete', id }))) return;
-		if (this.currentCard === `comment:${id}`) this.setCurrentCard(null);
-		desk.flash('Comment deleted', () => void this.add(c.text, range));
+		const range = this.ranges[key];
+		const view = this.view;
+		if (!c || !range || !view || refuseOpenBox()) return;
+		const anchor = range[1] > range[0] ? anchorAt(view.state.doc.toString(), range[0], range[1], '') : null;
+		const keys = this.cards.map((card) => card.key);
+		if (!(await this.exclusive(() => this.send({ op: 'delete', id })))) return;
+		if (this.currentCard === key) this.setCurrentCard(null);
+		desk.flash('Comment deleted', anchor ? () => void this.restore(c.text, anchor) : undefined);
+		await this.focusAfterRemoving(keys, keys.indexOf(key));
+	}
+
+	/** Adds a deleted comment again where its anchor now places it, or says why it cannot. */
+	private async restore(text: string, anchor: Anchor) {
+		if (!this.view || refuseOpenBox()) return;
+		const at = place(this.view.state.doc.toString(), anchor);
+		if (!at) {
+			desk.flash(RESTORE_GONE);
+			return;
+		}
+		await this.exclusive(() => this.add(text, [at.from, at.to]));
 	}
 
 	/** Opens the reply box on one of the author's threads, holding Geoff's reply so far. */
@@ -749,17 +818,21 @@ export class DocReview {
 		await this.focusBox();
 	}
 
+	/** Removes Geoff's reply to a thread; its Edit and Delete give way to Resolve and Reply, so focus moves to those. */
 	async deleteReply(id: string) {
-		if (!refuseOpenBox()) await this.send({ op: 'reply', id, text: '' });
+		if (refuseOpenBox()) return;
+		if (!(await this.exclusive(() => this.send({ op: 'reply', id, text: '' })))) return;
+		await tick();
+		this.focusCard(`thread:${id}`);
 	}
 
 	/** Resolves a thread, or opens it again; only Geoff resolves one. */
 	async resolveThread(id: string, resolved: boolean) {
 		if (refuseOpenBox()) return;
-		if (!(await this.send({ op: resolved ? 'resolve' : 'reopen', id }))) return;
+		if (!(await this.exclusive(() => this.send({ op: resolved ? 'resolve' : 'reopen', id })))) return;
 		if (resolved && this.currentCard === `thread:${id}`) this.setCurrentCard(null);
 		await tick();
-		document.getElementById(cardId(`thread:${id}`))?.querySelector<HTMLElement>('button')?.focus();
+		this.focusCard(`thread:${id}`);
 	}
 
 	/** Makes a card current, opening this document's drawer and showing the card there where the margin is one. */
