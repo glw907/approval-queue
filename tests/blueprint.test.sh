@@ -111,6 +111,20 @@ for want in 'note 2 (D1) has kind "dispute"' 'note 1 (C1) has an unknown field e
 done
 refuse "usage" "usage:" "$repo" T
 
+# A --replies file is an array of threads with unique ids, and a blueprint's anchors name no file.
+thread='{"id":"C1","status":"done","text":"Fixed.","quote":"Sort the steps by time.","anchor":{"quote":"Sort the steps by time.","prefix":"","suffix":"","from":10,"to":33,"commit":"c0"}}'
+printf '[%s]\n' "$thread" >"$root/replies.json"
+refuse "replies not JSON" "is not JSON" "$repo" T "$FILE" --replies "$DOC"
+refuse "replies not an array" "a JSON array of threads" "$repo" T "$FILE" --replies "$root/obj.json"
+refuse "replies file missing" "no replies file" "$repo" T "$FILE" --replies "$root/none.json"
+jq '. + [.[0]] | .[1].status = "fixed" | .[0].anchor.file = "x.md" | .[1].extra = 1 | .[1].anchor.to = 2' \
+  "$root/replies.json" >"$root/bad-replies.json"
+out=$(bash "$SCRIPT" blueprint "$repo" T "$FILE" --replies "$root/bad-replies.json" 2>&1 >/dev/null)
+for want in 'the id "C1" is used 2 times' 'thread 2 (C1) has status "fixed"' 'thread 1 (C1) has an anchor file' \
+  'thread 2 (C1) has an unknown field extra' 'thread 2 (C1) needs an anchor whose from and to are whole numbers'; do
+  case "$out" in *"$want"*) ;; *) echo "FAIL: bad replies: stderr lacks '$want'"; fail=1 ;; esac
+done
+
 # A queued blueprint carries the file as committed, the notes, and the worktree, repo, and blob.
 queued_blob=$(git -C "$repo" rev-parse "HEAD:$FILE")
 queue blueprint "$repo" "Approve the plan for Fix a slow build" "./$FILE" --notes "$NOTES"
@@ -118,6 +132,7 @@ assert_eq "$(jq -c '[.kind,.repo,.file,.blob,.worktree,.headline]' "$dir/item.js
   "[\"blueprint\",\"sample\",\"$FILE\",\"$queued_blob\",\"$(cd "$repo" && pwd -P)\",\"Approve the plan for Fix a slow build\"]" "queue: item.json"
 cmp -s "$dir/doc.md" "$DOC" || { echo "FAIL: queue: doc.md is not the committed file"; fail=1; }
 assert_eq "$(jq -c '[.[].id]' "$dir/notes.json")" '["C1","D1","Q1","X1"]' "queue: notes.json"
+[ ! -e "$dir/replies.json" ] || { echo "FAIL: queue: replies.json without --replies"; fail=1; }
 
 # Approve: the app records HEAD at approval; the blob is read at that commit even after HEAD moves on.
 printf 'Edited in review.\n' >>"$repo/$FILE"
@@ -126,14 +141,17 @@ approved_commit=$(git -C "$repo" rev-parse HEAD)
 approved_blob=$(git -C "$repo" rev-parse "HEAD:$FILE")
 printf 'Later.\n' >>"$repo/$FILE"
 git -C "$repo" commit -q -am "A later commit"
-decide "{\"decision\":\"approve\",\"calls\":[{\"id\":\"D1\",\"choice\":\"Keep the author's wording\"},{\"id\":\"Q1\",\"choice\":\"Keep it\"}],\"waived\":[{\"id\":\"D1\",\"choice\":\"Keep the author's wording\",\"reason\":\"Kept the author's wording\"}],\"commit\":\"$approved_commit\",\"blob\":\"$approved_blob\"}"
+comment='{"id":"C1","text":"Say which log.","anchor":{"quote":"build log","prefix":"","suffix":"","from":3,"to":12,"commit":"c0"}}'
+decide "{\"decision\":\"approve\",\"calls\":[{\"id\":\"D1\",\"choice\":\"Keep the author's wording\"},{\"id\":\"Q1\",\"choice\":\"Keep it\"}],\"waived\":[{\"id\":\"D1\",\"choice\":\"Keep the author's wording\",\"reason\":\"Kept the author's wording\"}],\"commit\":\"$approved_commit\",\"blob\":\"$approved_blob\",\"comments\":[$comment],\"threads\":[]}"
 assert_eq "$rc" "0" "approve: exit code"
 assert_eq "$(jq -cS . "$root/out")" \
-  "$(jq -cnS --arg c "$approved_commit" --arg b "$approved_blob" --arg f "$FILE" \
-    '{decision: "approve", file: $f, commit: $c, blob: $b, calls: [{id: "D1", choice: "Keep the author'"'"'s wording"}, {id: "Q1", choice: "Keep it"}]}')" "approve: stdout"
+  "$(jq -cnS --arg c "$approved_commit" --arg b "$approved_blob" --arg f "$FILE" --argjson comment "$comment" \
+    '{decision: "approve", file: $f, commit: $c, blob: $b, calls: [{id: "D1", choice: "Keep the author'"'"'s wording"}, {id: "Q1", choice: "Keep it"}],
+      comments: [$comment], threads: []}')" "approve: stdout"
 assert_eq "$(wc -l <"$log")" "1" "approve: one log line"
 assert_eq "$(jq -c '[.kind,.ref,.lane,.verdict,.blob,.commit,.waived[0].id,.waived[0].reason,.initiative]' "$log")" \
   "[\"blueprint\",\"sample:$FILE\",\"single\",\"approve\",\"$approved_blob\",\"$approved_commit\",\"D1\",\"Kept the author's wording\",null]" "approve: log line"
+assert_eq "$(jq -c '[.comments,.replies]' "$log")" "[1,0]" "approve: log counts"
 
 # approved answers 0 for the approved blob only, by the ref's file part.
 bash "$SCRIPT" approved "$FILE" "$approved_blob"; assert_eq "$?" "0" "approved: the approved blob"
@@ -145,12 +163,23 @@ printf 'not json\n' >>"$log"
 bash "$SCRIPT" approved "$FILE" "$approved_blob"; assert_eq "$?" "0" "approved: a bad line is skipped"
 XDG_STATE_HOME="$root/empty" bash "$SCRIPT" approved "$FILE" "$approved_blob"; assert_eq "$?" "1" "approved: no log"
 
-# A send-back prints the note and logs a reject at HEAD, which never counts as approved.
-queue blueprint "$repo" T "$FILE"
+# A send-back prints the note, the calls made, the comments, and the replies, and logs a reject at HEAD, which
+# never counts as approved. A re-queue takes the author's replies, and an empty list is a valid one.
+echo '[]' >"$root/no-replies.json"
+queue blueprint "$repo" T "$FILE" --replies "$root/no-replies.json"
 assert_eq "$(cat "$dir/notes.json")" "[]" "no notes: empty notes.json"
-decide '{"decision":"reject","note":"Fold the event section in."}'
+assert_eq "$(cat "$dir/replies.json")" "[]" "empty replies: replies.json"
+decide "{\"decision\":\"reject\",\"note\":\"Fold the event section in.\",\"calls\":[{\"id\":\"Q1\",\"choice\":\"Fold it in\"}],\"comments\":[$comment],\"threads\":[{\"id\":\"C0\",\"reply\":\"Not yet.\"}]}"
 assert_eq "$rc" "0" "reject: exit code"
-assert_eq "$(cat "$root/out")" '{"decision":"reject","note":"Fold the event section in."}' "reject: stdout"
+assert_eq "$(cat "$root/out")" \
+  "$(jq -cn --argjson comment "$comment" '{decision: "reject", note: "Fold the event section in.", calls: [{id: "Q1", choice: "Fold it in"}],
+    comments: [$comment], threads: [{id: "C0", reply: "Not yet."}]}')" "reject: stdout"
+assert_eq "$(grep -v '^not json' "$log" | tail -n 1 | jq -c '[.comments,.replies]')" "[1,1]" "reject: log counts"
+
+queue blueprint "$repo" T "$FILE" --replies "$root/replies.json"
+assert_eq "$(jq -c '[.[].id]' "$dir/replies.json")" '["C1"]' "replies: replies.json"
+decide '{"decision":"reject","note":""}'
+assert_eq "$(cat "$root/out")" '{"decision":"reject","note":"","calls":[],"comments":[],"threads":[]}' "reject with nothing: stdout"
 head_blob=$(git -C "$repo" rev-parse "HEAD:$FILE")
 assert_eq "$(grep -v '^not json' "$log" | tail -n 1 | jq -c '[.verdict,.blob,.waived]')" "[\"reject\",\"$head_blob\",[]]" "reject: log line"
 bash "$SCRIPT" approved "$FILE" "$head_blob"; assert_eq "$?" "1" "approved: a rejected blob"

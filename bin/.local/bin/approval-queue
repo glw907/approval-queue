@@ -7,9 +7,9 @@ set -euo pipefail
 
 usage="usage: approval-queue <pr|design|triage> <repo> <title> <source>
        approval-queue packet [--check] <initiative> <file>
-       approval-queue blueprint <worktree> <title> <file> [--notes <notes.json>]
-       approval-queue page <worktree> <title> <file> --pr <owner/repo#n> [--notes <notes.json>]
-       approval-queue change <owner/repo#n> <title> [--notes <notes.json>]
+       approval-queue blueprint <worktree> <title> <file> [--notes <notes.json>] [--replies <replies.json>]
+       approval-queue page <worktree> <title> <file> --pr <owner/repo#n> [--notes <notes.json>] [--replies <replies.json>]
+       approval-queue change <owner/repo#n> <title> [--notes <notes.json>] [--replies <replies.json>]
        approval-queue approved [--kind blueprint|page] <file> <blob>"
 root="${XDG_STATE_HOME:-$HOME/.local/state}/approval-queue"
 
@@ -35,7 +35,7 @@ if [ "${1:-}" = approved ]; then
   exit 1
 fi
 
-check="" initiative="" repo="" title="" source="" worktree="" notes="" pr="" pr_repo="" number="" prhead=""
+check="" initiative="" repo="" title="" source="" worktree="" notes="" replies="" pr="" pr_repo="" number="" prhead=""
 if [ "${1:-}" = blueprint ] || [ "${1:-}" = page ] || [ "${1:-}" = change ]; then
   kind=$1
   shift
@@ -43,6 +43,7 @@ if [ "${1:-}" = blueprint ] || [ "${1:-}" = page ] || [ "${1:-}" = change ]; the
   while [ $# -gt 0 ]; do
     case "$1" in
       --notes) [ $# -ge 2 ] || { echo "$usage" >&2; exit 2; }; notes=$2; shift 2 ;;
+      --replies) [ $# -ge 2 ] || { echo "$usage" >&2; exit 2; }; replies=$2; shift 2 ;;
       --pr) [ "$kind" = page ] && [ $# -ge 2 ] || { echo "$usage" >&2; exit 2; }; pr=$2; shift 2 ;;
       *) args+=("$1"); shift ;;
     esac
@@ -292,8 +293,60 @@ check_notes() {
   fi
 }
 
+# The shape of a --replies file: an array of threads, each the original comment's id, quote, and anchor with
+# the author's status and reply text, as `Thread` in approval-queue/src/lib/editor/comments.ts sets it. Prints
+# one defect per line. With --argjson change true, each anchor names its document in `file`; otherwise it names
+# none.
+replies_program=$(cat <<'JQ'
+def str: type == "string";
+def whole: type == "number" and . >= 0 and . == floor;
+def name($i): "thread \($i + 1)" + (if (.id? | type) == "string" then " (\(.id))" else "" end);
+if type != "array" then "the file must hold a JSON array of threads"
+else
+  (to_entries[] | .key as $i | .value
+   | if type != "object" then "thread \($i + 1) is not an object"
+     else name($i) as $n
+     | ((keys - ["id", "status", "text", "quote", "anchor"])[] | "\($n) has an unknown field \(.)"),
+       (if (.id | str) and .id != "" then empty else "\($n) needs an id string" end),
+       (if .status | IN("done", "kept", "answered") then empty
+        else "\($n) has status \(.status | tojson); status is done, kept, or answered" end),
+       (if .text | str then empty else "\($n) needs a text string" end),
+       (if (.quote | str) and .quote != "" then empty else "\($n) needs a quote string" end),
+       (if (.anchor | type) != "object" then "\($n) needs an anchor object"
+        else .anchor
+        | ((keys - ["quote", "prefix", "suffix", "from", "to", "commit", "file"])[] | "\($n) has an unknown anchor field \(.)"),
+          (if (.quote | str) and (.prefix | str) and (.suffix | str) and (.commit | str) then empty
+           else "\($n) needs an anchor with quote, prefix, suffix, and commit strings" end),
+          (if (.from | whole) and (.to | whole) and .from < .to then empty
+           else "\($n) needs an anchor whose from and to are whole numbers, from before to" end),
+          (if $change then (if (.file | str) and .file != "" then empty else "\($n) needs an anchor file naming a changed document" end)
+           elif has("file") then "\($n) has an anchor file; only a change's threads name one"
+           else empty end)
+        end)
+     end),
+  ([.[] | objects | .id | strings] | group_by(.)[] | select(length > 1) | "the id \(.[0] | tojson) is used \(length) times")
+end
+JQ
+)
+
+# check_replies: refuses (exit 2) a --replies file that does not match the thread shape. A change's threads
+# also name a document each.
+check_replies() {
+  local defects
+  [ -n "$replies" ] || return 0
+  if [ ! -f "$replies" ]; then echo "approval-queue: no replies file at $replies" >&2; exit 2; fi
+  if ! defects=$(jq -r --argjson change "$change_notes" "$replies_program" "$replies" 2>/dev/null); then
+    echo "approval-queue: $replies is not JSON" >&2; exit 2
+  fi
+  if [ -n "$defects" ]; then
+    printf 'approval-queue: %s does not match the replies shape (see the README'"'"'s Comments and replies):\n' "$replies" >&2
+    printf '  %s\n' "$defects" >&2
+    exit 2
+  fi
+}
+
 # check_blueprint: refuses (exit 2) a worktree that is not a git worktree's top, a file that is not a regular
-# file committed there or has uncommitted changes, and a notes file that does not match the notes shape. Sets
+# file committed there or has uncommitted changes, and a notes or replies file that does not match its shape. Sets
 # worktree to its absolute path, repo to the repository's name, and blob to the file's blob at HEAD.
 blob=""
 check_blueprint() {
@@ -320,6 +373,7 @@ check_blueprint() {
     echo "approval-queue: $source has uncommitted changes in $worktree; commit them first" >&2; exit 2
   fi
   check_notes
+  check_replies
   common=$(git -C "$worktree" rev-parse --path-format=absolute --git-common-dir)
   repo=$(basename "$(dirname "$common")")
 }
@@ -412,6 +466,7 @@ queue_change() {
   repo=${pr_repo}
   change_notes=true
   check_notes
+  check_replies
   fetch_pr "$fetch/pr" "$repo" "$number"
   head=$(jq -r '.head' "$fetch/pr/pr.json")
   tip=$(gh pr view "$number" -R "$repo" --json baseRefOid </dev/null | jq -er '.baseRefOid') \
@@ -447,6 +502,14 @@ queue_change() {
       exit 2
     fi
   fi
+  if [ -n "$replies" ]; then
+    unnamed=$(jq -r --argjson docs "$docs" '[.[].anchor.file] | unique - [$docs[].path] | .[]' "$replies")
+    if [ -n "$unnamed" ]; then
+      printf 'approval-queue: %s has threads on files that %s does not change as a blueprint or page:\n' "$replies" "$pr" >&2
+      printf '  %s\n' "$unnamed" >&2
+      exit 2
+    fi
+  fi
   exec 8>"$root/queue.lock"
   flock 8
   other=$(waiting_item "$repo#$number")
@@ -458,6 +521,7 @@ queue_change() {
   mv "$fetch/pr/body.md" "$fetch/pr/pr.json" "$fetch/pr/diff.patch" "$fetch/docs" "$item/"
   printf '%s\n' "$docs" >"$item/docs.json"
   if [ -n "$notes" ]; then jq -c . "$notes" >"$item/notes.json"; else echo '[]' >"$item/notes.json"; fi
+  if [ -n "$replies" ]; then jq -c . "$replies" >"$item/replies.json"; fi
   jq -n --arg id "$id" --arg repo "$repo" --arg title "$title" --argjson number "$number" --arg head "$head" \
     --arg created "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
     '{id: $id, kind: "change", repo: $repo, title: $title, headline: $title, created: $created, number: $number, head: $head}' \
@@ -500,6 +564,7 @@ case "$kind" in
     mkdir -p "$item"
     git -C "$worktree" cat-file blob "$blob" >"$item/doc.md"
     if [ -n "$notes" ]; then jq -c . "$notes" >"$item/notes.json"; else echo '[]' >"$item/notes.json"; fi
+    if [ -n "$replies" ]; then jq -c . "$replies" >"$item/replies.json"; fi
     jq -n --arg id "$id" --arg repo "$repo" --arg title "$title" --arg created "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
       --arg worktree "$worktree" --arg file "$source" --arg blob "$blob" --arg kind "$kind" --arg pr "$pr" --arg prhead "$prhead" \
       '{id: $id, kind: $kind, repo: $repo, title: $title, headline: $title, created: $created,
@@ -671,9 +736,16 @@ single_log() {
     '{time: $t, packet: $id, initiative: null, ref: $ref, kind: $kind, lane: "single", verdict: $v, ($k): $val}' | append_log
 }
 
+# The comments and replies a document review's decision carries, its log line's counts of them, and the
+# printed send-back, shared by doc_decision and change_decision.
+carried='{comments: (.comments // []), threads: (.threads // [])}'
+counts='{comments: (.comments // [] | length), replies: (.threads // [] | length)}'
+sent_back='{decision: "reject", note: (.note // ""), calls: (.calls // [])} + '"$carried"
+
 # doc_decision: a blueprint's or a page's decision. An approve names the commit the app recorded at HEAD when
 # Geoff approved, and the blob is read from the worktree at that commit; a send-back names the HEAD it left.
-# Both log one line keyed to the blob, with each disputed note Geoff waived and its reason. A page's approve
+# Both log one line keyed to the blob, with each disputed note Geoff waived and its reason and the counts of his
+# comments and replies, and both print the comments and replies; a send-back also prints the calls. A page's approve
 # also names its pull request and the head it was queued at, the one the screen showed, and is refused when
 # the PR has moved since; its log line carries both.
 doc_decision() {
@@ -699,18 +771,18 @@ doc_decision() {
   jq -c --arg t "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg id "$id" --arg ref "$repo:$source" --arg v "$verdict" --arg kind "$kind" \
     --arg blob "$bl" --arg commit "$commit" --argjson extra "$extra" \
     '{time: $t, packet: $id, initiative: null, ref: $ref, kind: $kind, lane: "single", verdict: $v,
-      blob: $blob, commit: $commit} + $extra + {waived: (.waived // [])}' "$d" | append_log
+      blob: $blob, commit: $commit} + $extra + {waived: (.waived // [])} + '"$counts" "$d" | append_log
   if [ "$verdict" = approve ]; then
     jq -c --arg file "$source" --arg commit "$commit" --arg blob "$bl" --argjson extra "$extra" \
-      '{decision: "approve", file: $file, commit: $commit, blob: $blob} + $extra + {calls: (.calls // [])}' "$d"
+      '{decision: "approve", file: $file, commit: $commit, blob: $blob} + $extra + {calls: (.calls // [])} + '"$carried" "$d"
   else
-    jq -c '{decision: "reject", note: (.note // "")}' "$d"
+    jq -c "$sent_back" "$d"
   fi
 }
 
 # change_decision: an approve and a send-back both name the head the change was queued at, the one its
 # documents were read at, and an approve is refused when the PR has moved since. Both log one line with the
-# calls Geoff answered.
+# calls Geoff answered and the counts of his comments and replies, and print the comments and replies.
 change_decision() {
   local d verdict h="$head"
   d="$item/decision.json"
@@ -722,11 +794,11 @@ change_decision() {
   esac
   jq -c --arg t "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg id "$id" --arg ref "$repo#$number" --arg v "$verdict" --arg head "$h" \
     '{time: $t, packet: $id, initiative: null, ref: $ref, kind: "change", lane: "single", verdict: $v, head: $head}
-     + (if $v == "approve" then {calls: (.calls // [])} else {} end)' "$d" | append_log
+     + (if $v == "approve" then {calls: (.calls // [])} else {} end) + '"$counts" "$d" | append_log
   if [ "$verdict" = approve ]; then
-    jq -c --arg pr "$repo#$number" --arg head "$h" '{decision: "approve", pr: $pr, head: $head, calls: (.calls // [])}' "$d"
+    jq -c --arg pr "$repo#$number" --arg head "$h" '{decision: "approve", pr: $pr, head: $head, calls: (.calls // [])} + '"$carried" "$d"
   else
-    jq -c '{decision: "reject", note: (.note // "")}' "$d"
+    jq -c "$sent_back" "$d"
   fi
 }
 

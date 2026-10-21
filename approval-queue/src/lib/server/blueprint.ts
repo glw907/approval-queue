@@ -42,11 +42,12 @@ export type Saved = { ok: true; blob: string; commit: string } | { ok: false; st
 
 // One writer at a time per file, so two quick saves never race on the worktree's index lock and an
 // approve never reads HEAD between a save's write and its commit.
-const queues = new Map<string, Promise<unknown>>();
+const fileQueues = new Map<string, Promise<unknown>>();
+// One writer at a time per item, so a comment never lands in `comments.json` after a decision has read it.
+const itemQueues = new Map<string, Promise<unknown>>();
 
-/** Runs `step` after every earlier step on the same file has finished; a failed step never blocks the next. */
-export function queued<T>(worktree: string, file: string, step: () => Promise<T>): Promise<T> {
-	const key = join(worktree, file);
+/** Runs `step` after every earlier step under `key` has finished; a failed step never blocks the next. */
+function serial<T>(queues: Map<string, Promise<unknown>>, key: string, step: () => Promise<T>): Promise<T> {
 	const run = (queues.get(key) ?? Promise.resolve()).then(step);
 	queues.set(
 		key,
@@ -54,6 +55,17 @@ export function queued<T>(worktree: string, file: string, step: () => Promise<T>
 	);
 	return run;
 }
+
+/** Runs `step` after every earlier step on the same file has finished. */
+export const queued = <T>(worktree: string, file: string, step: () => Promise<T>): Promise<T> =>
+	serial(fileQueues, join(worktree, file), step);
+
+/**
+ * Runs `step` after every earlier step on the same item directory has finished. A step that also
+ * needs the file's queue takes it inside this one, never the other way round, so the two never
+ * wait on each other.
+ */
+export const queuedItem = <T>(dir: string, step: () => Promise<T>): Promise<T> => serial(itemQueues, dir, step);
 
 /**
  * Writes the text to the file and commits it, when the file at HEAD is still the blob the text was
