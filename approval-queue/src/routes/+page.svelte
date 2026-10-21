@@ -4,19 +4,23 @@ nothing waits. The sort comes from the server's cookie read, so the first render
 order; picking a sort writes the cookie and reorders here, and the 2-second poll refreshes the
 rows without moving the reader. Row links replace the history entry, so the empty state's
 `window.close()` keeps working. Each row's one link stretches over the row, so a row is one tab
-stop and the whole row is the target.
+stop and the whole row is the target. An item whose decision `held` is counting down or posting
+is left off, and the empty state shows once nothing else waits.
 -->
 <script lang="ts">
 	import { age, boardGroups, SORT_COOKIE, type Sort } from '#lib/board.ts';
 	import EmptyState from '#lib/components/EmptyState.svelte';
 	import PacketIcon from '#lib/components/PacketIcon.svelte';
+	import { held } from '#lib/held.svelte.ts';
 
 	let { data } = $props();
 
 	let picked = $state<Sort | null>(null);
+	const rows = $derived(data.empty ? [] : data.rows.filter((row) => !held.ids.has(row.id)));
+	const empty = $derived(rows.length === 0);
 	const sort = $derived<Sort>(picked ?? (data.empty ? 'asks' : data.sort));
-	const groups = $derived(data.empty ? [] : boardGroups(data.rows, sort));
-	const total = $derived(data.empty ? 0 : data.rows.reduce((n, r) => n + r.asks, 0));
+	const groups = $derived(boardGroups(rows, sort));
+	const total = $derived(rows.reduce((n, r) => n + r.asks, 0));
 
 	function pick(next: Sort) {
 		picked = next;
@@ -34,10 +38,10 @@ stop and the whole row is the target.
 </script>
 
 <svelte:head>
-	{#if !data.empty}<title>Waiting for you · Design & PR Approvals</title>{/if}
+	{#if !empty}<title>Waiting for you · Design & PR Approvals</title>{/if}
 </svelte:head>
 
-{#if data.empty}
+{#if empty}
 	<EmptyState />
 {:else}
 	<main id="main" tabindex="-1" class="flex-1 px-5 pt-6 pb-8 lg:px-12">
@@ -46,7 +50,7 @@ stop and the whole row is the target.
 				<div>
 					<h1 class="desk-title text-[1.75rem] leading-tight">Waiting for you</h1>
 					<p class="desk-muted mt-1">
-						<span class="tabular-nums">{plural(data.rows.length, 'item')}</span>,
+						<span class="tabular-nums">{plural(rows.length, 'item')}</span>,
 						<span class="tabular-nums">{plural(total, 'ask')}</span>. The order changes only when you pick a sort.
 					</p>
 				</div>

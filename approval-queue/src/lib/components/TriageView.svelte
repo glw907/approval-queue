@@ -139,7 +139,6 @@ which submits them; nothing here posts. A row's number is its position in the fi
 										placeholder="Your note on this item"
 										aria-label="Note for item {index + 1}"
 										bind:value={rows[index].note}
-										disabled={desk.held}
 										onkeydown={(e) => onNoteKey(e, index)}
 										onblur={() => endEdit(index, false)}
 									/>
@@ -149,7 +148,6 @@ which submits them; nothing here posts. A row's number is its position in the fi
 										class="btn btn-xs btn-ghost font-normal text-(--color-muted)"
 										data-edit={index}
 										aria-label="{row.note ? 'Edit note' : 'Add a note'} for item {index + 1}"
-										disabled={desk.held}
 										onclick={() => startEdit(index)}
 									>
 										<svg class="size-3 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m4 20 4-1 11-11-3-3L5 16l-1 4zM14 6l3 3" /></svg>
@@ -173,7 +171,6 @@ which submits them; nothing here posts. A row's number is its position in the fi
 										name="r{index}"
 										aria-label={target.label}
 										checked={row.disposition === target.key}
-										disabled={desk.held}
 										onchange={() => moveTo(index, target.key)}
 									/>
 								{/each}

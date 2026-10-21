@@ -5,29 +5,27 @@ inside a `{#key}` on the item's id, so per-item state here (the note, a failed p
 when the next item loads. Triage calls are the exception: unsent ones are kept in `desk.drafts`, so
 opening another item and coming back keeps them.
 
-A decision is held in the page for five seconds before the form posts: the submit function awaits
-the hold, and Undo calls `cancel()` so nothing is sent. Opening another item during the hold sends
-the decision at once, while closing the tab undoes it, since a closing page cannot finish a post.
-A post that fails unlocks the bar and shows why; a post that succeeds navigates to the item the
-server named, replacing the history entry so the tab stays script-closable. A send-back closes its
-note before the hold starts, so the toast never covers it, and Undo opens it again as it was.
+A decision never posts from here. The submit function flushes any pending save, cancels the form's
+own post, and hands its form data to the layout's `held` store, then opens the next waiting item at
+once (or the board when none is left), replacing the history entry so the tab stays
+script-closable. The store posts after five seconds unless Undo opens this item again; the new
+panel then takes the decision back and seeds its note, a packet's answers and verdicts, a PR's or
+design's picks, and triage rows from the held form data, so the item returns as it was left.
 
-A packet holds the same way, with its Undo, Pause, countdown, and status in the bar, so the hold
-can pause while the pointer is over it or on a press of Pause. Every Approve uses `aria-disabled`
-rather than `disabled` while calls are open, so a locked press still arrives and moves focus to the
-first open ask, card, or call. A packet whose steps cannot be undone asks for one confirmation
-first, which posts as `irreversible=yes`. A withdrawn packet answers 410 with the board to offer.
+Every Approve uses `aria-disabled` rather than `disabled` while calls are open, so a locked press
+still arrives and moves focus to the first open ask, card, or call. A packet whose steps cannot be
+undone asks for one confirmation first, which posts as `irreversible=yes`.
 
 A document review saves as the reader types. Opening another item while an edit is unsaved waits
 for that save first, and closing the tab then asks before leaving.
 -->
 <script lang="ts">
 	import { deserialize, enhance, type SubmitFunction } from '$app/forms';
-	import { beforeNavigate, goto, invalidateAll } from '$app/navigation';
+	import { beforeNavigate, goto } from '$app/navigation';
 	import { tick } from 'svelte';
 	import { fingerprint, gate } from '#lib/cards.ts';
 	import { desk } from '#lib/desk.svelte.ts';
-	import { startHold } from '#lib/hold.ts';
+	import { held, seedFrom, UNDONE } from '#lib/held.svelte.ts';
 	import { nextItem } from '#lib/queue.ts';
 	import { changedCount, seedRows, type Row } from '#lib/triage.ts';
 	import { VERDICT_LOOK } from '#lib/packet-view.ts';
@@ -66,10 +64,12 @@ for that save first, and closing the tab then asks before leaving.
 	let sendButton = $state<HTMLButtonElement>();
 	let submitButton = $state<HTMLButtonElement>();
 	let confirmDialog = $state<HTMLDialogElement>();
-	let returnTo: HTMLElement | null = null;
-	let hold: ReturnType<typeof startHold> | null = null;
-	// Set when a held decision is sent because another item is opening, so success must not navigate too.
-	let leaving = false;
+	// The page keys this component on the item id, so a decision Undo handed back is taken once.
+	// svelte-ignore state_referenced_locally
+	const restored = held.take(data.meta.id);
+	// svelte-ignore state_referenced_locally
+	const seed = restored ? seedFrom(restored.form, data.kind) : null;
+	noteText = seed?.note ?? '';
 
 	// The poll hands the panel a new `data` every two seconds, so effects read these instead: a
 	// derived that keeps its value does not re-run them.
@@ -79,7 +79,13 @@ for that save first, and closing the tab then asks before leaving.
 	// The page keys this component on the item id, so the rows are read once per item.
 	// svelte-ignore state_referenced_locally
 	let rows = $state<Row[]>(
-		data.kind === 'triage' ? (data.decided ? data.rows : seedRows(data.rows, desk.drafts.get(data.meta.id))) : []
+		data.kind === 'triage'
+			? data.decided
+				? data.rows
+				: seed?.rows.length === data.rows.length
+					? data.rows.map((row, i) => ({ ...row, ...(seed.rows[i] as Pick<Row, 'disposition' | 'note'>) }))
+					: seedRows(data.rows, desk.drafts.get(data.meta.id))
+			: []
 	);
 	const changed = $derived(changedCount(rows));
 
@@ -91,7 +97,7 @@ for that save first, and closing the tab then asks before leaving.
 	});
 
 	// A card's pick is its choice's index; Approve unlocks once every card has one and none sends back.
-	let picks = $state<Array<number | undefined>>([]);
+	let picks = $state<Array<number | undefined>>(seed?.picks ?? []);
 	const cards = $derived(data.kind === 'pr' || data.kind === 'design' ? data.cards : []);
 	const decided = $derived(gate(cards, picks));
 	const readySub = $derived.by(() => {
@@ -110,7 +116,7 @@ for that save first, and closing the tab then asks before leaving.
 	let answers = $state<Record<number, string | undefined>>(
 		data.kind === 'packet' && data.decision?.decision === 'approve'
 			? Object.fromEntries((data.decision.asks ?? []).map((ask) => [ask.index, ask.choice]))
-			: {}
+			: (seed?.answers ?? {})
 	);
 	// svelte-ignore state_referenced_locally
 	let verdicts = $state<Record<string, string>>(
@@ -118,7 +124,8 @@ for that save first, and closing the tab then asks before leaving.
 			? {
 					...Object.fromEntries(data.routine.map((row) => [row.ref, row.verdict])),
 					...(data.decision?.decision === 'approve' &&
-						Object.fromEntries((data.decision.parts ?? []).map((part) => [part.ref, part.verdict])))
+						Object.fromEntries((data.decision.parts ?? []).map((part) => [part.ref, part.verdict]))),
+					...seed?.verdicts
 				}
 			: {}
 	);
@@ -268,7 +275,7 @@ for that save first, and closing the tab then asks before leaving.
 	const decidedCount = $derived(docReviews.reduce((n, r) => n + Object.keys(r.decided).length, 0));
 	const blueprint = $derived(data.kind === 'blueprint' || data.kind === 'page' ? data : null);
 	const change = $derived(data.kind === 'change' ? data : null);
-	const frozen = $derived(isDecided || desk.held);
+	const frozen = $derived(isDecided);
 	const missing = $derived(data.kind === 'blueprint' || data.kind === 'page' ? data.missing : false);
 
 	// A held or decided review takes no choices, and no text edits either while the file is gone.
@@ -341,24 +348,26 @@ for that save first, and closing the tab then asks before leaving.
 		if (!open.length) return;
 		const at = open.findIndex((c) => document.getElementById(c.id)?.contains(document.activeElement));
 		const target = document.getElementById(open[(at + 1) % open.length].id);
-		target?.scrollIntoView({ block: 'center' });
-		(target?.querySelector<HTMLElement>('input, button, a, textarea') ?? target)?.focus();
+		target?.scrollIntoView({ block: 'center', behavior: jump() });
+		(target?.querySelector<HTMLElement>('input, button, a, textarea') ?? target)?.focus({ preventScroll: true });
 	}
-	// What the bar's status region says in place of the lock text: the hold, an undo, or a failed post.
-	let barNote = $state<string | null>(null);
-	let holding = $state(false);
-	let holdLeft = $state(5);
-	/** Why a packet's hold is paused: the pointer over the bar, or a press of Pause; null while it runs. */
-	let pausedBy = $state<'pointer' | 'button' | null>(null);
-	// Where a withdrawn packet's failed post offers to go.
-	let withdrawn = $state<string | null>(null);
-
-	/** An answer or a changed verdict makes an undo or failure note stale, so the bar goes back to its count. */
-	function clearNote() {
-		if (holding) return;
-		barNote = null;
-		withdrawn = null;
-	}
+	/** Motion rule 5: a jump scrolls smoothly, unless the reader asked for reduced motion. */
+	const jump = (): ScrollBehavior => (matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth');
+	// An item Undo opened again says so, and a send-back reopens its note as it was.
+	$effect(() => {
+		if (!restored) return;
+		desk.toast = UNDONE;
+		desk.announce(UNDONE);
+		if (restored.outcome === 'reject') void openNote();
+		const clear = setTimeout(() => {
+			if (desk.toast === UNDONE) desk.toast = null;
+		}, 3200);
+		return () => clearTimeout(clear);
+	});
+	// A failed post links here, so opening the item ends the toast that named it.
+	$effect(() => {
+		if (held.failure?.href === `/item/${encodeURIComponent(data.meta.id)}`) held.failure = null;
+	});
 
 	$effect(() => {
 		desk.page = kind;
@@ -373,8 +382,7 @@ for that save first, and closing the tab then asks before leaving.
 			'open-note': openNote,
 			'close-note': closeNote,
 			'send-rejection': () => form?.requestSubmit(sendButton),
-			submit: () => form?.requestSubmit(submitButton),
-			undo: () => desk.undo?.()
+			submit: () => form?.requestSubmit(submitButton)
 		});
 	});
 
@@ -406,15 +414,6 @@ for that save first, and closing the tab then asks before leaving.
 	let leaveAfterSave: (() => void) | null = null;
 
 	beforeNavigate((navigation) => {
-		if (hold) {
-			if (navigation.willUnload) {
-				desk.undo?.();
-				return;
-			}
-			leaving = true;
-			hold.flush();
-			return;
-		}
 		if (!review?.pending) return;
 		// A closing tab cannot wait for the save, so the browser asks first.
 		navigation.cancel();
@@ -442,7 +441,7 @@ for that save first, and closing the tab then asks before leaving.
 
 	/** Approve on a packet: a locked press moves to the first open ask, an irreversible packet asks once more. */
 	async function approvePacket() {
-		if (desk.held || confirmDialog?.open) return;
+		if (confirmDialog?.open) return;
 		if (openAsks.length) {
 			document.querySelector<HTMLElement>(`#ask-${openAsks[0].index} input[type="radio"]`)?.focus();
 			return;
@@ -453,7 +452,7 @@ for that save first, and closing the tab then asks before leaving.
 
 	/** Approve on a PR or design: a locked press moves to the first open card. */
 	function approveCards() {
-		if (desk.held || decided.sendBack) return;
+		if (decided.sendBack) return;
 		if (decided.open.length) {
 			const card = document.getElementById(`card-${cards.indexOf(decided.open[0])}`);
 			card?.scrollIntoView({ block: 'center' });
@@ -465,7 +464,6 @@ for that save first, and closing the tab then asks before leaving.
 
 	/** Approve on a document review: a locked press moves to the next open call; otherwise the last edit saves first. */
 	async function approveDoc() {
-		if (desk.held) return;
 		if (openCalls.length) {
 			nextCall();
 			return;
@@ -522,133 +520,34 @@ for that save first, and closing the tab then asks before leaving.
 		return `Submitted ${rows.length} calls.`;
 	}
 
-	async function unlock(message: string, focusTo: HTMLElement | null, toast: string | null) {
-		desk.held = false;
-		desk.counting = false;
-		desk.toast = toast;
-		desk.undo = null;
-		holding = false;
-		pausedBy = null;
-		if (data.kind === 'packet') barNote = message;
-		else desk.announce(message);
-		await tick();
-		// The Approve button unmounts for the hold, so the captured submitter can be a detached node.
-		(focusTo?.isConnected ? focusTo : approveButton)?.focus();
-	}
-
-	/** The pointer pauses only a running hold; Pause takes over a pointer's pause, so leaving the bar keeps it. */
-	function pauseHold(by: 'pointer' | 'button') {
-		if (!holding || pausedBy === 'button' || pausedBy === by) return;
-		hold?.pause();
-		pausedBy = by;
-	}
-
-	function resumeHold(by: 'pointer' | 'button') {
-		if (pausedBy !== by) return;
-		hold?.resume();
-		pausedBy = null;
-	}
-
-	const decide: SubmitFunction = async ({ cancel, action, submitter, formData }) => {
-		// A send-back carries the edits too, so the last one is committed before the hold starts, and
-		// the post names the blob that save returned rather than the one the form rendered with.
+	const decide: SubmitFunction = async ({ cancel, action, formData }) => {
+		cancel();
+		// A send-back carries the edits too, so the last one is committed first, and the post names
+		// the blob that save returned rather than the one the form rendered with.
 		if (review) {
 			await review.flush();
 			formData.set('blob', review.blob);
 		}
+		const outcome = action.search === '?/approve' ? 'approve' : action.search === '?/reject' ? 'reject' : 'submit';
+		// Every held item is left out, so the next one is never an item whose decision is still counting.
+		const waiting = data.queue.filter((item) => item.id === data.meta.id || !held.ids.has(item.id));
+		const upNext = nextItem(waiting, data.meta.id);
 		const text = decisionText(action);
-		const upNext = nextItem(data.queue, data.meta.id);
-		const packet = data.kind === 'packet';
-		const sendingBack = action.search === '?/reject';
-		const where = packet ? 'Returning to the board' : upNext ? `Opening ${upNext.title}` : 'Closing the queue';
-		// The confirmation dialog closes as it submits, so focus returns to the button that opened it.
-		returnTo = packet && submitter?.closest('dialog') ? (approveButton ?? null) : submitter;
-		desk.held = true;
-		desk.counting = true;
-		desk.toastError = false;
-		const undoNote = `${text} ${where} in 5 seconds. ${desk.singleKeys ? 'Press z or the Undo button' : 'Press the Undo button'} to undo.`;
-		if (packet) {
-			// The bar carries the Undo, the countdown, and the status, so the pointer over it pauses the hold.
-			barNote = undoNote;
-			withdrawn = null;
-			holding = true;
-			holdLeft = 5;
-			desk.toast = null;
-		} else {
-			// The note has posted with the form, so it closes for the hold and its text waits for an Undo.
-			if (sendingBack) desk.noteOpen = false;
-			desk.toast = `${text} ${where} in 5 s.`;
-			desk.announce(undoNote);
-		}
-		await tick();
-		document.getElementById('undo')?.focus();
-
-		const fired = await new Promise<boolean>((resolve) => {
-			hold = startHold(5000, {
-				tick: (left) => {
-					if (packet) holdLeft = left;
-					else desk.toast = `${text} ${where} in ${left} s.`;
-				},
-				fire: () => resolve(true)
-			});
-			desk.undo = () => {
-				hold?.cancel();
-				resolve(false);
-			};
+		held.hold({
+			id: data.meta.id,
+			title: data.meta.headline ?? data.meta.title,
+			kind: data.kind,
+			subject: subject() ?? data.meta.repo,
+			href: action.href,
+			form: formData,
+			outcome,
+			toast: text
 		});
-		hold = null;
-		holding = false;
-		pausedBy = null;
-		// The next item is already opening, so its keys and rows must not wait on this post.
-		if (leaving) desk.held = false;
-		if (!fired) {
-			cancel();
-			await unlock('Undone. Nothing was sent.', returnTo, null);
-			if (sendingBack && !packet) await openNote();
-			return;
-		}
-
-		const done = leaving ? text : `${text} ${where}.`;
-		// The Undo button holds focus and is about to unmount, so focus moves first.
-		document.getElementById('main')?.focus();
-		desk.counting = false;
-		desk.undo = null;
-		desk.toast = done;
-		if (packet) barNote = done;
-		else desk.announce(done);
-		return async ({ result }) => {
-			if (result.type === 'success') {
-				desk.drafts.delete(data.meta.id);
-				try {
-					for (const key of Object.keys(localStorage)) if (remember && (key === remember || key.startsWith(`${remember}.`))) localStorage.removeItem(key);
-				} catch {
-					// The remembered choices are a convenience; a stale entry is ignored once the item is decided.
-				}
-				if (leaving) {
-					desk.toast = null;
-					// Reopening the same item keeps the panel, so its decided state comes only from a reload.
-					await invalidateAll();
-					return;
-				}
-				const next = (result.data as { next: string | null }).next;
-				// A packet's decision returns the tab to the board, not to the next item.
-				await goto(packet ? '/' : (next ?? '/'), { replace: true, refreshAll: true });
-				desk.held = false;
-				// The empty state puts focus on Keep itself, so only a main that holds no focus gets it.
-				const main = document.getElementById('main');
-				if (main && !main.contains(document.activeElement)) main.focus();
-				setTimeout(() => {
-					if (desk.toast === done) desk.toast = null;
-				}, 2000);
-				return;
-			}
-			const reason =
-				result.type === 'error' ? result.error.message : result.type === 'failure' ? result.data?.message : 'unknown';
-			const failed = leaving ? `The decision on ${subject()} was not sent: ${reason}` : `Not sent: ${reason}`;
-			desk.toastError = true;
-			if (result.type === 'failure' && result.data?.board) withdrawn = String(result.data.board);
-			await unlock(failed, returnTo, failed);
-		};
+		desk.announce(`${text} ${desk.singleKeys ? 'Press z or the Undo button' : 'Press the Undo button'} to undo.`);
+		await goto(upNext ? `/item/${encodeURIComponent(upNext.id)}` : '/', { replace: true });
+		// The empty state puts focus on Keep itself, so only a main that holds no focus gets it.
+		const main = document.getElementById('main');
+		if (main && !main.contains(document.activeElement)) main.focus();
 	};
 </script>
 
@@ -733,11 +632,9 @@ for that save first, and closing the tab then asks before leaving.
 	{/snippet}
 
 	{#if packet}
-		<div onchange={clearNote}>
-			<PacketBrief data={packet} bind:verdicts decided={packet.decided} />
-			<PacketAsks asks={packet.asks} bind:answers decided={packet.decided} />
-			<PacketRoutine routine={packet.routine} parts={packet.parts} bind:verdicts decided={packet.decided} />
-		</div>
+		<PacketBrief data={packet} bind:verdicts decided={packet.decided} />
+		<PacketAsks asks={packet.asks} bind:answers decided={packet.decided} />
+		<PacketRoutine routine={packet.routine} parts={packet.parts} bind:verdicts decided={packet.decided} />
 	{:else if blueprint && review}
 		{#if blueprint.missing}
 			<p class="bg bg-first bg-flat">The queue can no longer read <code>{blueprint.file}</code> from the worktree’s latest commit. The editor shows the copy that was queued, and you can’t edit it.</p>
@@ -804,8 +701,6 @@ for that save first, and closing the tab then asks before leaving.
 				bind:this={form}
 				use:enhance={decide}
 				aria-label="Decision"
-				onpointerenter={() => pauseHold('pointer')}
-				onpointerleave={() => resumeHold('pointer')}
 			>
 				{#if packet}
 					<input type="hidden" name="fingerprint" value={packet.fingerprint} />
@@ -826,7 +721,7 @@ for that save first, and closing the tab then asks before leaving.
 				{:else}
 					<input type="hidden" name="cards" value={fingerprint(cards)} />
 				{/if}
-				<DecisionBar hideStatus={holding}>
+				<DecisionBar>
 					{#snippet note()}
 						{#if desk.noteOpen}
 							<div class="sendback">
@@ -846,11 +741,10 @@ for that save first, and closing the tab then asks before leaving.
 									class="textarea desk-field w-full"
 									bind:this={noteField}
 									bind:value={noteText}
-									disabled={desk.held}
 								></textarea>
 								<div class="acts">
-									<button type="button" class="btn" disabled={desk.held} onclick={closeNote}>Cancel <kbd>Esc</kbd></button>
-									<button class="btn btn-primary" formaction="?/reject" bind:this={sendButton} disabled={desk.held}>
+									<button type="button" class="btn" onclick={closeNote}>Cancel <kbd>Esc</kbd></button>
+									<button class="btn btn-primary" formaction="?/reject" bind:this={sendButton}>
 										Send back <kbd>Ctrl</kbd><kbd>Enter</kbd>
 									</button>
 								</div>
@@ -858,23 +752,19 @@ for that save first, and closing the tab then asks before leaving.
 						{/if}
 					{/snippet}
 					{#snippet reject()}
-						{#if data.kind !== 'triage' && !holding}
+						{#if data.kind !== 'triage'}
 							<button
 								type="button"
 								class={['btn', decided.sendBack && !packet ? 'btn-primary' : 'btn-outline']}
-								bind:this={rejectButton} disabled={desk.held} onclick={openNote}>
+								bind:this={rejectButton} onclick={openNote}>
 								Send back with note
 							</button>
 						{/if}
 					{/snippet}
 					{#snippet status()}
 						{#if packet}
-							<p class="s1" role="status">{barNote ?? packetLock}</p>
-							{#if barNote === null}
-								<p class="s2">{packetSub}</p>
-							{:else if withdrawn}
-								<p class="s2"><a class="link" href={withdrawn}>Open the board</a></p>
-							{/if}
+							<p class="s1" role="status">{packetLock}</p>
+							<p class="s2">{packetSub}</p>
 						{:else if docReviews.length}
 							<p class="s1" role="status">
 								{openCalls.length ? `Make ${plural(openCalls.length, 'call')} to approve` : 'Ready to approve'}
@@ -909,32 +799,8 @@ for that save first, and closing the tab then asks before leaving.
 							<p class="s2">{readySub}</p>
 						{/if}
 					{/snippet}
-					{#snippet hold()}
-						{#if holding}
-							<div class="holding">
-								<div class="min-w-0 flex-1" aria-hidden="true">
-									<p class="s1">{pausedBy ? 'Paused' : `Sending in ${holdLeft} s`}</p>
-									<p class="s2">
-										{pausedBy === 'button' ? 'Press Resume to carry on.' : pausedBy ? 'Move off the bar to carry on.' : 'Point at the bar to pause.'}
-									</p>
-									<progress class="progress progress-primary" value={holdLeft} max="5"></progress>
-								</div>
-								<button
-									type="button"
-									class="btn"
-									aria-pressed={pausedBy === 'button'}
-									onclick={() => (pausedBy === 'button' ? resumeHold('button') : pauseHold('button'))}
-								>
-									{pausedBy === 'button' ? 'Resume' : 'Pause'}
-								</button>
-								<button type="button" class="btn" id="undo" onclick={() => desk.undo?.()}>Undo <kbd class="desk-sk">Z</kbd></button>
-							</div>
-						{/if}
-					{/snippet}
 					{#snippet approve()}
-						{#if holding}
-							<!-- The hold block carries Undo; the approval is gone until the hold ends. -->
-						{:else if packet}
+						{#if packet}
 							<button
 								type="submit"
 								class="btn btn-primary bar-approve"
@@ -942,7 +808,6 @@ for that save first, and closing the tab then asks before leaving.
 								bind:this={approveButton}
 								aria-describedby="bar-state"
 								aria-disabled={openAsks.length > 0}
-								disabled={desk.held}
 								onclick={(e) => {
 									e.preventDefault();
 									approvePacket();
@@ -958,7 +823,6 @@ for that save first, and closing the tab then asks before leaving.
 								bind:this={approveButton}
 								aria-describedby="bar-state"
 								aria-disabled={openCalls.length > 0}
-								disabled={desk.held}
 								onclick={(e) => {
 									e.preventDefault();
 									approveDoc();
@@ -967,7 +831,7 @@ for that save first, and closing the tab then asks before leaving.
 								Approve the {data.kind === 'page' ? 'page' : data.kind === 'change' ? 'change' : 'blueprint'} <kbd>Ctrl</kbd><kbd>Enter</kbd>
 							</button>
 						{:else if data.kind === 'triage'}
-							<button class="btn btn-primary" bind:this={submitButton} disabled={desk.held}>
+							<button class="btn btn-primary" bind:this={submitButton}>
 								Submit calls <kbd>Ctrl</kbd><kbd>Enter</kbd>
 							</button>
 						{:else if !decided.sendBack}
@@ -978,7 +842,6 @@ for that save first, and closing the tab then asks before leaving.
 								bind:this={approveButton}
 								aria-describedby="bar-state"
 								aria-disabled={decided.locked}
-								disabled={desk.held}
 								onclick={(e) => {
 									e.preventDefault();
 									approveCards();
