@@ -443,14 +443,14 @@ this session" until the queue reload lists it there itself.
 		<div class="alert alert-info border border-base-300 text-sm">
 			<span>{desk.toast}</span>
 			{#if desk.toastUndo}
-				{@const undo = desk.toastUndo}
 				<button
 					type="button"
 					class="btn btn-sm"
 					onclick={() => {
+						// Clearing the toast drops its Undo, so the function is taken first.
+						const undo = desk.toastUndo;
 						desk.toast = null;
-						desk.toastUndo = null;
-						undo();
+						undo?.();
 					}}>Undo</button
 				>
 			{/if}

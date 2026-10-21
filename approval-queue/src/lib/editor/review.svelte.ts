@@ -799,7 +799,13 @@ export class DocReview {
 
 	/** Adds a deleted comment again where its anchor now places it, or says why it cannot. */
 	private async restore(text: string, anchor: Anchor) {
-		if (!this.view || refuseOpenBox()) return;
+		if (!this.view) return;
+		// The layout drops the toast's Undo before calling it, so a refusal offers the Undo again.
+		if (boxes.open || this.op) {
+			void boxes.open?.focusBox();
+			desk.flash(boxes.open ? `${OPEN_FIRST}, then press Undo.` : 'Comment deleted', () => void this.restore(text, anchor));
+			return;
+		}
 		const at = place(this.view.state.doc.toString(), anchor);
 		if (!at) {
 			desk.flash(RESTORE_GONE);
