@@ -520,8 +520,14 @@ for that save first, and closing the tab then asks before leaving.
 		return `Submitted ${rows.length} calls.`;
 	}
 
+	// Set from a decision until the next item opens, so a second press during the flush or the
+	// navigation can't hold the same item twice.
+	let deciding = false;
+
 	const decide: SubmitFunction = async ({ cancel, action, formData }) => {
 		cancel();
+		if (deciding) return;
+		deciding = true;
 		// A send-back carries the edits too, so the last one is committed first, and the post names
 		// the blob that save returned rather than the one the form rendered with.
 		if (review) {
@@ -545,6 +551,7 @@ for that save first, and closing the tab then asks before leaving.
 		});
 		desk.announce(`${text} ${desk.singleKeys ? 'Press z or the Undo button' : 'Press the Undo button'} to undo.`);
 		await goto(upNext ? `/item/${encodeURIComponent(upNext.id)}` : '/', { replace: true });
+		deciding = false;
 		// The empty state puts focus on Keep itself, so only a main that holds no focus gets it.
 		const main = document.getElementById('main');
 		if (main && !main.contains(document.activeElement)) main.focus();

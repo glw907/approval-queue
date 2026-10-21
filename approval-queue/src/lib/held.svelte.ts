@@ -99,12 +99,18 @@ export class Held {
 		return new Set([...(this.current ? [this.current.id] : []), ...this.sending.map((d) => d.id)]);
 	}
 
+	/** Holds `decision`, posting any decision already held; one for an item held or posting is ignored. */
 	hold(decision: HeldDecision) {
+		if (this.ids.has(decision.id)) return;
+		// The toast stays mounted only when this replaces a decision still showing, so only then can a
+		// pointer or focus already on it hold the new clock; an unmounted toast never sent its leave.
+		const showing = this.current !== null;
 		this.#timer?.flush();
 		this.failure = null;
-		this.#pausers.clear();
+		if (!showing) this.#pausers.clear();
 		this.current = decision;
 		this.#timer = startHold(HOLD_MS, { tick: () => {}, fire: () => void this.#send() });
+		if (this.#pausers.size) this.#timer.pause();
 	}
 
 	/** Stops the clock while the pointer or focus is on the toast; `by` names which, so each resumes only its own. */

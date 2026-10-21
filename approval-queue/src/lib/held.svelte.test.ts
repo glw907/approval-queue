@@ -73,6 +73,38 @@ describe('Held', () => {
 		expect(store.take('a')).toBeNull();
 	});
 
+	it('ignores a second decision on an item already held or posting, keeping the first clock', async () => {
+		let answer!: (r: ActionResult) => void;
+		const { store, post } = setup(() => new Promise((resolve) => (answer = resolve)));
+		const first = decision('a');
+		store.hold(first);
+		await vi.advanceTimersByTimeAsync(2000);
+		store.hold(decision('a', 'reject'));
+		expect(store.current).toBe(first);
+		expect(post).not.toHaveBeenCalled();
+		await vi.advanceTimersByTimeAsync(HOLD_MS - 2000);
+		expect(post).toHaveBeenCalledTimes(1);
+		store.hold(decision('a', 'reject'));
+		expect(store.current).toBeNull();
+		answer(SUCCESS);
+		await vi.advanceTimersByTimeAsync(HOLD_MS * 2);
+		expect(post).toHaveBeenCalledTimes(1);
+		expect(post).toHaveBeenLastCalledWith(first.href, first.form);
+	});
+
+	it('keeps a second decision paused while the pointer stays on the toast', async () => {
+		const { store, post } = setup();
+		store.hold(decision('a'));
+		store.pause('pointer');
+		store.hold(decision('b'));
+		expect(post).toHaveBeenCalledTimes(1);
+		await vi.advanceTimersByTimeAsync(HOLD_MS * 2);
+		expect(post).toHaveBeenCalledTimes(1);
+		store.resume('pointer');
+		await vi.advanceTimersByTimeAsync(HOLD_MS);
+		expect(post).toHaveBeenCalledTimes(2);
+	});
+
 	it('posts a held decision at once when a second one is taken, and holds the second', async () => {
 		const { store, post } = setup();
 		const a = decision('a');
