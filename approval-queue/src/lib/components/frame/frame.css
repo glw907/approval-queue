@@ -32,6 +32,8 @@ html {
 	border-right: 1px solid var(--color-base-300);
 	padding: 16px 12px;
 	display: grid;
+	/* Bounded tracks, so a decided row's one-line title ellipsizes instead of widening the rail. */
+	grid-template-columns: minmax(0, 1fr);
 	align-content: start;
 	gap: 4px;
 	position: sticky;
@@ -65,6 +67,8 @@ html {
 	margin: 0;
 	padding: 0;
 	display: grid;
+	grid-template-columns: minmax(0, 1fr);
+	min-width: 0;
 	gap: 4px;
 }
 .rail a.q {
@@ -97,6 +101,7 @@ html {
 	display: flex;
 	justify-content: space-between;
 	gap: 8px;
+	min-width: 0;
 	padding: 4px 8px 4px 14px;
 	font-size: 0.9rem;
 	color: var(--color-muted);
