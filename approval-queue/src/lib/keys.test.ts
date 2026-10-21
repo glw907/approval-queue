@@ -158,14 +158,21 @@ describe('keyAction', () => {
 	});
 
 	it('takes the comment chords on a document page only, from the editor and with single keys off', () => {
-		const chord = { ...none, ctrl: true, alt: true };
+		const chord = (code: string) => ({ ...none, ctrl: true, alt: true, code });
 		const t = ctx({ page: 'page', typing: true, singleKeys: false });
-		expect(keyAction('m', chord, t)).toBe('comment');
-		expect(keyAction('M', chord, ctx({ page: 'blueprint' }))).toBe('comment');
-		expect(keyAction('n', chord, ctx({ page: 'change' }))).toBe('next-comment');
-		expect(keyAction('p', chord, t)).toBe('prev-comment');
-		expect(keyAction('m', chord, ctx({ page: 'pr' }))).toBeNull();
-		expect(keyAction('m', { ...chord, shift: true }, t)).toBeNull();
-		expect(keyAction('m', { ...none, ctrl: true }, t)).toBeNull();
+		expect(keyAction('m', chord('KeyM'), t)).toBe('comment');
+		expect(keyAction('M', chord('KeyM'), ctx({ page: 'blueprint' }))).toBe('comment');
+		expect(keyAction('n', chord('KeyN'), ctx({ page: 'change' }))).toBe('next-comment');
+		expect(keyAction('p', chord('KeyP'), t)).toBe('prev-comment');
+		expect(keyAction('m', chord('KeyM'), ctx({ page: 'pr' }))).toBeNull();
+		expect(keyAction('m', { ...chord('KeyM'), shift: true }, t)).toBeNull();
+		expect(keyAction('m', { ...none, ctrl: true, code: 'KeyM' }, t)).toBeNull();
+	});
+
+	it('matches the comment chords by physical key, whatever character the layout gives them', () => {
+		const t = ctx({ page: 'blueprint', typing: true });
+		// Option+M on macOS gives "µ", and AltGr layouts give their own characters.
+		expect(keyAction('µ', { ...none, ctrl: true, alt: true, code: 'KeyM' }, t)).toBe('comment');
+		expect(keyAction('m', { ...none, ctrl: true, alt: true, code: 'Semicolon' }, t)).toBeNull();
 	});
 });

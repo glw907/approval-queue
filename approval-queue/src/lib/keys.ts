@@ -45,11 +45,16 @@ export interface KeyMods {
 	meta: boolean;
 	alt: boolean;
 	shift: boolean;
+	/**
+	 * The physical key, as `KeyboardEvent.code` names it. The comment chords match it rather than
+	 * `key`, which Option on macOS and AltGr on other layouts turn into another character.
+	 */
+	code?: string;
 }
 
 const MOVES: Record<string, KeyAction> = { '1': 'move-now', '2': 'move-defer', '3': 'move-drop' };
 const DOCS: ReadonlyArray<KeyContext['page']> = ['blueprint', 'page', 'change'];
-const COMMENT_KEYS: Record<string, KeyAction> = { m: 'comment', n: 'next-comment', p: 'prev-comment' };
+const COMMENT_KEYS: Record<string, KeyAction> = { KeyM: 'comment', KeyN: 'next-comment', KeyP: 'prev-comment' };
 
 /**
  * Follows the catalogue's global handler order: the open sheet takes everything but `?`, then
@@ -67,7 +72,7 @@ export function keyAction(key: string, mods: KeyMods, context: KeyContext): KeyA
 	}
 	// The comment chords work from the editor, which is a typing target, and with single keys off.
 	if (DOCS.includes(page) && mods.ctrl && mods.alt && !mods.meta && !mods.shift) {
-		const action = COMMENT_KEYS[key.toLowerCase()];
+		const action = COMMENT_KEYS[mods.code ?? ''];
 		if (action) return action;
 	}
 
