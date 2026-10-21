@@ -7,6 +7,9 @@
 - [ ] **#2** A damaged `packet.json` makes that packet's page and actions answer 500 `#improvement` `#approval-queue` `#initiative:approval-packets` *(2026-10-17)*
   `readPacket` in `approval-queue/src/lib/server/items.ts` throws on a file that does not parse, so the item's page, approve, and reject return 500. The board and the listings now skip it. Answer 404 or the withdrawn message instead, and name the item on the board (the design's "skips an unreadable item and names it"). The same page's `reject` for a non-packet item and its `submit` action also read `request.formData()` with no catch, so a post that is not a form answers 500 instead of 400.
 
+- [ ] **#13** Give a send-back structured instructions the session can act on `#feature` `#approval-queue` *(2026-10-21)*
+  A reject returns only `{"decision":"reject","note"}`, so the session has to work out from free text what to change. LangChain's Agent Inbox has a "respond" outcome that sends the agent a reply it continues from. Add the same here: a send-back carrying the calls Geoff made, each with its anchor (part, file and line, or ask) and his instruction, in the decision JSON. The session then revises and queues the item again. PR #4 already records a send-back's calls, but only for display.
+
 - [ ] **#1** The packet fingerprint omits each part's lane and each ask's bound part and rule `#improvement` `#approval-queue` `#initiative:approval-packets` *(2026-10-17)*
   `packetFingerprint` in `approval-queue/src/lib/server/packet-decision.ts` hashes refs, kinds, verdicts, heads, hashes, and each ask's title, labels, and tags. Rebinding an ask to another ask-bound part with the same question and labels keeps the fingerprint. The command's `jq` check closes this for authorization today, since lane and binding come from the stored `packet.json`. Add `a.part?.ref`, `a.rule`, and `p.lane`.
 
