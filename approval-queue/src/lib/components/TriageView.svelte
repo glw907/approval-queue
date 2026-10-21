@@ -1,6 +1,7 @@
 <!-- @component
 A triage item: the session's calls in three groups (Do now, Do later, Don't do), each row with a
-choice join, a Note button, and a Technical detail disclosure. Choosing moves the row to the group
+verdict segment (amber once it differs from the session's proposal), a Note button, and a Technical
+detail disclosure. Choosing moves the row to the group
 it names, and keys `1`, `2`, `3` do the same for the focused row. The rows are bound to `ItemPanel`,
 which submits them; nothing here posts. A row's number is its position in the file and never changes.
 -->
@@ -8,24 +9,20 @@ which submits them; nothing here posts. A row's number is its position in the fi
 	import { tick } from 'svelte';
 	import { desk } from '#lib/desk.svelte.ts';
 	import { groupRows, moveRow, type Disposition, type Row } from '#lib/triage.ts';
-	import BriefBlock from './BriefBlock.svelte';
+	import PacketIcon from './PacketIcon.svelte';
 
 	interface Props {
 		rows: Row[];
 		/** Each row's action, reason, and technical detail as rendered HTML, in the file's order. */
 		html: Array<{ action: string; why: string; detail: string | null }>;
-		headlineHtml: string;
-		ledeHtml: string;
-		/** The meta line above the block, such as "Triage · drafter Pass 0". */
-		meta: string;
 	}
 
-	let { rows = $bindable(), html, headlineHtml, ledeHtml, meta }: Props = $props();
+	let { rows = $bindable(), html }: Props = $props();
 
 	const SECTIONS = [
-		{ key: 'now', label: 'Do now', dot: 'bg-warning', pick: 'checked:bg-warning/25' },
-		{ key: 'defer', label: 'Do later', dot: 'bg-base-content/40', pick: 'checked:bg-base-300' },
-		{ key: 'drop', label: 'Don’t do', dot: 'bg-base-content/20', pick: 'checked:bg-base-300' }
+		{ key: 'now', label: 'Do now' },
+		{ key: 'defer', label: 'Do later' },
+		{ key: 'drop', label: 'Don’t do' }
 	] as const;
 	const LABEL: Record<Disposition, string> = { now: 'Do now', defer: 'Do later', drop: 'Don’t do' };
 
@@ -35,16 +32,15 @@ which submits them; nothing here posts. A row's number is its position in the fi
 	let editing = $state<number | null>(null);
 	let original = '';
 
-	$effect(() => {
-		desk.handlers = {
-			...desk.handlers,
+	$effect(() =>
+		desk.register({
 			'row-next': () => stepRow(1),
 			'row-prev': () => stepRow(-1),
 			'move-now': () => moveFocused('now'),
 			'move-defer': () => moveFocused('defer'),
 			'move-drop': () => moveFocused('drop')
-		};
-	});
+		})
+	);
 
 	const rowEl = (index: number) => document.querySelector<HTMLElement>(`[data-row="${index}"]`);
 
@@ -110,58 +106,32 @@ which submits them; nothing here posts. A row's number is its position in the fi
 	}
 </script>
 
-<p class="mb-2 text-xs tracking-wide text-(--color-muted)">{meta}</p>
-<BriefBlock {headlineHtml} {ledeHtml} />
-
 {#each SECTIONS as section (section.key)}
-	<section data-group={section.key} aria-labelledby="g-{section.key}">
-		<h2 id="g-{section.key}" class="mt-9 mb-0 flex items-center gap-2 text-base font-semibold">
-			<span class="size-2 rounded-full {section.dot}" aria-hidden="true"></span>
-			{section.label}
-			<span class="text-sm font-normal text-(--color-muted)">{groups[section.key].length}</span>
-		</h2>
-		{#if groups[section.key].length === 0}
-			<p class="py-3 text-sm text-(--color-muted)">Nothing here.</p>
-		{:else}
-			<ul class="list">
+	<section class="sec" id="group-{section.key}" data-group={section.key} aria-labelledby="g-{section.key}">
+		<h2 id="g-{section.key}">{section.label}</h2>
+		<p class="sl">
+			{#if groups[section.key].length === 0}Nothing here.{:else}{groups[section.key].length} {groups[section.key].length === 1 ? 'item' : 'items'}.{/if}
+		</p>
+		{#if groups[section.key].length}
+			<ul class="parts">
 				{#each groups[section.key] as { row, index } (index)}
-					<!-- The list takes one tab stop and the arrows move within it, so each row is focusable. -->
-					<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+					<!-- svelte-ignore a11y_no_noninteractive_tabindex: the list takes one tab stop and the arrows move within it, so each row is focusable -->
 					<li
 						data-row={index}
-						class="list-row items-start px-0 py-3 after:border-base-content/10"
+						class="part"
 						tabindex={current === index ? 0 : -1}
 						aria-labelledby="item-{index}"
 						onfocusin={() => (current = index)}
 					>
-						<div class="min-w-0 list-col-grow">
-							<p
-								id="item-{index}"
-								class={[
-									'max-w-[70ch] text-base leading-snug font-semibold text-pretty',
-									section.key === 'drop' && 'text-(--color-muted)'
-								]}
-							>
+						<div class="st">
+							<p id="item-{index}" class={['pt', 'action', section.key === 'drop' && 'dropped']}>
 								{@html html[index].action}
 							</p>
-							<p class="mt-0.5 max-w-[70ch] text-[0.95rem] leading-relaxed text-pretty text-(--color-muted)">
+							<p class="sx why-text">
 								{@html html[index].why}
 								{#if row.note}<span class="italic">Your note: {row.note}</span>{/if}
 							</p>
-							<div class="mt-2 flex flex-wrap items-center gap-x-1 gap-y-2">
-								<div class="join rounded-field border border-base-300" role="radiogroup" aria-label="Call for item {index + 1}">
-									{#each SECTIONS as target (target.key)}
-										<input
-											class="join-item btn btn-xs btn-ghost font-normal checked:border-base-content/55 checked:font-semibold checked:text-base-content not-checked:hover:border-transparent not-checked:hover:bg-base-content/5 {target.pick}"
-											type="radio"
-											name="r{index}"
-											aria-label={target.label}
-											checked={row.disposition === target.key}
-											disabled={desk.held}
-											onchange={() => moveTo(index, target.key)}
-										/>
-									{/each}
-								</div>
+							<div class="flex flex-wrap items-center gap-x-1 gap-y-2">
 								{#if editing === index}
 									<input
 										class="input input-sm w-full max-w-[60ch]"
@@ -188,16 +158,26 @@ which submits them; nothing here posts. A row's number is its position in the fi
 								{/if}
 							</div>
 							{#if html[index].detail}
-								<details class="group mt-0">
-									<summary class="flex w-fit cursor-pointer list-none items-center gap-1 py-1 text-xs text-(--color-muted) hover:text-base-content">
-										<span class="transition-transform group-open:rotate-90">
-											<svg class="size-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 6 6 6-6 6" /></svg>
-										</span>
-										Technical detail
-									</summary>
-									<div class="desk-code mt-1 max-w-[70ch] text-xs leading-relaxed text-pretty opacity-90">{@html html[index].detail}</div>
+								<details class="why">
+									<summary><PacketIcon name="chev" class="chev" />Technical detail</summary>
+									<div class="why-body desk-code">{@html html[index].detail}</div>
 								</details>
 							{/if}
+						</div>
+						<div class="sc">
+							<div class={['join seg', row.disposition !== row.proposed && 'changed']} role="radiogroup" aria-label="Call for item {index + 1}">
+								{#each SECTIONS as target (target.key)}
+									<input
+										class="join-item btn btn-sm"
+										type="radio"
+										name="r{index}"
+										aria-label={target.label}
+										checked={row.disposition === target.key}
+										disabled={desk.held}
+										onchange={() => moveTo(index, target.key)}
+									/>
+								{/each}
+							</div>
 						</div>
 					</li>
 				{/each}
@@ -207,6 +187,16 @@ which submits them; nothing here posts. A row's number is its position in the fi
 {/each}
 
 <style>
+	.action {
+		font-weight: 600;
+	}
+	.action.dropped,
+	.why-text {
+		color: var(--color-muted);
+	}
+	.why-text {
+		font-size: 0.95rem;
+	}
 	.desk-code :global(code) {
 		font-family: var(--font-mono);
 		font-size: var(--text-step-inline-code);

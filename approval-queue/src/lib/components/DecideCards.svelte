@@ -1,6 +1,7 @@
 <!-- @component
-The "Decide first" cards a PR or a design raises, each a soft alert with a join of radio choices.
-Renders nothing when there are no cards.
+The "Decide first" cards a PR or a design raises, each a note on the frame's status rule (amber
+while open, red for a failed check or a review that asks for a fix, green once picked) holding a
+radio group with nothing preselected. Renders nothing when there are no cards.
 
 The radios belong to the decision form in `ItemPanel` (`form="decision-form"`), so a pick posts
 with Approve as `c<card>`, and `picks` is bound up to the panel so its bar can unlock Approve. The
@@ -9,6 +10,8 @@ server rebuilds the same list and refuses a post whose picks don't cover it.
 <script lang="ts">
 	import { gate, type Card } from '#lib/cards.ts';
 	import { desk } from '#lib/desk.svelte.ts';
+	import PacketIcon from './PacketIcon.svelte';
+	import Prose from './Prose.svelte';
 
 	interface Props {
 		/** Each card with the HTML the server rendered from its text. */
@@ -21,6 +24,7 @@ server rebuilds the same list and refuses a post whose picks don't cover it.
 
 	let { cards, picks = $bindable([]), decided }: Props = $props();
 
+	const KIND = { check: 'Failing.', review: 'Review.', 'before-merge': 'Before merge.', decide: 'Decide.' } as const;
 	const left = $derived(gate(cards, picks).open.length);
 
 	/** A source line ends in a full stop; a session's own text may already carry one. */
@@ -28,62 +32,79 @@ server rebuilds the same list and refuses a post whose picks don't cover it.
 </script>
 
 {#if cards.length}
-	<section class="mt-8 space-y-3" aria-labelledby="decide-h">
-		<h2 id="decide-h" class="mb-3 flex items-baseline gap-3 text-base font-semibold">
-			Decide first
-			<span class="text-sm font-normal text-(--color-muted)">{left} of {cards.length} left</span>
-		</h2>
-		{#each cards as card, i (i)}
-			{@const error = card.kind === 'check' || card.kind === 'review'}
-			<section
-				id="card-{i}"
-				aria-labelledby="card-{i}-title"
-				class={['alert alert-soft items-start', error ? 'alert-error bg-error/7' : 'alert-warning bg-warning/10']}
-			>
-				{#if error}
-					<svg class="mt-0.5 size-5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 2 20h20L12 3zM12 10v4M12 17h.01" /></svg>
-				{:else}
-					<svg class="mt-0.5 size-5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M12 11v5M12 8h.01" /></svg>
-				{/if}
-				<div class="text-base-content">
-					<div class="flex items-center gap-2">
-						<h3 id="card-{i}-title" class="text-base font-semibold">{card.title}</h3>
-						{#if picks[i] !== undefined}
-							<span class="badge badge-ghost badge-sm">
-								<svg class="size-3 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 5 5 9-10" /></svg>
-								Decided
-							</span>
-						{/if}
-					</div>
+	<section class="sec" id="decide-first" aria-labelledby="decide-h">
+		<h2 id="decide-h">Decide first</h2>
+		<p class="sl">{left} of {cards.length} left. Pick one choice in each.</p>
+		<div class="grid gap-3">
+			{#each cards as card, i (i)}
+				{@const error = card.kind === 'check' || card.kind === 'review'}
+				<section
+					id="card-{i}"
+					aria-labelledby="card-{i}-title"
+					class={['note ask', picks[i] !== undefined ? 'done' : error ? 'error' : 'decide']}
+				>
+					<h3 id="card-{i}-title" class="nh">
+						<span class="kind">{KIND[card.kind]}</span>
+						{card.title}
+					</h3>
 					{#if card.kind === 'before-merge'}
-						<div class="desk-md desk-card mt-1 max-w-[70ch] text-pretty">{@html card.html}</div>
-						<p class="mt-1 text-[0.95rem] text-(--color-muted)">{card.source}.</p>
+						<div class="desk-md summary">{@html card.html}</div>
+						<p class="ask-part">{stop(card.source)}</p>
 					{:else}
-						<p class="mt-1 max-w-[70ch] text-[0.95rem] leading-relaxed text-pretty">
+						<p class="summary">
 							{@html card.html}
-							<span class="text-(--color-muted)">{stop(card.source)}</span>
+							<span class="desk-src">{stop(card.source)}</span>
 						</p>
 					{/if}
-					<div
-						class="join mt-3 rounded-field border border-base-300 bg-base-100 max-sm:join-vertical"
-						role="radiogroup"
-						aria-labelledby="card-{i}-title"
-					>
+					<fieldset class="choices">
+						<legend class="sr-only">{card.title}</legend>
+						<p class="choices-h" aria-hidden="true">Choose one</p>
 						{#each card.choices as choice, j (j)}
-							<input
-								class="join-item btn btn-sm checked:border-base-content checked:bg-base-content checked:text-base-100"
-								type="radio"
-								name="c{i}"
-								value={j}
-								form="decision-form"
-								aria-label={choice.recommended ? `${choice.label} (recommended)` : choice.label}
-								disabled={desk.held || decided}
-								bind:group={picks[i]}
-							/>
+							<label class="ask-option">
+								<input
+									type="radio"
+									class="radio radio-sm mt-0.5"
+									name="c{i}"
+									value={j}
+									form="decision-form"
+									disabled={desk.held || decided}
+									bind:group={picks[i]}
+								/>
+								<span class="flex-1 leading-snug font-semibold"><Prose text={choice.label} /></span>
+								{#if choice.recommended}
+									<span class="badge badge-sm badge-outline rule-badge tone-info gap-1">
+										<PacketIcon name="bulb" class="size-3.5" />Recommended
+									</span>
+								{/if}
+							</label>
 						{/each}
-					</div>
-				</div>
-			</section>
-		{/each}
+					</fieldset>
+				</section>
+			{/each}
+		</div>
 	</section>
 {/if}
+
+<style>
+	.desk-src {
+		color: var(--color-muted);
+	}
+	.desk-md :global(ol),
+	.desk-md :global(ul) {
+		margin: 0.3rem 0;
+		padding-inline-start: 1.25rem;
+	}
+	.desk-md :global(ol) {
+		list-style: decimal;
+	}
+	.desk-md :global(ul) {
+		list-style: disc;
+	}
+	.desk-md :global(p) {
+		margin: 0 0 4px;
+	}
+	.desk-md :global(code) {
+		font-family: var(--font-mono);
+		font-size: 0.86em;
+	}
+</style>

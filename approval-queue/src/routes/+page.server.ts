@@ -7,7 +7,7 @@ import { listWaiting, type ItemMeta } from '#lib/server/items.ts';
 import { isIrreversible } from '#lib/server/packet-decision.ts';
 import type { PageServerLoad } from './$types';
 
-const KINDS = { pr: 'PR', design: 'Design', triage: 'Triage' };
+const KINDS = { pr: 'PR', design: 'Design', triage: 'Triage', blueprint: 'Blueprint', page: 'Page', change: 'Change' };
 
 async function toRow(meta: ItemMeta): Promise<BoardRow> {
 	const base = { id: meta.id, headline: meta.headline ?? meta.title, created: meta.created };

@@ -1,74 +1,89 @@
 <!-- @component
-The four parts a packet opens with, each styled for its job: the summary (headline and lede, alone in
-the tinted box), Background (a muted row whose closed state is its first sentence), "If you approve"
-(a vertical timeline, with the steps you run listed above it), and "Not checked" (a neutral panel
-whose icon and rule carry the warning hue). A background of one sentence has nothing to open.
+The packet's opening sections, the header aside: Background (a muted row whose closed state is its
+first sentence), "If you approve" (the numbered steps, each with who runs it and, where the packet
+routes the step, a verdict segment), and "Not checked" (a note with a warning rule). A background of
+one sentence has nothing to open.
+
+A step's verdict is a routine row on `step:<n>`; `verdicts` is bound up so the page can follow what
+changed. A step the packet does not route shows no segment.
 -->
 <script lang="ts">
 	import { splitLead } from '#lib/prose.ts';
 	import type { PageData } from '../../routes/item/[id=id]/$types';
 	import PacketIcon from './PacketIcon.svelte';
+	import PacketSeg from './PacketSeg.svelte';
 	import Prose from './Prose.svelte';
 
-	let { data }: { data: Extract<PageData, { kind: 'packet' }> } = $props();
+	interface Props {
+		data: Extract<PageData, { kind: 'packet' }>;
+		/** The verdict chosen for each part, by ref. */
+		verdicts: Record<string, string>;
+		decided: boolean;
+	}
+
+	let { data, verdicts = $bindable({}), decided }: Props = $props();
 
 	const background = $derived(splitLead(data.background.text));
-	const yours = $derived(data.steps.filter((s) => s.tag === 'you'));
-	const STEP_LABEL = { session: 'Session step', irreversible: 'Irreversible step', you: 'Your step' };
+	const yours = $derived(data.steps.filter((s) => s.tag === 'you').length);
+	const row = (n: number) => data.routine.find((r) => r.ref === `step:${n}`);
+	const WORDS = ['none', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten'];
+	const word = (n: number) => WORDS[n] ?? String(n);
+	const sentence = (w: string) => w[0].toUpperCase() + w.slice(1);
+	const WHO = {
+		session: { icon: 'play', text: 'The session runs it.', tail: '' },
+		irreversible: { icon: 'lock', text: 'The session runs it.', tail: ' It cannot be undone.' },
+		you: { icon: 'user', text: 'You run it.', tail: '' }
+	} as const;
 </script>
 
-<div class="brief-stack">
-	<section aria-labelledby="packet-title" class="rounded-box bg-base-200 py-5 ps-5 pe-4 lg:-ms-7 lg:ps-7 lg:pe-6">
-		<h1 id="packet-title" class="desk-title brief-title text-balance"><Prose text={data.headline} /></h1>
-		<p class="prose-measure mt-3 text-[1.125rem] leading-[1.55]"><Prose text={data.lede} /></p>
-	</section>
+{#if background.rest}
+	<details class="bg bg-first" id="background">
+		<summary>
+			<PacketIcon name="chev" class="chev" />
+			<span><span class="lead">Background.</span> <Prose text={background.lead} /></span>
+		</summary>
+		<div class="body"><p><Prose text={background.rest} /></p></div>
+	</details>
+{:else}
+	<p class="bg bg-first bg-flat" id="background"><span class="lead">Background.</span> <Prose text={background.lead} /></p>
+{/if}
 
-	{#if background.rest}
-		<details class="collapse brief-bg mt-3 rounded-none">
-			<summary class="collapse-title brief-bg-row">
-				<PacketIcon name="chev" class="chev mt-[0.2rem] size-4" />
-				<span><span class="layer-tag">Background</span> <Prose text={background.lead} /></span>
-			</summary>
-			<div class="collapse-content brief-bg-body"><p class="prose-measure"><Prose text={background.rest} /></p></div>
-		</details>
-	{:else}
-		<p class="brief-bg-row brief-bg-flat mt-3"><span class="layer-tag">Background</span> <Prose text={background.lead} /></p>
-	{/if}
-
-	<section aria-labelledby="plan-h" class="mt-6">
-		<h2 id="plan-h" class="section-h">If you approve</h2>
-		{#if yours.length}
-			<p class="prose-measure mt-2 flex items-start gap-2 text-[1.0625rem] leading-normal">
-				<PacketIcon name="user" class="mt-[0.2rem] size-4 v-primary" />
-				<span>
-					<span class="font-semibold">You’ll need to</span>
-					{#each yours as step, i (step.n)}{#if i}<span aria-hidden="true"> · </span><span class="sr-only">, and </span>{/if}<Prose text={step.label ?? step.text} />{/each}.
-				</span>
-			</p>
-		{/if}
-		<ol class="timeline timeline-vertical timeline-compact timeline-snap-icon plan-timeline mt-3">
-			{#each data.steps as step, i (step.n)}
-				<li class="plan-step step-{step.tag}">
-					{#if i}<hr />{/if}
-					<div class="timeline-middle step-mark">
-						{#if step.tag === 'session'}
-							<svg class="size-2.5 shrink-0" viewBox="0 0 10 10" aria-hidden="true"><circle cx="5" cy="5" r="4" fill="currentColor" /></svg>
-						{:else}
-							<PacketIcon name={step.tag === 'irreversible' ? 'lock' : 'user'} />
-						{/if}
+<section class="sec" id="if-you-approve" aria-labelledby="plan-h">
+	<h2 id="plan-h">If you approve</h2>
+	<p class="sl">
+		{sentence(word(data.steps.length))} {data.steps.length === 1 ? 'step' : 'steps'}, in order.
+		{yours === 0 ? 'None are yours.' : yours === 1 ? 'One is yours.' : `${sentence(word(yours))} are yours.`}
+	</p>
+	<ol class="psteps">
+		{#each data.steps as step (step.n)}
+			{@const who = WHO[step.tag]}
+			{@const routed = row(step.n)}
+			<li class="pstep {step.tag}" id="step-{step.n}">
+				<span class="num">{step.n}</span>
+				<div class="st">
+					<p class="sx"><Prose text={step.text} /></p>
+					<p class="sw">
+						<PacketIcon name={who.icon} class="who" /><span class="by">{who.text}</span>{who.tail}
+						{#if routed}<Prose text={routed.fact} />{/if}
+					</p>
+					{#if routed}
+						<details class="why">
+							<summary><PacketIcon name="chev" class="chev" />Why</summary>
+							<div class="why-body"><p><Prose text={routed.why} /></p></div>
+						</details>
+					{/if}
+				</div>
+				{#if routed}
+					<div class="sc">
+						<PacketSeg ref={routed.ref} kind={routed.kind} session={routed.verdict} label="Step {step.n}" bind:verdicts {decided} />
 					</div>
-					<div class="timeline-end step-text"><span class="sr-only">{STEP_LABEL[step.tag]}: </span><Prose text={step.text} /></div>
-					{#if i < data.steps.length - 1}<hr />{/if}
-				</li>
-			{/each}
-		</ol>
-	</section>
+				{/if}
+			</li>
+		{/each}
+	</ol>
+</section>
 
-	<aside aria-labelledby="unchecked-h" class="alert brief-unchecked mt-6 items-start">
-		<PacketIcon name="eyeoff" class="mt-[0.2rem] size-5 tone-warning" />
-		<div class="min-w-0">
-			<h2 id="unchecked-h" class="font-semibold">Not checked</h2>
-			<p class="prose-measure mt-1 leading-relaxed"><Prose text={data.notChecked} /></p>
-		</div>
-	</aside>
+<div class="note decide" id="not-checked">
+	<p class="nh"><span class="kind">Not checked.</span></p>
+	<p><Prose text={data.notChecked} /></p>
 </div>

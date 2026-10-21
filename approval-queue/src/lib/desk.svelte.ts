@@ -12,9 +12,13 @@ class Desk {
 	/** A decision is counting down in the toast, so every decision key is dead. */
 	held = $state(false);
 	noteOpen = $state(false);
+	/** The queue rail is open as a drawer (below 1024px). */
+	railOpen = $state(false);
+	/** The review pane is open as a drawer (below 1260px). */
+	paneOpen = $state(false);
 	/** Approve is disabled, so the `a` key must not post it either. */
 	approveLocked = $state(false);
-	page = $state<'pr' | 'design' | 'triage' | 'packet'>('design');
+	page = $state<'pr' | 'design' | 'triage' | 'packet' | 'blueprint' | 'page' | 'change'>('design');
 	/** The toast's text; null hides it. */
 	toast = $state<string | null>(null);
 	/** The toast reports a post that failed. */
@@ -31,6 +35,21 @@ class Desk {
 	 * before opening another item live here until they are submitted.
 	 */
 	drafts = new Map<string, Row[]>();
+
+	/**
+	 * Adds key handlers and returns the function that removes them again, so a component that
+	 * registers from an effect can unregister in its teardown without clearing another's.
+	 */
+	register(handlers: Partial<Record<KeyAction, () => void>>): () => void {
+		this.handlers = { ...this.handlers, ...handlers };
+		return () => {
+			const kept = { ...this.handlers };
+			for (const [action, fn] of Object.entries(handlers) as Array<[KeyAction, () => void]>) {
+				if (kept[action] === fn) delete kept[action];
+			}
+			this.handlers = kept;
+		};
+	}
 
 	/** Blanks the region first so a repeated message is read again. */
 	announce(message: string) {

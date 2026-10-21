@@ -6,6 +6,7 @@ export type KeyAction =
 	| 'approve'
 	| 'open-note'
 	| 'close-note'
+	| 'next-call'
 	| 'send-rejection'
 	| 'focus-filter'
 	| 'row-next'
@@ -16,7 +17,7 @@ export type KeyAction =
 	| 'submit';
 
 export interface KeyContext {
-	page: 'pr' | 'design' | 'triage' | 'packet';
+	page: 'pr' | 'design' | 'triage' | 'packet' | 'blueprint' | 'page' | 'change';
 	/** The event target is a field that takes text. */
 	typing: boolean;
 	singleKeys: boolean;
@@ -26,8 +27,8 @@ export interface KeyContext {
 	noteOpen: boolean;
 	/**
 	 * Approve is locked: a card has no pick, or a pick sends the PR back. It gates the single key `a`
-	 * on a PR or design page. Ctrl+Enter on a packet ignores it, because the page moves focus to the
-	 * first open ask instead of approving.
+	 * on a PR or design page. Ctrl+Enter ignores it, because a locked approve moves focus to the
+	 * first open ask, card, or call instead of approving.
 	 */
 	approveLocked: boolean;
 }
@@ -56,9 +57,12 @@ export function keyAction(key: string, mods: KeyMods, context: KeyContext): KeyA
 		if (held) return null;
 		if (page === 'triage') return 'submit';
 		if (noteOpen) return 'send-rejection';
-		// Locked, the handler moves focus to the first open ask, matching the button it advertises.
-		return page === 'packet' ? 'approve' : null;
+		// Locked, the handler moves to the first open ask or call, matching the button it advertises.
+		return 'approve';
 	}
+
+	// F8 is a function key, so like Ctrl+Enter it works from a field and ignores the single-key switch.
+	if (key === 'F8' && plain && !mods.shift) return 'next-call';
 
 	if (typing) return null;
 	if (page === 'triage' && plain) {
@@ -72,9 +76,9 @@ export function keyAction(key: string, mods: KeyMods, context: KeyContext): KeyA
 	if (key === 'k') return 'queue-prev';
 	if (key === 'z') return held ? 'undo' : null;
 	if (held) return null;
-	if (page !== 'triage' && page !== 'packet' && key === 'a') return noteOpen || approveLocked ? null : 'approve';
+	if ((page === 'pr' || page === 'design') && key === 'a') return noteOpen || approveLocked ? null : 'approve';
 	if (page !== 'triage' && key === 'r') return 'open-note';
-	if (page === 'pr' && key === '/') return 'focus-filter';
+	if ((page === 'pr' || page === 'change') && key === '/') return 'focus-filter';
 	if (page === 'triage' && key in MOVES) return MOVES[key];
 	return null;
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { render, renderInline } from './markdown.ts';
+import { render, renderInline, renderLabel } from './markdown.ts';
 
 describe('render', () => {
 	it('renders markdown', () => {
@@ -36,5 +36,10 @@ describe('links', () => {
 	it('renders a javascript: or data: link as its text', () => {
 		expect(render('[x](javascript:alert(1))')).toBe('<p>x</p>\n');
 		expect(renderInline('[y](data:text/html,hi)')).toBe('y');
+	});
+
+	it('renders a label with each link as its text, so it can sit inside a link', () => {
+		expect(renderLabel('Fix [the guard](https://x.test) in **auth**')).toBe('Fix the guard in <strong>auth</strong>');
+		expect(renderLabel('<a href="x">raw</a>')).toBe('&lt;a href=&quot;x&quot;&gt;raw&lt;/a&gt;');
 	});
 });

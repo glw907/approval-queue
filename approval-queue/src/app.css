@@ -5,6 +5,7 @@
 @import "./lib/survey/survey.css";
 /* The real 600 face for Monaspace Neon, so a 600 label never takes a synthesized bold. */
 @import "@fontsource/monaspace-neon/600.css";
+@import "./lib/components/frame/frame.css";
 
 :focus-visible {
 	outline: 2px solid var(--color-primary);
@@ -43,6 +44,15 @@ main[tabindex='-1']:focus {
 html.desk-no-sk .desk-sk {
 	display: none;
 }
+/* A key hint inside a white field takes the muted ink at full strength, which keeps it at AA. */
+.input .desk-kbd {
+	opacity: 1;
+	color: var(--color-muted);
+}
+/* The pad is the bar's height plus 72px; this sets the toast 8px above the bar's own card. */
+.desk-toast {
+	bottom: max(1rem, calc(var(--desk-bar-pad, 9rem) - 96px));
+}
 
 /* A focused control stays clear of the sticky bar and the toast; ItemPanel sets the pad. */
 html {
@@ -71,7 +81,7 @@ dd {
 	color: var(--color-muted);
 }
 
-/* The packet screen. Status inks are the theme's contrast-checked tokens, never the soft fills. */
+/* Status inks are the theme's contrast-checked tokens, never the soft fills. */
 .v-success,
 .tone-success {
 	color: var(--cairn-success-ink);
@@ -99,206 +109,6 @@ dd {
 	background-color: var(--color-base-100);
 	font-weight: 600;
 }
-/* Brief and secondary prose hold about 75 characters in Karla, where 65ch holds 84 to 90. */
-.prose-measure {
-	max-width: 56ch;
-}
-.prose-wide {
-	max-width: 65ch;
-}
-.section-h {
-	font-family: var(--font-display);
-	font-weight: 500;
-	font-size: 1.35rem;
-	line-height: 1.2;
-}
-.brief-title {
-	font-size: clamp(1.85rem, 1.3rem + 1.1vw, 2.35rem);
-	line-height: 1.15;
-}
-.brief-stack code,
-.ask code,
-.part-row code {
-	font-family: var(--font-mono);
-	font-size: 0.86em;
-}
-
-/* Background: a borderless, muted row; closed it shows its first sentence, open it keeps the size and color. */
-.brief-bg {
-	max-width: 56ch;
-	overflow: visible;
-}
-.brief-bg > .collapse-title.brief-bg-row,
-.brief-bg-row {
-	display: flex;
-	align-items: flex-start;
-	gap: 6px;
-	min-height: 2rem;
-	padding: 4px 0;
-	font-size: 0.95rem;
-	line-height: 1.45;
-	color: var(--color-muted);
-	cursor: pointer;
-	list-style: none;
-}
-.brief-bg > .collapse-content.brief-bg-body {
-	padding: 0 0 0 22px;
-	font-size: 0.95rem;
-	line-height: 1.55;
-	color: var(--color-muted);
-}
-.brief-bg[open] > .collapse-content.brief-bg-body {
-	padding-block: 4px 8px;
-}
-.brief-bg > summary::-webkit-details-marker,
-.layer > summary::-webkit-details-marker,
-.part-detail > summary::-webkit-details-marker {
-	display: none;
-}
-.brief-bg > summary:hover,
-.brief-bg[open] > summary {
-	color: var(--color-base-content);
-}
-.brief-bg[open] > summary .chev,
-.layer[open] > .layer-summary .chev,
-.part-detail[open] .chev {
-	transform: rotate(90deg);
-}
-p.brief-bg-flat {
-	display: block;
-	padding-inline-start: 22px;
-	cursor: auto;
-}
-.layer-tag {
-	margin-inline-end: 4px;
-	font-size: 0.72rem;
-	font-weight: 700;
-	letter-spacing: 0.06em;
-	text-transform: uppercase;
-	color: var(--color-muted);
-}
-
-/* If you approve: a timeline whose marker shows the step's type by shape; your steps take the primary ink. */
-.plan-timeline {
-	max-width: 56ch;
-}
-.plan-timeline > li {
-	--timeline-col-start: 0;
-	--timeline-row-start: 0;
-}
-.plan-timeline > li > hr {
-	background-color: color-mix(in oklab, var(--color-base-content) 22%, transparent);
-	width: 2px;
-}
-.plan-timeline .step-mark {
-	display: grid;
-	place-items: center;
-	width: 1.75rem;
-	height: 1.75rem;
-	color: var(--color-muted);
-}
-.plan-timeline .step-irreversible .step-mark {
-	color: var(--cairn-error-ink);
-}
-.plan-timeline .step-you .step-mark {
-	color: var(--color-primary);
-}
-.plan-timeline .step-text {
-	place-self: start stretch;
-	margin: 0 0 0.9rem 0.5rem;
-	font-size: 1.0625rem;
-	line-height: 1.5;
-}
-.plan-timeline > li:last-child .step-text {
-	margin-bottom: 0;
-}
-.plan-timeline .step-you .step-text {
-	font-weight: 600;
-	color: var(--color-primary);
-}
-
-/* Not checked: a neutral panel; only the icon and a thin rule carry the warning hue. */
-.brief-unchecked {
-	max-width: calc(56ch + 4rem);
-	font-size: 1rem;
-	background-color: var(--color-base-200);
-	border: 0;
-	border-inline-start: 3px solid var(--color-warning);
-	border-radius: 0 var(--radius-box) var(--radius-box) 0;
-	box-shadow: none;
-}
-.brief-unchecked::before {
-	display: none;
-}
-/* An alert's text track may shrink below its content, so a wide excerpt scrolls inside it. */
-.ask,
-.brief-unchecked {
-	grid-template-columns: auto minmax(0, 1fr);
-}
-.ask > div,
-.brief-unchecked > div {
-	justify-self: stretch;
-}
-
-/* Ask choices: a radio row; the picked row takes a full-ink edge. */
-.ask-option {
-	border-color: var(--color-base-300);
-}
-.ask-option:hover {
-	border-color: var(--site-field-border);
-}
-.ask-option:has(:checked) {
-	border-color: var(--color-base-content);
-	box-shadow: 0 0 0 1px var(--color-base-content);
-}
-.ask-option:has(:focus-visible) {
-	outline: 2px solid var(--color-primary);
-	outline-offset: 2px;
-}
-.ask-option input:focus-visible {
-	outline: none;
-}
-/* The theme's radio guard never matches radio-sm, so the unchecked ring takes the field-edge token (3:1). */
-.ask-option .radio:not(:checked) {
-	border-color: var(--site-field-border);
-}
-
-/* Layers: a disclosure whose summary is a full sentence. */
-.layer > summary {
-	list-style: none;
-}
-.layer-summary {
-	display: flex;
-	align-items: flex-start;
-	gap: 6px;
-	min-height: 2rem;
-	padding-block: 4px;
-	cursor: pointer;
-	line-height: 1.45;
-}
-.layer-summary .chev {
-	color: var(--color-muted);
-}
-.layer-summary:hover .chev,
-.layer[open] > .layer-summary .chev {
-	color: var(--color-base-content);
-}
-.layer-body {
-	margin: 2px 0 8px 22px;
-	max-width: 56ch;
-	line-height: 1.55;
-}
-.layer-open {
-	padding: 4px 0 4px 22px;
-	line-height: 1.45;
-}
-.ask-layers {
-	border-block: 1px solid color-mix(in oklab, var(--color-base-content) 14%, transparent);
-	padding-block: 4px;
-}
-.ask-layers > * + * {
-	border-top: 1px dashed color-mix(in oklab, var(--color-base-content) 12%, transparent);
-}
 .fact-list {
 	list-style: disc;
 	padding-inline-start: 1.1rem;
@@ -324,122 +134,4 @@ p.brief-bg-flat {
 }
 .evidence-code code {
 	font-size: inherit;
-}
-
-/* Routine table and its overrides. */
-.routine-table td,
-.routine-table th {
-	padding-block: 10px;
-}
-.routine-table thead th {
-	color: var(--color-muted);
-	font-weight: 600;
-}
-.part-row.is-changed > td:first-child {
-	box-shadow: inset 4px 0 0 var(--color-primary);
-}
-.part-detail > summary {
-	list-style: none;
-}
-.part-detail > summary:hover {
-	color: var(--color-base-content);
-}
-.join.override .btn {
-	min-height: 2rem;
-	font-weight: 500;
-}
-.join.override .btn:checked {
-	border-color: var(--color-base-content);
-	background-color: var(--color-base-content);
-	color: var(--color-base-100);
-}
-
-/* Decision bar: a locked Approve stays pressable so the press can move focus to the first open ask. */
-.bar {
-	box-shadow: 0 8px 28px -6px rgb(0 0 0 / 0.22), 0 2px 6px -2px rgb(0 0 0 / 0.1);
-}
-.bar-approve[aria-disabled='true'] {
-	background-color: var(--color-base-200);
-	border-color: var(--site-field-border);
-	color: var(--color-base-content);
-	cursor: not-allowed;
-	pointer-events: auto;
-}
-
-/* Phone: the routine table stacks and the bar compacts to two rows, the state line over Reject and Approve. */
-@media (max-width: 639.98px) {
-	.routine-table thead {
-		position: absolute;
-		width: 1px;
-		height: 1px;
-		overflow: hidden;
-		clip-path: inset(50%);
-	}
-	.routine-table,
-	.routine-table tbody {
-		display: block;
-	}
-	.routine-table tr.part-row {
-		display: flex;
-		flex-wrap: wrap;
-		align-items: center;
-		gap: 8px 12px;
-		padding-block: 12px;
-		padding-inline-start: 12px;
-	}
-	.routine-table tr.part-row:last-child {
-		border-bottom: 0;
-	}
-	.routine-table tr.part-row > td {
-		display: block;
-		width: auto;
-		padding: 0;
-		border: 0;
-	}
-	.routine-table tr.part-row > .part-cell {
-		flex: 1 1 100%;
-	}
-	.routine-table tr.part-row > .verdict-cell {
-		flex: 1 1 auto;
-	}
-	.routine-table tr.part-row > .change-cell {
-		margin-inline-start: auto;
-	}
-	.part-row.is-changed > td:first-child {
-		box-shadow: none;
-	}
-	.routine-table tr.part-row.is-changed {
-		box-shadow: inset 4px 0 0 var(--color-primary);
-	}
-
-	#decision:has(.bar) {
-		padding: 8px 12px 12px;
-	}
-	.bar {
-		padding: 8px 12px;
-	}
-	.bar-main {
-		display: grid;
-		grid-template-columns: 1fr 1fr;
-		gap: 6px 8px;
-	}
-	.bar-main > .ms-auto {
-		display: contents;
-	}
-	.bar-state {
-		grid-column: 1 / -1;
-		grid-row: 1;
-		text-align: start;
-	}
-	.bar-reject,
-	.bar-approve {
-		width: 100%;
-		padding-inline: 8px;
-		min-width: 0;
-	}
-}
-@media (max-width: 359.98px) {
-	.bar-reject svg {
-		display: none;
-	}
 }

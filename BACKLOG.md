@@ -4,6 +4,12 @@
 
 ## Medium
 
+- [ ] **#10** Read the inline notes with a real screen reader `#improvement` `#approval-queue` `#initiative:docs-system` *(2026-10-21)*
+  The notes and their choice buttons sit inside CodeMirror's `role="textbox"` (`approval-queue/src/lib/editor/setup.ts`). Tab reaches the buttons and nothing traps the keyboard, but NVDA and JAWS in focus mode may read the notes as plain text. The reviewed-pages accessibility review asked for a run with a real screen reader (its warning 10).
+
+- [ ] **#9** Land "Next call for you" on the call on a long document at phone width `#bug` `#approval-queue` `#initiative:docs-system` *(2026-10-21)*
+  On the long blueprint at 500px, a tap often leaves the call out of sight: the cursor moves, but the scroll stops at the editor's height estimate, up to 8,000px short. The prototype does the same, and short pages land correctly. The link is the phone's main way to reach a call, so measure the line before scrolling to it. Found by the reviewed-pages visual regrade.
+
 - [ ] **#2** A damaged `packet.json` makes that packet's page and actions answer 500 `#improvement` `#approval-queue` `#initiative:approval-packets` *(2026-10-17)*
   `readPacket` in `approval-queue/src/lib/server/items.ts` throws on a file that does not parse, so the item's page, approve, and reject return 500. The board and the listings now skip it. Answer 404 or the withdrawn message instead, and name the item on the board (the design's "skips an unreadable item and names it"). The same page's `reject` for a non-packet item and its `submit` action also read `request.formData()` with no catch, so a post that is not a form answers 500 instead of 400.
 
@@ -23,6 +29,12 @@
   `packetFingerprint` in `approval-queue/src/lib/server/packet-decision.ts` hashes refs, kinds, verdicts, heads, hashes, and each ask's title, labels, and tags. Rebinding an ask to another ask-bound part with the same question and labels keeps the fingerprint. The command's `jq` check closes this for authorization today, since lane and binding come from the stored `packet.json`. Add `a.part?.ref`, `a.rule`, and `p.lane`.
 
 ## Low
+
+- [ ] **#12** The review screens' optional Svelte and accessibility suggestions `#improvement` `#approval-queue` `#initiative:docs-system` *(2026-10-21)*
+  From the reviewed-pages close review. Svelte: `$state.raw` for `DocReview.decided`, `starts`, and DocEditor's `view`; announce only save failures; move the headline's long-size threshold into `FrameHeader`; key `PaneList` rows on more than `href`; a note on why the custom enhance never calls `applyAction`; `App.PageData` in `app.d.ts`; rename the `blueprint` derived in `ItemPanel` to `docItem`. Accessibility: `aria-keyshortcuts` with `aria-hidden` key caps in buttons; `<th scope="row">` in the help sheet; a `nav` breadcrumb; `aria-describedby` on the send-back hint; an "opens in a new tab" cue; a heading for each note's header.
+
+- [ ] **#11** DaisyUI-first pass on the review frame and its panes `#improvement` `#approval-queue` `#initiative:docs-system` *(2026-10-21)*
+  No ledger ruling records a DaisyUI defect behind these home-grown parts: the frame drawers (`drawer drawer-end`; the hand-rolled `inert` focus handling is better, so record that if kept), `PaneList` (`menu menu-sm`), `.linkbtn`, `.drawer-x`, `.appbtn`, `.rail-keys`, the note choices, the pane's native checkbox (`toggle toggle-sm`), the send-back `fieldset`, and the crumb (`breadcrumbs`). Each can take the stock class and keep the prototype's look with overrides.
 
 - [ ] **#8** The packet and board polish the prototype has and the design did not list `#improvement` `#approval-queue` `#initiative:approval-packets` *(2026-10-17)*
   From the T8 visual grade (cosmetic only): the selected sort segment is blue where the prototype uses near-black; the sidebar group has no bordered box, a very faint mono repo label, and no "Board [b]" row; sidebar entries read "Packet" where the prototype shows the ask count and an irreversible flag (the layout's data holds only item metadata); no hamburger icon on the phone top bar; the breadcrumb shows "Board / N asks" where the prototype shows initiative, repos, and waiting; the person step's text is link-blue; the 1/2/3 number-key chips on ask options are missing, and so is the single-key pick; the dark-mode lifted bar (colour ledger row 7); "Reject with note" wraps on a 390px bar because the R key chip stays.

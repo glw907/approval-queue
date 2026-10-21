@@ -12,12 +12,23 @@ function run(host?: string) {
 
 describe('handle', () => {
 	it('passes the loopback host to resolve', async () => {
-		const { res, resolve } = await run('127.0.0.1:7907');
+		const { res, resolve } = await run(`127.0.0.1:${__QUEUE_PORT__}`);
 		expect(res.status).toBe(200);
 		expect(resolve).toHaveBeenCalledOnce();
 	});
 
-	it.each(['evil.example:7907', 'localhost:7907', undefined])('refuses host %s', async (host) => {
+	// A build made without APPROVAL_QUEUE_PORT bakes in 7907, as it did before the setting existed.
+	it.skipIf(process.env.APPROVAL_QUEUE_PORT)('serves 7907 when the variable is unset', () => {
+		expect(__QUEUE_PORT__).toBe(7907);
+	});
+
+	it.each([
+		'evil.example:7907',
+		'localhost:7907',
+		`127.0.0.1:${__QUEUE_PORT__ + 1}`,
+		'127.0.0.1',
+		undefined
+	])('refuses host %s', async (host) => {
 		const { res, resolve } = await run(host);
 		expect(res.status).toBe(403);
 		expect(resolve).not.toHaveBeenCalled();

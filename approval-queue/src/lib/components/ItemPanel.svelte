@@ -1,22 +1,28 @@
 <!-- @component
-One open item: its header, its view, and the sticky decision bar. The page renders it inside a
-`{#key}` on the item's id, so per-item state here (the note, a failed post) starts fresh when the
-next item loads. Triage calls are the exception: unsent ones are kept in `desk.drafts`, so
+One open item in the three-pane frame: a switch on the item's kind picks its header, its work, its
+review pane, and the decision bar's labels, and the frame supplies the rest. The page renders it
+inside a `{#key}` on the item's id, so per-item state here (the note, a failed post) starts fresh
+when the next item loads. Triage calls are the exception: unsent ones are kept in `desk.drafts`, so
 opening another item and coming back keeps them.
 
 A decision is held in the page for five seconds before the form posts: the submit function awaits
 the hold, and Undo calls `cancel()` so nothing is sent. Opening another item during the hold sends
 the decision at once, while closing the tab undoes it, since a closing page cannot finish a post.
 A post that fails unlocks the bar and shows why; a post that succeeds navigates to the item the
-server named, replacing the history entry so the tab stays script-closable.
+server named, replacing the history entry so the tab stays script-closable. A send-back closes its
+note before the hold starts, so the toast never covers it, and Undo opens it again as it was.
 
-A packet holds the same way, with its Undo, countdown, and status in the bar so the hold can pause
-while the pointer is over it. Its Approve uses `aria-disabled`, so a locked press still arrives and
-moves focus to the first open ask. A packet whose steps cannot be undone asks for one confirmation
+A packet holds the same way, with its Undo, Pause, countdown, and status in the bar, so the hold
+can pause while the pointer is over it or on a press of Pause. Every Approve uses `aria-disabled`
+rather than `disabled` while calls are open, so a locked press still arrives and moves focus to the
+first open ask, card, or call. A packet whose steps cannot be undone asks for one confirmation
 first, which posts as `irreversible=yes`. A withdrawn packet answers 410 with the board to offer.
+
+A document review saves as the reader types. Opening another item while an edit is unsaved waits
+for that save first, and closing the tab then asks before leaving.
 -->
 <script lang="ts">
-	import { enhance, type SubmitFunction } from '$app/forms';
+	import { deserialize, enhance, type SubmitFunction } from '$app/forms';
 	import { beforeNavigate, goto, invalidateAll } from '$app/navigation';
 	import { tick } from 'svelte';
 	import { fingerprint, gate } from '#lib/cards.ts';
@@ -24,29 +30,37 @@ first, which posts as `irreversible=yes`. A withdrawn packet answers 410 with th
 	import { startHold } from '#lib/hold.ts';
 	import { nextItem } from '#lib/queue.ts';
 	import { changedCount, seedRows, type Row } from '#lib/triage.ts';
+	import { VERDICT_LOOK } from '#lib/packet-view.ts';
+	import type { PlacedNote } from '#lib/editor/notes.ts';
+	import { DocReview, type SaveResult } from '#lib/editor/review.svelte.ts';
 	import type { PageData } from '../../routes/item/[id=id]/$types';
+	import BlueprintView from './BlueprintView.svelte';
 	import BriefBlock from './BriefBlock.svelte';
+	import ChangePane from './ChangePane.svelte';
+	import ChangeView from './ChangeView.svelte';
 	import DecideCards from './DecideCards.svelte';
 	import DesignView from './DesignView.svelte';
 	import DetailRows from './DetailRows.svelte';
+	import DecisionBar from './frame/DecisionBar.svelte';
+	import Frame from './frame/Frame.svelte';
+	import FrameHeader from './frame/FrameHeader.svelte';
+	import PaneList, { type PaneItem } from './frame/PaneList.svelte';
+	import PaneSection from './frame/PaneSection.svelte';
 	import PacketAsks from './PacketAsks.svelte';
+	import PageView from './PageView.svelte';
 	import PacketBrief from './PacketBrief.svelte';
 	import PacketIcon from './PacketIcon.svelte';
 	import PacketRoutine from './PacketRoutine.svelte';
 	import PrView from './PrView.svelte';
 	import Prose from './Prose.svelte';
+	import ReviewPane from './ReviewPane.svelte';
 	import TriageView from './TriageView.svelte';
 
 	let { data }: { data: PageData } = $props();
 
-	const BAR =
-		'flex max-w-3xl flex-wrap items-center gap-x-4 gap-y-3 rounded-box border border-base-300 bg-base-100 px-5 py-3.5 shadow-[0_8px_28px_-6px_rgb(0_0_0/0.22),0_2px_6px_-2px_rgb(0_0_0/0.10)]';
-	const PACKET_BAR =
-		'bar flex max-w-4xl flex-wrap items-center gap-x-4 gap-y-3 rounded-box border border-base-300 bg-base-100 px-5 py-3.5';
-	const KEY = 'kbd kbd-xs border-current/25 bg-transparent text-current opacity-85';
-
 	let form = $state<HTMLFormElement>();
 	let noteField = $state<HTMLTextAreaElement>();
+	let noteText = $state('');
 	let approveButton = $state<HTMLButtonElement>();
 	let rejectButton = $state<HTMLButtonElement>();
 	let sendButton = $state<HTMLButtonElement>();
@@ -56,6 +70,11 @@ first, which posts as `irreversible=yes`. A withdrawn packet answers 410 with th
 	let hold: ReturnType<typeof startHold> | null = null;
 	// Set when a held decision is sent because another item is opening, so success must not navigate too.
 	let leaving = false;
+
+	// The poll hands the panel a new `data` every two seconds, so effects read these instead: a
+	// derived that keeps its value does not re-run them.
+	const kind = $derived(data.kind);
+	const isDecided = $derived(data.decided);
 
 	// The page keys this component on the item id, so the rows are read once per item.
 	// svelte-ignore state_referenced_locally
@@ -75,8 +94,6 @@ first, which posts as `irreversible=yes`. A withdrawn packet answers 410 with th
 	let picks = $state<Array<number | undefined>>([]);
 	const cards = $derived(data.kind === 'pr' || data.kind === 'design' ? data.cards : []);
 	const decided = $derived(gate(cards, picks));
-	const approvable = $derived(!decided.locked);
-	const tip = $derived(!approvable && decided.open.length ? `Decide ${decided.open[0].title} first` : undefined);
 	const readySub = $derived.by(() => {
 		if (cards.length > 0) return 'Every decision is made.';
 		if (data.kind !== 'pr') return '';
@@ -116,16 +133,223 @@ first, which posts as `irreversible=yes`. A withdrawn packet answers 410 with th
 			: 'Ready to approve'
 	);
 	const packetSub = $derived.by(() => {
-		if (openAsks.length) return 'to unlock Approve packet';
-		if (data.kind !== 'packet') return '';
-		const n = data.routine.length;
-		return `${n} routine ${n === 1 ? 'part' : 'parts'}, ${packetChanged === 0 ? 'none' : packetChanged} changed`;
+		if (openAsks.length) return 'to unlock Approve';
+		return packetChanged === 0 ? 'No verdicts changed' : `${packetChanged} ${packetChanged === 1 ? 'verdict' : 'verdicts'} changed`;
 	});
+
+	/** The decisions the screen asks for, in page order: what the pane lists and F8 walks. */
+	const calls = $derived.by((): Array<{ id: string; label: string; what: string; open: boolean }> => {
+		if (data.kind === 'packet') {
+			return data.asks.map((ask) => {
+				const picked = answers[ask.index];
+				return {
+					id: `ask-${ask.index}`,
+					label: ask.question,
+					what: picked === undefined ? 'Open, pick one' : `Answered: ${picked}`,
+					open: picked === undefined
+				};
+			});
+		}
+		return cards.map((card, i) => ({
+			id: `card-${i}`,
+			label: card.title,
+			what: picks[i] === undefined ? 'Open' : 'Decided',
+			open: picks[i] === undefined
+		}));
+	});
+	const callItems = $derived<PaneItem[]>(
+		calls.map((c) => ({ href: `#${c.id}`, label: c.label, what: c.what, dot: c.open ? 'call' : 'done' }))
+	);
+	const verdictWord = (ref: string, session: string) =>
+		verdicts[ref] === session ? `${VERDICT_LOOK[session].label}, the session’s verdict` : `${VERDICT_LOOK[verdicts[ref]].label}, your change`;
+	/** The packet's routine parts that are not plan steps; a step's verdict sits on its step. */
+	const partRows = $derived(data.kind === 'packet' ? data.routine.filter((row) => row.kind !== 'step') : []);
+	const partId = (ref: string) => `part-${ref.replace(/[^\w-]+/g, '-')}`;
+	const TRIAGE_WORD = { now: 'Do now', defer: 'Do later', drop: 'Don’t do' };
+	const partItems = $derived<PaneItem[]>(
+		partRows.map((row) => ({
+			href: `#${partId(row.ref)}`,
+			label: row.ref,
+			what: verdictWord(row.ref, row.verdict),
+			dot: verdicts[row.ref] === row.verdict ? 'done' : 'call'
+		}))
+	);
+	const yourSteps = $derived<PaneItem[]>(
+		data.kind === 'packet'
+			? data.steps.filter((s) => s.tag === 'you').map((s) => ({ href: `#step-${s.n}`, label: `${s.n}. ${s.label ?? s.text}`, dot: 'call' as const }))
+			: []
+	);
+	/** The screen's sections in page order, numbered; a section holding an open call carries a dot. */
+	const outline = $derived.by((): PaneItem[] => {
+		const sections: Array<Omit<PaneItem, 'n'>> = [];
+		if (data.kind === 'packet') {
+			sections.push({ href: '#background', label: 'Background' }, { href: '#if-you-approve', label: 'If you approve' }, { href: '#not-checked', label: 'Not checked' });
+			if (data.asks.length) sections.push({ href: '#asks', label: 'Asks', mark: openAsks.length ? 'call' : undefined });
+			if (partRows.length) sections.push({ href: '#parts', label: 'Parts' });
+		} else if (data.kind === 'pr' || data.kind === 'design') {
+			if (data.whatChanges.length) sections.push({ href: '#what-changes', label: 'What changes' });
+			if (data.ifYouApprove.length) sections.push({ href: '#if-you-approve', label: 'If you approve' });
+			if (cards.length) sections.push({ href: '#decide-first', label: 'Decide first', mark: decided.open.length ? 'call' : undefined });
+			if (data.details.length) sections.push({ href: '#details', label: 'Details' });
+			sections.push(data.kind === 'pr' ? { href: '#evidence', label: 'Evidence' } : { href: '#design', label: 'The design' });
+		} else if (data.kind === 'triage') {
+			sections.push({ href: '#group-now', label: 'Do now' }, { href: '#group-defer', label: 'Do later' }, { href: '#group-drop', label: 'Don’t do' });
+		}
+		return sections.map((s, i) => ({ ...s, n: i + 1 }));
+	});
+	const packet = $derived(data.kind === 'packet' ? data : null);
+
+	// The page keys this component on the item id, so the save's address is fixed once per item: a
+	// save that lands after the reader has moved on still reaches this item, never the next one.
+	// svelte-ignore state_referenced_locally
+	const saveUrl = `/item/${encodeURIComponent(data.meta.id)}?/save`;
+
+	/** Posts a blueprint's text to the save action, which commits it in the worktree. */
+	async function saveBlueprint(text: string, base: string): Promise<SaveResult> {
+		const body = new FormData();
+		body.set('text', text);
+		body.set('base', base);
+		const res = await fetch(saveUrl, { method: 'POST', body, headers: { 'x-sveltekit-action': 'true' } });
+		const result = deserialize(await res.text());
+		if (result.type === 'success') return { ok: true, blob: String(result.data?.blob ?? '') };
+		if (result.type === 'failure') return { ok: false, message: String(result.data?.message ?? 'refused') };
+		return { ok: false, message: result.type === 'error' ? result.error.message : 'unexpected answer' };
+	}
+
+	/** A decided item's calls as choice indexes, approved or sent back, so its notes show what was chosen. */
+	function answeredCalls(notes: PlacedNote[]): Record<string, number> {
+		const decision = 'decision' in data ? data.decision : undefined;
+		if (decision?.decision !== 'approve' && decision?.decision !== 'reject') return {};
+		const out: Record<string, number> = {};
+		for (const call of decision.calls ?? []) {
+			const at = notes.find((n) => n.id === call.id)?.choices?.findIndex((c) => c.label === call.choice) ?? -1;
+			if (at >= 0) out[call.id] = at;
+		}
+		return out;
+	}
+	// The page keys this component on the item id, so each review is built once per item.
+	// svelte-ignore state_referenced_locally
+	const remember = data.decided ? undefined : `desk.calls.${data.meta.id}`;
+	// svelte-ignore state_referenced_locally
+	const review =
+		data.kind === 'blueprint' || data.kind === 'page'
+			? new DocReview({
+					doc: data.doc,
+					original: data.original,
+					blob: data.blob,
+					notes: data.notes,
+					save: saveBlueprint,
+					decided: data.decided ? answeredCalls(data.notes) : undefined,
+					remember
+				})
+			: null;
+	// A change review shows each changed document read-only, with the lines the change edited marked.
+	// svelte-ignore state_referenced_locally
+	const changeReviews =
+		data.kind === 'change'
+			? data.docs.map((d, i) => {
+					const r = new DocReview({
+						doc: d.doc,
+						original: d.original,
+						blob: '',
+						notes: d.notes,
+						save: async () => ({ ok: false, message: 'a change review takes no edits' }),
+						decided: data.decided ? answeredCalls(d.notes) : undefined,
+						remember: remember && `${remember}.${i}`,
+						readonly: true
+					});
+					r.markChanges = true;
+					r.saveStatus = 'Read only';
+					return r;
+				})
+			: [];
+	const docReviews = review ? [review] : changeReviews;
+	const openCalls = $derived(docReviews.flatMap((r) => r.openCalls));
+	const decidedCount = $derived(docReviews.reduce((n, r) => n + Object.keys(r.decided).length, 0));
+	const blueprint = $derived(data.kind === 'blueprint' || data.kind === 'page' ? data : null);
+	const change = $derived(data.kind === 'change' ? data : null);
+	const frozen = $derived(isDecided || desk.held);
+	const missing = $derived(data.kind === 'blueprint' || data.kind === 'page' ? data.missing : false);
+
+	// A held or decided review takes no choices, and no text edits either while the file is gone.
+	$effect(() => {
+		for (const r of docReviews) r.locked = frozen;
+		review?.setReadonly(frozen || missing);
+	});
+
+	const WORDS = ['no', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten'];
+	const word = (n: number) => WORDS[n] ?? String(n);
+	const capital = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+	const plural = (n: number, one: string, many = `${one}s`) => `${word(n)} ${n === 1 ? one : many}`;
+	/** The lede's first sentence: how many calls still need a choice. */
+	const callsLine = $derived(
+		openCalls.length === 0
+			? 'No calls are open.'
+			: `${capital(plural(openCalls.length, 'call'))} ${openCalls.length === 1 ? 'is' : 'are'} open.`
+	);
+	/**
+	 * The lede of a blueprint or page: the open calls, what the file describes, then what the author did
+	 * with the fact check. A blueprint's type name is hyphenated as a modifier ("symptom-row page").
+	 */
+	const docLede = $derived.by(() => {
+		if (!blueprint || !review) return '';
+		const type = blueprint.pageType ? `${/^[aeiou]/i.test(blueprint.pageType) ? 'an' : 'a'} ${blueprint.pageType.replaceAll(' ', '-')} page` : 'a docs page';
+		const what = `${blueprint.kind === 'page' ? 'This draft is' : 'This blueprint describes'} ${type}${blueprint.track ? ` on the ${blueprint.track} track` : ''}.`;
+		const fixed = review.notes.filter((n) => n.kind === 'info').length;
+		const disputed = review.notes.filter((n) => n.kind === 'decide').length;
+		const asked = review.notes.filter((n) => n.kind === 'question').length;
+		const found = fixed + disputed;
+		const check =
+			found === 0
+				? ''
+				: disputed === 0
+					? `The author fixed ${found === 1 ? 'the one finding' : `all ${word(found)} findings`} from the fact check.`
+					: fixed === 0
+						? `The author disputed ${found === 1 ? 'the one finding' : `all ${word(found)} findings`} from the fact check.`
+						: `Of the fact check’s ${word(found)} findings, the author fixed ${word(fixed)} and disputed ${word(disputed)}.`;
+		const question = asked ? `The author ${check ? 'also ' : ''}has ${asked === 1 ? 'a question' : `${word(asked)} questions`} for you.` : '';
+		return [what, check, question, callsLine].filter(Boolean).join(' ');
+	});
+	/** The change's lede: the open calls, then what the change edits. */
+	const changeLede = $derived.by(() => {
+		if (!change) return '';
+		const docs = plural(change.docs.length, 'document');
+		const code = change.totals.files ? ` and ${plural(change.totals.files, 'code file')}` : '';
+		return `“${change.meta.title}” edits ${docs}${code}. ${callsLine}`;
+	});
+
+	/** Moves focus to the next open call after the one holding focus, wrapping to the first. */
+	let lastDoc = -1;
+	function nextCall() {
+		if (review) {
+			review.nextCall();
+			return;
+		}
+		if (changeReviews.length) {
+			// One document at a time, starting after the last one visited.
+			for (let step = 1; step <= changeReviews.length; step++) {
+				const at = (lastDoc + step) % changeReviews.length;
+				if (changeReviews[at].openCalls.length) {
+					lastDoc = at;
+					changeReviews[at].nextCall();
+					return;
+				}
+			}
+			return;
+		}
+		const open = calls.filter((c) => c.open);
+		if (!open.length) return;
+		const at = open.findIndex((c) => document.getElementById(c.id)?.contains(document.activeElement));
+		const target = document.getElementById(open[(at + 1) % open.length].id);
+		target?.scrollIntoView({ block: 'center' });
+		(target?.querySelector<HTMLElement>('input, button, a, textarea') ?? target)?.focus();
+	}
 	// What the bar's status region says in place of the lock text: the hold, an undo, or a failed post.
 	let barNote = $state<string | null>(null);
 	let holding = $state(false);
 	let holdLeft = $state(5);
-	let holdPaused = $state(false);
+	/** Why a packet's hold is paused: the pointer over the bar, or a press of Pause; null while it runs. */
+	let pausedBy = $state<'pointer' | 'button' | null>(null);
 	// Where a withdrawn packet's failed post offers to go.
 	let withdrawn = $state<string | null>(null);
 
@@ -137,31 +361,29 @@ first, which posts as `irreversible=yes`. A withdrawn packet answers 410 with th
 	}
 
 	$effect(() => {
-		desk.page = data.kind;
-		if (!data.decided) {
-			desk.handlers = {
-				...desk.handlers,
-				approve: data.kind === 'packet' ? approvePacket : () => approveButton && !approveButton.disabled && form?.requestSubmit(approveButton),
-				'open-note': openNote,
-				'close-note': closeNote,
-				'send-rejection': () => form?.requestSubmit(sendButton),
-				submit: () => form?.requestSubmit(submitButton),
-				undo: () => desk.undo?.()
-			};
-		}
-		return () => {
-			desk.handlers = {};
-			desk.page = 'design';
-		};
+		desk.page = kind;
+		return () => (desk.page = 'design');
 	});
 
-	// The queue poll hands the panel fresh `data` every two seconds and re-runs the effect above,
-	// so the note closes only when the panel itself goes, on opening another item.
+	$effect(() => {
+		if (isDecided) return;
+		return desk.register({
+			approve: kind === 'packet' ? approvePacket : docReviews.length ? approveDoc : approveCards,
+			'next-call': nextCall,
+			'open-note': openNote,
+			'close-note': closeNote,
+			'send-rejection': () => form?.requestSubmit(sendButton),
+			submit: () => form?.requestSubmit(submitButton),
+			undo: () => desk.undo?.()
+		});
+	});
+
+	// Only the panel going, on opening another item, closes the note.
 	$effect(() => () => (desk.noteOpen = false));
 
-	// Its own effect: a pick must not re-run the handler registration, whose teardown clears every handler.
+	// Its own effect: a pick must not re-run the handler registration.
 	$effect(() => {
-		desk.approveLocked = data.kind === 'packet' ? openAsks.length > 0 : decided.locked;
+		desk.approveLocked = data.kind === 'packet' ? openAsks.length > 0 : docReviews.length ? openCalls.length > 0 : decided.locked;
 		return () => (desk.approveLocked = false);
 	});
 
@@ -179,14 +401,43 @@ first, which posts as `irreversible=yes`. A withdrawn packet answers 410 with th
 		};
 	});
 
+	const STILL_SAVING = 'Your edits are still saving, so this item stays open until they land.';
+	/** Where the reader goes once the save that held a navigation lands; null while none is held. */
+	let leaveAfterSave: (() => void) | null = null;
+
 	beforeNavigate((navigation) => {
-		if (!hold) return;
-		if (navigation.willUnload) {
-			desk.undo?.();
+		if (hold) {
+			if (navigation.willUnload) {
+				desk.undo?.();
+				return;
+			}
+			leaving = true;
+			hold.flush();
 			return;
 		}
-		leaving = true;
-		hold.flush();
+		if (!review?.pending) return;
+		// A closing tab cannot wait for the save, so the browser asks first.
+		navigation.cancel();
+		if (navigation.willUnload || !navigation.to) return;
+		const to = navigation.to.url;
+		// The cancel put a Back or Forward back in place, so the same step is taken again, not a new entry.
+		const delta = navigation.type === 'popstate' ? navigation.delta : 0;
+		const waiting = leaveAfterSave !== null;
+		// A second press while the save runs only changes where the reader goes once it lands.
+		leaveAfterSave = () => (delta ? history.go(delta) : void goto(to));
+		if (waiting) return;
+		const stalled = setTimeout(() => {
+			desk.toast = STILL_SAVING;
+			desk.announce(STILL_SAVING);
+		}, 3000);
+		void review.flush().then(() => {
+			clearTimeout(stalled);
+			if (desk.toast === STILL_SAVING) desk.toast = null;
+			const leave = leaveAfterSave;
+			leaveAfterSave = null;
+			if (review.saveFailed) desk.announce(`${review.saveStatus}. You are still on this item.`);
+			else leave?.();
+		});
 	});
 
 	/** Approve on a packet: a locked press moves to the first open ask, an irreversible packet asks once more. */
@@ -200,10 +451,51 @@ first, which posts as `irreversible=yes`. A withdrawn packet answers 410 with th
 		else form?.requestSubmit(approveButton);
 	}
 
+	/** Approve on a PR or design: a locked press moves to the first open card. */
+	function approveCards() {
+		if (desk.held || decided.sendBack) return;
+		if (decided.open.length) {
+			const card = document.getElementById(`card-${cards.indexOf(decided.open[0])}`);
+			card?.scrollIntoView({ block: 'center' });
+			card?.querySelector<HTMLElement>('input[type="radio"]')?.focus();
+			return;
+		}
+		form?.requestSubmit(approveButton);
+	}
+
+	/** Approve on a document review: a locked press moves to the next open call; otherwise the last edit saves first. */
+	async function approveDoc() {
+		if (desk.held) return;
+		if (openCalls.length) {
+			nextCall();
+			return;
+		}
+		if (review) {
+			await review.flush();
+			if (review.saveFailed) {
+				desk.announce(`Not approved: ${review.saveStatus}`);
+				return;
+			}
+		}
+		form?.requestSubmit(approveButton);
+	}
+
+	/** What a document review's send-back starts with: each call still open, and how much was edited. */
+	function prefill() {
+		const lines = openCalls.map((n) => `- Still open: ${n.title}`);
+		if (review?.changedLines) {
+			const n = review.changedLines;
+			lines.push(`- ${n} ${n === 1 ? 'line' : 'lines'} changed in the ${data.kind === 'page' ? 'page' : 'plan'}`);
+		}
+		return lines.length ? `${lines.join('\n')}\n` : '';
+	}
+
 	async function openNote() {
+		if (docReviews.length && !noteText) noteText = prefill();
 		desk.noteOpen = true;
 		await tick();
 		noteField?.focus();
+		noteField?.setSelectionRange(noteText.length, noteText.length);
 	}
 
 	async function closeNote() {
@@ -217,13 +509,15 @@ first, which posts as `irreversible=yes`. A withdrawn packet answers 410 with th
 		const name = data.meta.repo.split('/').pop();
 		if (data.kind === 'design') return `the design ${data.meta.title}`;
 		if (data.kind === 'packet') return 'the packet';
+		if (data.kind === 'blueprint') return `the blueprint for ${data.page}`;
+		if (data.kind === 'page') return `the page ${data.page}`;
 		return data.meta.number === undefined ? name : `${name} #${data.meta.number}`;
 	}
 
 	function decisionText(action: URL) {
 		if (action.search === '?/approve') return `Approved ${subject()}.`;
 		if (action.search === '?/reject') {
-			return noteField?.value.trim() ? `Sent ${subject()} back with a note.` : `Sent ${subject()} back.`;
+			return noteText.trim() ? `Sent ${subject()} back with a note.` : `Sent ${subject()} back.`;
 		}
 		return `Submitted ${rows.length} calls.`;
 	}
@@ -234,7 +528,7 @@ first, which posts as `irreversible=yes`. A withdrawn packet answers 410 with th
 		desk.toast = toast;
 		desk.undo = null;
 		holding = false;
-		holdPaused = false;
+		pausedBy = null;
 		if (data.kind === 'packet') barNote = message;
 		else desk.announce(message);
 		await tick();
@@ -242,17 +536,37 @@ first, which posts as `irreversible=yes`. A withdrawn packet answers 410 with th
 		(focusTo?.isConnected ? focusTo : approveButton)?.focus();
 	}
 
-	const decide: SubmitFunction = async ({ cancel, action, submitter }) => {
+	/** The pointer pauses only a running hold; Pause takes over a pointer's pause, so leaving the bar keeps it. */
+	function pauseHold(by: 'pointer' | 'button') {
+		if (!holding || pausedBy === 'button' || pausedBy === by) return;
+		hold?.pause();
+		pausedBy = by;
+	}
+
+	function resumeHold(by: 'pointer' | 'button') {
+		if (pausedBy !== by) return;
+		hold?.resume();
+		pausedBy = null;
+	}
+
+	const decide: SubmitFunction = async ({ cancel, action, submitter, formData }) => {
+		// A send-back carries the edits too, so the last one is committed before the hold starts, and
+		// the post names the blob that save returned rather than the one the form rendered with.
+		if (review) {
+			await review.flush();
+			formData.set('blob', review.blob);
+		}
 		const text = decisionText(action);
 		const upNext = nextItem(data.queue, data.meta.id);
 		const packet = data.kind === 'packet';
+		const sendingBack = action.search === '?/reject';
 		const where = packet ? 'Returning to the board' : upNext ? `Opening ${upNext.title}` : 'Closing the queue';
 		// The confirmation dialog closes as it submits, so focus returns to the button that opened it.
 		returnTo = packet && submitter?.closest('dialog') ? (approveButton ?? null) : submitter;
 		desk.held = true;
 		desk.counting = true;
 		desk.toastError = false;
-		const undoNote = `${text} ${where} in 5 seconds. Press z or the Undo button to undo.`;
+		const undoNote = `${text} ${where} in 5 seconds. ${desk.singleKeys ? 'Press z or the Undo button' : 'Press the Undo button'} to undo.`;
 		if (packet) {
 			// The bar carries the Undo, the countdown, and the status, so the pointer over it pauses the hold.
 			barNote = undoNote;
@@ -261,6 +575,8 @@ first, which posts as `irreversible=yes`. A withdrawn packet answers 410 with th
 			holdLeft = 5;
 			desk.toast = null;
 		} else {
+			// The note has posted with the form, so it closes for the hold and its text waits for an Undo.
+			if (sendingBack) desk.noteOpen = false;
 			desk.toast = `${text} ${where} in 5 s.`;
 			desk.announce(undoNote);
 		}
@@ -282,12 +598,13 @@ first, which posts as `irreversible=yes`. A withdrawn packet answers 410 with th
 		});
 		hold = null;
 		holding = false;
-		holdPaused = false;
+		pausedBy = null;
 		// The next item is already opening, so its keys and rows must not wait on this post.
 		if (leaving) desk.held = false;
 		if (!fired) {
 			cancel();
 			await unlock('Undone. Nothing was sent.', returnTo, null);
+			if (sendingBack && !packet) await openNote();
 			return;
 		}
 
@@ -302,6 +619,11 @@ first, which posts as `irreversible=yes`. A withdrawn packet answers 410 with th
 		return async ({ result }) => {
 			if (result.type === 'success') {
 				desk.drafts.delete(data.meta.id);
+				try {
+					for (const key of Object.keys(localStorage)) if (remember && (key === remember || key.startsWith(`${remember}.`))) localStorage.removeItem(key);
+				} catch {
+					// The remembered choices are a convenience; a stale entry is ignored once the item is decided.
+				}
 				if (leaving) {
 					desk.toast = null;
 					// Reopening the same item keeps the panel, so its decided state comes only from a reload.
@@ -330,255 +652,347 @@ first, which posts as `irreversible=yes`. A withdrawn packet answers 410 with th
 	};
 </script>
 
-<main id="main" tabindex="-1" class="flex-1 px-5 pt-4 pb-8 lg:px-12">
-	<div class={data.kind === 'packet' ? 'max-w-4xl' : 'max-w-3xl'}>
-		{#if data.kind === 'packet'}
-			<p class="mb-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs tracking-wide desk-muted">
-				<a class="link link-hover" href="/">Board</a><span aria-hidden="true">/</span>
-				<span>{data.asks.length} {data.asks.length === 1 ? 'ask' : 'asks'}</span>
-				{#if data.irreversible}
-					<span class="badge badge-sm badge-outline rule-badge tone-error gap-1"><PacketIcon name="lock" class="size-3.5" />Irreversible</span>
-				{/if}
-			</p>
-			<PacketBrief {data} />
-			<div onchange={clearNote}>
-				<PacketAsks asks={data.asks} bind:answers decided={data.decided} />
-				<PacketRoutine routine={data.routine} parts={data.parts} bind:verdicts decided={data.decided} />
-			</div>
-		{:else if data.kind === 'pr'}
-			<PrView {data} bind:picks subject={subject() ?? ''} />
-		{:else if data.kind === 'design'}
-			<p class="mb-2 text-xs tracking-wide text-(--color-muted)">
-				{data.meta.repo.split('/').pop()}{#if data.meta.file} · {data.meta.file}{/if} · {data.minutes} min read
-			</p>
-			<BriefBlock
-				headlineHtml={data.headlineHtml}
-				ledeHtml={data.ledeHtml}
-				whatChanges={data.whatChanges}
-				ifYouApprove={data.ifYouApprove}
-				worthKnowing={data.worthKnowing}
-			/>
-			<DecideCards cards={data.cards} bind:picks decided={data.decided} />
-			<DetailRows details={data.details} />
-			<div class="mt-10"><DesignView docHtml={data.docHtml} /></div>
-		{:else if data.kind === 'triage'}
-			<TriageView
-				bind:rows
-				html={data.html}
-				headlineHtml={data.headlineHtml}
-				ledeHtml={data.ledeHtml}
-				meta="Triage · {data.meta.title}"
-			/>
-		{/if}
-	</div>
-</main>
-
-<div id="decision" class="sticky bottom-0 z-10 bg-linear-to-t from-base-100 from-60% to-transparent px-5 pt-8 pb-4 lg:px-12">
-	{#if data.decided}
-		<p class="max-w-3xl rounded-box border border-base-300 bg-base-100 px-5 py-3.5 text-sm">Decided</p>
-	{:else if data.kind === 'triage'}
-		<form
-			id="decision-form"
-			method="post"
-			action="?/submit"
-			bind:this={form}
-			use:enhance={decide}
-			aria-label="Decision"
-			class={BAR}
-		>
-			{#each rows as row, i (i)}
-				<input type="hidden" name="disposition" value={row.disposition} />
-				<input type="hidden" name="note" value={row.note} />
-			{/each}
-			<div class="mr-auto flex min-w-0 items-start gap-3">
-				<span class="status mt-2 bg-base-content/50" aria-hidden="true"></span>
-				<div class="min-w-0" role="status">
-					<p class="leading-tight font-semibold">
-						{rows.length} calls, {changed === 0 ? 'none' : changed} changed
-					</p>
-					<p class="mt-0.5 text-sm leading-snug text-(--color-muted)">Submit sends your calls back to the session.</p>
-				</div>
-			</div>
-			<button class="btn btn-primary" bind:this={submitButton} disabled={desk.held}>
-				<svg class="size-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 5 5 9-10" /></svg>
-				Submit calls <kbd class={KEY}>Ctrl</kbd><kbd class={KEY}>Enter</kbd>
-			</button>
-		</form>
-	{:else if data.kind === 'packet'}
-		<form
-			id="decision-form"
-			method="post"
-			bind:this={form}
-			use:enhance={decide}
-			aria-label="Decision"
-			class={PACKET_BAR}
-			onpointerenter={() => {
-				if (!holding) return;
-				hold?.pause();
-				holdPaused = true;
-			}}
-			onpointerleave={() => {
-				hold?.resume();
-				holdPaused = false;
-			}}
-		>
-			<input type="hidden" name="fingerprint" value={data.fingerprint} />
-			{#if desk.noteOpen}
-				<div class="basis-full">
-					<label for="note" class="text-sm font-semibold">
-						Note for the session
-						<span class="font-normal desk-muted">(the session reads it as the reason)</span>
-					</label>
-					<textarea
-						id="note"
-						name="note"
-						class="textarea desk-field mt-1 w-full max-w-[88ch] text-sm"
-						rows="2"
-						placeholder="What has to change before you approve"
-						bind:this={noteField}
-						disabled={desk.held}
-					></textarea>
-				</div>
-			{/if}
-			<div class="bar-main flex min-w-0 flex-1 flex-wrap items-center gap-x-4 gap-y-3">
-				{#if !holding && !desk.noteOpen}
-					<button type="button" class="bar-reject btn btn-outline" bind:this={rejectButton} disabled={desk.held} onclick={openNote}>
-						<PacketIcon name="undo" />Reject with note <kbd class={[KEY, 'desk-sk']}>R</kbd>
-					</button>
-				{/if}
-				<div class="ms-auto flex min-w-0 flex-wrap items-center justify-end gap-x-4 gap-y-2">
-					<div id="bar-state" role="status" class={['bar-state min-w-0 text-right', holding && 'sr-only']}>
-						<p class="leading-tight font-semibold">{barNote ?? packetLock}</p>
-						{#if barNote === null}
-							<p class="mt-0.5 text-sm leading-snug desk-muted max-sm:hidden">{packetSub}</p>
-						{:else if withdrawn}
-							<p class="mt-0.5 text-sm leading-snug"><a class="link" href={withdrawn}>Open the board</a></p>
+<Frame
+	where={data.meta.headline ?? data.meta.title}
+	paneLabel={data.kind === 'packet'
+		? 'Outline and parts'
+		: data.kind === 'blueprint' || data.kind === 'page'
+			? 'Outline and calls'
+			: data.kind === 'change'
+				? 'Calls and documents'
+				: 'Calls and outline'}
+>
+	{#snippet header()}
+		{#if packet}
+			<FrameHeader long={packet.headline.length > 90}>
+				{#snippet crumb()}
+					<a href="/">Board</a><span aria-hidden="true">/</span><span>Packet</span>
+					{#if packet.meta.initiativeTitle}<span aria-hidden="true">/</span><span>{packet.meta.initiativeTitle}</span>{/if}
+					{#if packet.irreversible}
+						<span class="badge badge-sm badge-outline rule-badge tone-error gap-1"><PacketIcon name="lock" class="size-3.5" />Irreversible</span>
+					{/if}
+				{/snippet}
+				{#snippet headline()}<Prose text={packet.headline} />{/snippet}
+				{#snippet lede()}<Prose text={packet.lede} />{/snippet}
+			</FrameHeader>
+		{:else if blueprint && review}
+			<FrameHeader>
+				{#snippet crumb()}
+					<a href="/">Board</a><span aria-hidden="true">/</span><span>{blueprint.kind === 'page' ? 'Page' : 'Blueprint'}</span><span aria-hidden="true">/</span><span>{blueprint.meta.repo}</span>
+				{/snippet}
+				{#snippet headline()}
+					{blueprint.kind === 'page'
+						? `Approving this draft clears “${blueprint.page}” to merge.`
+						: `Approving this blueprint lets drafter write “${blueprint.page}” from it.`}
+				{/snippet}
+				{#snippet lede()}{docLede}{/snippet}
+			</FrameHeader>
+		{:else if change}
+			<FrameHeader>
+				{#snippet crumb()}
+					<a href="/">Board</a><span aria-hidden="true">/</span><span>Change</span><span aria-hidden="true">/</span><span>{change.ref}</span>
+				{/snippet}
+				{#snippet headline()}
+					Approving this change clears its pull request to merge.
+				{/snippet}
+				{#snippet lede()}{changeLede}{/snippet}
+			</FrameHeader>
+		{:else if data.kind === 'pr' || data.kind === 'design' || data.kind === 'triage'}
+			{@const item = data}
+			<FrameHeader long={item.headlineHtml.length > 90}>
+				{#snippet crumb()}
+					<a href="/">Board</a><span aria-hidden="true">/</span>
+					{#if item.kind === 'pr'}
+						<span>Pull request</span><span aria-hidden="true">/</span><span>{subject()}</span>
+						{#if item.link}
+							<span aria-hidden="true">/</span><span>{item.link.head} → {item.link.base}</span>
+							<a href={item.link.url} target="_blank" rel="noopener noreferrer">GitHub</a>
 						{/if}
-					</div>
-					{#if desk.noteOpen}
-						<button type="button" class="btn btn-ghost" disabled={desk.held} onclick={closeNote}>
-							Cancel <kbd class={KEY}>Esc</kbd>
-						</button>
-						<button class="btn btn-primary" formaction="?/reject" bind:this={sendButton} disabled={desk.held}>
-							<PacketIcon name="undo" />Send rejection <kbd class="{KEY} max-sm:hidden">Ctrl</kbd><kbd class="{KEY} max-sm:hidden">Enter</kbd>
-						</button>
-					{:else if !holding}
-						<button
-							type="submit"
-							class="bar-approve btn btn-primary"
-							formaction="?/approve"
-							bind:this={approveButton}
-							aria-describedby="bar-state"
-							aria-disabled={openAsks.length > 0}
-							disabled={desk.held}
-							onclick={(e) => {
-								e.preventDefault();
-								approvePacket();
-							}}
-						>
-							<PacketIcon name={openAsks.length ? 'lock' : 'check'} />Approve packet
-							<span class="max-sm:hidden"><kbd class={KEY}>Ctrl</kbd><kbd class={KEY}>Enter</kbd></span>
-						</button>
-					{/if}
-				</div>
-			</div>
-			{#if holding}
-				<div class="flex min-w-0 flex-1 flex-wrap items-center gap-x-4 gap-y-2">
-					<div class="min-w-0 flex-1" aria-hidden="true">
-						<p class="leading-tight font-semibold">{holdPaused ? 'Paused' : `Sending in ${holdLeft} s`}</p>
-						<p class="mt-0.5 text-sm desk-muted">{holdPaused ? 'Move off the bar to carry on.' : 'Point at the bar to pause.'}</p>
-						<progress class="progress progress-primary mt-1.5 h-1.5 w-full max-w-sm" value={holdLeft} max="5"></progress>
-					</div>
-					<button type="button" class="btn" id="undo" onclick={() => desk.undo?.()}>
-						<PacketIcon name="undo" />Undo <kbd class={[KEY, 'desk-sk']}>Z</kbd>
-					</button>
-				</div>
-			{/if}
-		</form>
-	{:else}
-		<form id="decision-form" method="post" bind:this={form} use:enhance={decide} aria-label="Decision" class={BAR}>
-			<input type="hidden" name="cards" value={fingerprint(cards)} />
-			{#if desk.noteOpen}
-				<div class="basis-full">
-					<label for="note" class="text-sm font-semibold">
-						Note for the session
-						<span class="font-normal text-(--color-muted)">(optional; the session reads it as the reason)</span>
-					</label>
-					<textarea
-						id="note"
-						name="note"
-						class="textarea desk-field mt-1 w-full max-w-[88ch] text-sm"
-						rows="3"
-						placeholder="What needs to change before this can be approved"
-						bind:this={noteField}
-						disabled={desk.held}
-					></textarea>
-				</div>
-			{/if}
-			<div class="mr-auto flex min-w-0 items-start gap-3">
-				<span class={['status mt-2', decided.locked ? 'status-warning' : 'status-success']} aria-hidden="true"></span>
-				<div class="min-w-0" id="bar-state" role="status">
-					{#if decided.sendBack}
-						<p class="leading-tight font-semibold">Sending back</p>
-						<p class="mt-0.5 text-sm leading-snug text-(--color-muted)">You chose to send this back to the session.</p>
-					{:else if decided.open.length}
-						<p class="leading-tight font-semibold">
-							{decided.open.length} {decided.open.length === 1 ? 'decision' : 'decisions'} left
-						</p>
-						<p class="mt-0.5 text-sm leading-snug text-(--color-muted)">
-							Decide <a class="link" href="#card-{cards.indexOf(decided.open[0])}">{decided.open[0].title}</a> to unlock Approve.
-						</p>
+					{:else if item.kind === 'design'}
+						<span>Design</span><span aria-hidden="true">/</span><span>{item.meta.repo.split('/').pop()}</span>
+						{#if item.meta.file}<span aria-hidden="true">/</span><span>{item.meta.file}</span>{/if}
+						<span aria-hidden="true">·</span><span>{item.minutes} min read</span>
 					{:else}
-						<p class="leading-tight font-semibold">Ready to approve</p>
-						<p class="mt-0.5 text-sm leading-snug text-(--color-muted)">{readySub}</p>
+						<span>Triage</span><span aria-hidden="true">/</span><span>{item.meta.title}</span>
 					{/if}
-				</div>
-			</div>
-			<div class="ms-auto flex flex-wrap gap-3">
-				{#if desk.noteOpen}
-					<button type="button" class="btn btn-ghost" disabled={desk.held} onclick={closeNote}>
-						Cancel <kbd class={KEY}>Esc</kbd>
-					</button>
-					<button class="btn btn-primary" formaction="?/reject" bind:this={sendButton} disabled={desk.held}>
-						{@render undoIcon()}Send back <kbd class={KEY}>Ctrl</kbd><kbd class={KEY}>Enter</kbd>
-					</button>
+				{/snippet}
+				{#snippet headline()}{@html item.headlineHtml}{/snippet}
+				{#snippet lede()}{@html item.ledeHtml}{/snippet}
+			</FrameHeader>
+		{/if}
+	{/snippet}
+
+	{#snippet place()}
+		{#if docReviews.length}
+			{#if openCalls.length}
+				<button type="button" class="linkbtn next-call" onclick={nextCall}>Next call for you <kbd>F8</kbd></button>
+			{:else}
+				<span class="nothing-open">Nothing open</span>
+			{/if}
+		{/if}
+	{/snippet}
+
+	{#if packet}
+		<div onchange={clearNote}>
+			<PacketBrief data={packet} bind:verdicts decided={packet.decided} />
+			<PacketAsks asks={packet.asks} bind:answers decided={packet.decided} />
+			<PacketRoutine routine={packet.routine} parts={packet.parts} bind:verdicts decided={packet.decided} />
+		</div>
+	{:else if blueprint && review}
+		{#if blueprint.missing}
+			<p class="bg bg-first bg-flat">The queue can no longer read <code>{blueprint.file}</code> from the worktree’s latest commit. The editor shows the copy that was queued, and you can’t edit it.</p>
+		{/if}
+		{#if blueprint.kind === 'page'}
+			<PageView {review} file={blueprint.file} pr={blueprint.pr} />
+		{:else}
+			<BlueprintView {review} file={blueprint.file} />
+		{/if}
+	{:else if change}
+		<ChangeView data={change} reviews={changeReviews} />
+	{:else if data.kind === 'pr'}
+		<PrView {data} bind:picks />
+	{:else if data.kind === 'design'}
+		<BriefBlock whatChanges={data.whatChanges} ifYouApprove={data.ifYouApprove} worthKnowing={data.worthKnowing} />
+		<DecideCards cards={data.cards} bind:picks decided={data.decided} />
+		<DetailRows details={data.details} />
+		<div class="mt-10"><DesignView docHtml={data.docHtml} /></div>
+	{:else if data.kind === 'triage'}
+		<TriageView bind:rows html={data.html} />
+	{/if}
+
+	{#snippet pane()}
+		{#if packet}
+			<PaneSection title="Calls for you"><PaneList items={callItems} empty="No asks in this packet." /></PaneSection>
+			{#if partItems.length}<PaneSection title="Parts"><PaneList items={partItems} /></PaneSection>{/if}
+			{#if yourSteps.length}<PaneSection title="Steps you run"><PaneList items={yourSteps} /></PaneSection>{/if}
+			<PaneSection title="Contents" contents><PaneList numbered items={outline} /></PaneSection>
+		{:else if review}
+			<ReviewPane {review} correctionsTitle="Fixed after the fact check" />
+		{:else if change}
+			<ChangePane reviews={changeReviews} paths={change.docs.map((d) => d.path)} hasCode={change.groups.length > 0} />
+		{:else if data.kind === 'triage'}
+			{@const html = data.html}
+			<PaneSection title="Calls for you">
+				<PaneList
+					empty="Nothing proposed."
+					items={rows.map((row, i) => ({
+						href: `#item-${i}`,
+						label: row.action,
+						labelHtml: html[i]?.label,
+						what: row.disposition === row.proposed ? `${TRIAGE_WORD[row.disposition]}, as proposed` : `${TRIAGE_WORD[row.disposition]}, your change`,
+						dot: 'call'
+					}))}
+				/>
+			</PaneSection>
+			<PaneSection title="Contents" contents><PaneList numbered items={outline} /></PaneSection>
+		{:else}
+			<PaneSection title="Calls for you"><PaneList items={callItems} empty="Nothing to decide first." /></PaneSection>
+			<PaneSection title="Contents" contents><PaneList numbered items={outline} /></PaneSection>
+		{/if}
+	{/snippet}
+
+	{#snippet bar()}
+		{#if data.decided}
+			<DecisionBar>
+				{#snippet status()}<p class="s1" role="status">Decided</p>{/snippet}
+			</DecisionBar>
+		{:else}
+			<form
+				id="decision-form"
+				method="post"
+				action={data.kind === 'triage' ? '?/submit' : undefined}
+				bind:this={form}
+				use:enhance={decide}
+				aria-label="Decision"
+				onpointerenter={() => pauseHold('pointer')}
+				onpointerleave={() => resumeHold('pointer')}
+			>
+				{#if packet}
+					<input type="hidden" name="fingerprint" value={packet.fingerprint} />
+				{:else if docReviews.length}
+					{#if review}<input type="hidden" name="blob" value={review.blob} />{/if}
+					{#each docReviews as docReview (docReview)}
+						{#each docReview.calls as call (call.id)}
+							{#if docReview.decided[call.id] !== undefined}
+								<input type="hidden" name="call:{call.id}" value={call.choices?.[docReview.decided[call.id]]?.label ?? ''} />
+							{/if}
+						{/each}
+					{/each}
+				{:else if data.kind === 'triage'}
+					{#each rows as row, i (i)}
+						<input type="hidden" name="disposition" value={row.disposition} />
+						<input type="hidden" name="note" value={row.note} />
+					{/each}
 				{:else}
-					<button
-						type="button"
-						class={['btn', decided.sendBack ? 'btn-primary' : 'btn-outline']}
-						bind:this={rejectButton}
-						disabled={desk.held}
-						onclick={openNote}
-					>
-						{@render undoIcon()}Send back <kbd class={[KEY, 'desk-sk']}>R</kbd>
-					</button>
-					{#if !decided.sendBack}
-						<div
-							class={tip && 'tooltip tooltip-top'}
-							data-tip={tip}
-						>
+					<input type="hidden" name="cards" value={fingerprint(cards)} />
+				{/if}
+				<DecisionBar hideStatus={holding}>
+					{#snippet note()}
+						{#if desk.noteOpen}
+							<div class="sendback">
+								<label for="note" class="lead">What should the {docReviews.length ? 'author' : 'session'} change?</label>
+								<p class="muted">
+									{packet
+										? 'Your verdicts go with this note.'
+										: review
+											? 'Your edits and decisions go with this note.'
+											: change
+												? 'The change’s author reads this note and makes the edits.'
+												: 'The session reads it as the reason; leave it empty to send back without one.'}
+								</p>
+								<textarea
+									id="note"
+									name="note"
+									class="textarea desk-field w-full"
+									bind:this={noteField}
+									bind:value={noteText}
+									disabled={desk.held}
+								></textarea>
+								<div class="acts">
+									<button type="button" class="btn" disabled={desk.held} onclick={closeNote}>Cancel <kbd>Esc</kbd></button>
+									<button class="btn btn-primary" formaction="?/reject" bind:this={sendButton} disabled={desk.held}>
+										Send back <kbd>Ctrl</kbd><kbd>Enter</kbd>
+									</button>
+								</div>
+							</div>
+						{/if}
+					{/snippet}
+					{#snippet reject()}
+						{#if data.kind !== 'triage' && !holding}
 							<button
-								class="btn btn-primary"
+								type="button"
+								class={['btn', decided.sendBack && !packet ? 'btn-primary' : 'btn-outline']}
+								bind:this={rejectButton} disabled={desk.held} onclick={openNote}>
+								Send back with note
+							</button>
+						{/if}
+					{/snippet}
+					{#snippet status()}
+						{#if packet}
+							<p class="s1" role="status">{barNote ?? packetLock}</p>
+							{#if barNote === null}
+								<p class="s2">{packetSub}</p>
+							{:else if withdrawn}
+								<p class="s2"><a class="link" href={withdrawn}>Open the board</a></p>
+							{/if}
+						{:else if docReviews.length}
+							<p class="s1" role="status">
+								{openCalls.length ? `Make ${plural(openCalls.length, 'call')} to approve` : 'Ready to approve'}
+							</p>
+							<p class="s2">
+								{capital(
+									[
+										decidedCount ? `${word(decidedCount)} decided` : '',
+										review
+											? review.changedLines
+												? `${plural(review.changedLines, 'line')} changed`
+												: 'no edits yet'
+											: ''
+									]
+										.filter(Boolean)
+										.join(', ') || 'Nothing decided yet'
+								)}
+							</p>
+						{:else if data.kind === 'triage'}
+							<p class="s1" role="status">{rows.length} calls, {changed === 0 ? 'none' : changed} changed</p>
+							<p class="s2">Submit sends your calls back to the session.</p>
+						{:else if decided.sendBack}
+							<p class="s1" role="status">Sending back</p>
+							<p class="s2">You chose to send this back to the session.</p>
+						{:else if decided.open.length}
+							<p class="s1" role="status">{decided.open.length} {decided.open.length === 1 ? 'decision' : 'decisions'} left</p>
+							<p class="s2">
+								Decide <a class="link" href="#card-{cards.indexOf(decided.open[0])}">{decided.open[0].title}</a> to unlock Approve.
+							</p>
+						{:else}
+							<p class="s1" role="status">Ready to approve</p>
+							<p class="s2">{readySub}</p>
+						{/if}
+					{/snippet}
+					{#snippet hold()}
+						{#if holding}
+							<div class="holding">
+								<div class="min-w-0 flex-1" aria-hidden="true">
+									<p class="s1">{pausedBy ? 'Paused' : `Sending in ${holdLeft} s`}</p>
+									<p class="s2">
+										{pausedBy === 'button' ? 'Press Resume to carry on.' : pausedBy ? 'Move off the bar to carry on.' : 'Point at the bar to pause.'}
+									</p>
+									<progress class="progress progress-primary" value={holdLeft} max="5"></progress>
+								</div>
+								<button
+									type="button"
+									class="btn"
+									aria-pressed={pausedBy === 'button'}
+									onclick={() => (pausedBy === 'button' ? resumeHold('button') : pauseHold('button'))}
+								>
+									{pausedBy === 'button' ? 'Resume' : 'Pause'}
+								</button>
+								<button type="button" class="btn" id="undo" onclick={() => desk.undo?.()}>Undo <kbd class="desk-sk">Z</kbd></button>
+							</div>
+						{/if}
+					{/snippet}
+					{#snippet approve()}
+						{#if holding}
+							<!-- The hold block carries Undo; the approval is gone until the hold ends. -->
+						{:else if packet}
+							<button
+								type="submit"
+								class="btn btn-primary bar-approve"
 								formaction="?/approve"
 								bind:this={approveButton}
 								aria-describedby="bar-state"
-								disabled={desk.held || !approvable}
+								aria-disabled={openAsks.length > 0}
+								disabled={desk.held}
+								onclick={(e) => {
+									e.preventDefault();
+									approvePacket();
+								}}
 							>
-								<svg class="size-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 5 5 9-10" /></svg>
-								{data.kind === 'pr' ? 'Approve and merge' : 'Approve'} <kbd class={[KEY, 'desk-sk']}>A</kbd>
+								Approve the packet <kbd>Ctrl</kbd><kbd>Enter</kbd>
 							</button>
-						</div>
-					{/if}
-				{/if}
-			</div>
-		</form>
-	{/if}
-</div>
-
-{#snippet undoIcon()}
-	<svg class="size-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 14 4 9l5-5M4 9h11a5 5 0 0 1 0 10h-3" /></svg>
-{/snippet}
-
+						{:else if docReviews.length}
+							<button
+								type="submit"
+								class="btn btn-primary bar-approve"
+								formaction="?/approve"
+								bind:this={approveButton}
+								aria-describedby="bar-state"
+								aria-disabled={openCalls.length > 0}
+								disabled={desk.held}
+								onclick={(e) => {
+									e.preventDefault();
+									approveDoc();
+								}}
+							>
+								Approve the {data.kind === 'page' ? 'page' : data.kind === 'change' ? 'change' : 'blueprint'} <kbd>Ctrl</kbd><kbd>Enter</kbd>
+							</button>
+						{:else if data.kind === 'triage'}
+							<button class="btn btn-primary" bind:this={submitButton} disabled={desk.held}>
+								Submit calls <kbd>Ctrl</kbd><kbd>Enter</kbd>
+							</button>
+						{:else if !decided.sendBack}
+							<button
+								type="submit"
+								class="btn btn-primary bar-approve"
+								formaction="?/approve"
+								bind:this={approveButton}
+								aria-describedby="bar-state"
+								aria-disabled={decided.locked}
+								disabled={desk.held}
+								onclick={(e) => {
+									e.preventDefault();
+									approveCards();
+								}}
+							>
+								{data.kind === 'pr' ? 'Approve and merge' : 'Approve the design'} <kbd>Ctrl</kbd><kbd>Enter</kbd>
+							</button>
+						{/if}
+					{/snippet}
+				</DecisionBar>
+			</form>
+		{/if}
+	{/snippet}
+</Frame>
 
 {#if data.kind === 'packet' && data.irreversible && !data.decided}
 	<dialog id="confirm" class="modal" aria-labelledby="confirm-title" bind:this={confirmDialog}>
