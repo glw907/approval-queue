@@ -49,7 +49,7 @@ Every decision also appends one line per part, plus one per ask with no part, to
 
 ### Comments and replies
 
-On the blueprint, page, and change kinds, Geoff can select text and comment on it. Each comment is saved to the item as he writes it, and it goes to the author with either decision. Both the approve and the send-back JSON carry two fields:
+On the blueprint, page, and change kinds, Geoff can select text and comment on it. Each comment is saved to the item when he presses Save, and it goes to the author with either decision. The text of a box still open is not saved. Both the approve and the send-back JSON carry two fields:
 
 - `comments`: every comment Geoff left, always present and possibly empty. A comment is `{id, text, anchor}`.
 - `threads`: `[{id, reply}]`, one for each of the author's replies that Geoff answered. A reply he resolved without answering, or left alone, is not listed: it resolves at the decision.
@@ -69,6 +69,8 @@ The author answers every comment, after a send-back or before acting on an appro
 
 `id`, `quote`, and `anchor` are the comment's own, copied from the decision. `status` is `done` (the author made the change), `kept` (the author left the text as it was, and says why in `text`), or `answered` (the comment was a question, and `text` answers it). Each thread on a change names its document in `anchor.file`, and that document must be one the change carries. The command refuses a file that is not an array of threads in this shape, or that uses an id twice, and accepts an empty array. The screen shows each reply on its comment's card, placed by the steps above, and a thread whose text is gone shows its original quote. Only Geoff resolves a thread. A new comment on the re-queued item takes an id past every thread's, so the ids never collide.
 
+A blueprint approve's answers come back on the page review. When the author queues the drafted page, it passes `page ... --replies <replies.json>` with one thread per blueprint comment. `id` and `quote` are the blueprint comment's. `anchor` is made against the page file at the commit the page is queued from, on the passage where the comment was applied, by the same `quote`, `prefix`, `suffix`, offset, and `commit` rules as above. Each reply then shows level with that passage. A thread whose comment changed nothing on the page anchors at the passage closest to it.
+
 The decision log line of each of these kinds gains `comments`, the number of comments, and `replies`, the number of `threads`.
 
 ## The blueprint kind
@@ -76,7 +78,7 @@ The decision log line of each of these kinds gains `comments`, the number of com
 A blueprint is a page plan Geoff reads and edits in place. The screen opens the file in an editor with each note from the author or the fact check under the line it is about, and every pause in typing (or Ctrl+S) writes the file and commits it with `Edit <file> in review`.
 
 ```sh
-approval-queue blueprint <worktree> <title> <file> [--notes <notes.json>]
+approval-queue blueprint <worktree> <title> <file> [--notes <notes.json>] [--replies <replies.json>]
 ```
 
 `<worktree>` is the top of a git worktree, and `<file>` is relative to it. The command refuses a file that is not a regular file committed at HEAD (a directory or a symlink is refused), a file with uncommitted changes, and a notes file that is not a JSON array of notes in the shape `{id, kind, anchor, title, body}`: `kind` is `info`, `decide`, or `question`, `body` is an array of paragraphs, and a note may add `was` and `now`, `sides` (`[{who, text}]`), and `choices` (`[{label, text?, done, edit?}]`). A `decide` or `question` note must carry choices. Each refusal names the problem and exits 2 before anything is queued.
@@ -106,7 +108,7 @@ Exits 0 when the decision log under `$XDG_STATE_HOME/approval-queue/` holds an a
 A page is a drafted page Geoff reads and edits in place, riding with a pull request. The screen is the blueprint screen with the PR and its head shown, and the same editor, notes, and save-by-commit.
 
 ```sh
-approval-queue page <worktree> <title> <file> --pr <owner/repo#n> [--notes <notes.json>]
+approval-queue page <worktree> <title> <file> --pr <owner/repo#n> [--notes <notes.json>] [--replies <replies.json>]
 ```
 
 The refusals and `--replies` are the blueprint's, plus a `--pr` that is not `owner/repo#n`; a PR whose head `gh pr view <n> -R <owner/repo> --json headRefOid` cannot read exits 1. A page's notes anchor with `<slug>.heading` for a heading and `<slug>.p<n>` for the nth paragraph, list item, or table under that heading, counting from 0 (a list item runs through its indented continuation; front matter, blank lines, code blocks, directive containers, and rules count for nothing). An approve prints the PR head read at approval:
@@ -122,7 +124,7 @@ A send-back prints the blueprint's send-back JSON. The log line is the blueprint
 A change is one review of a code PR that also edits blueprints and pages. The screen shows each changed document read-only as it is at the PR head, with its notes inline, the lines the change edited marked, and its own diff behind a row; the rest of the PR shows as the PR screen's Files row. Geoff decides the PR, and its author makes any edits.
 
 ```sh
-approval-queue change <owner/repo#n> <title> [--notes <notes.json>]
+approval-queue change <owner/repo#n> <title> [--notes <notes.json>] [--replies <replies.json>]
 ```
 
 A changed file is a document when it is `blueprints/**/*.blueprint.md`, `.yaml`, or `.yml`, or a `.md` or `.mdx` file under `docs/` outside `docs/internal/`; a PR with none is refused (queue it with `pr`). The notes take the blueprint's shape plus a required `file` naming the document each anchors into, and a choice may not carry `text` or `edit`. A PR already waiting in the queue is refused. `--replies` takes the blueprint's shape, and each thread's `anchor.file` must name a document the change carries. An approve prints:
