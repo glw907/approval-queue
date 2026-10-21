@@ -28,7 +28,7 @@ export interface EditorHooks {
 export interface EditorOptions {
 	doc: string;
 	notes: PlacedNote[];
-	/** The text the review opened with; "Mark the lines I changed" compares each line against it. */
+	/** The text the review opened with; "Mark the lines you changed" compares each line against it. */
 	original: string;
 	/** The editable region's accessible name. */
 	label: string;

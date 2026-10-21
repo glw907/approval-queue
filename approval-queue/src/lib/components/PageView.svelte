@@ -23,29 +23,32 @@ pause in typing commits it there. A page queued with no readable pull request re
 
 {#if pr}
 	<p class="bg bg-first bg-flat prline">
-		<span class="lead">Pull request.</span>
-		<a href={pr.url} target="_blank" rel="noopener noreferrer">{pr.ref}</a>{#if pr.head}, head <code>{pr.head.slice(0, 9)}</code> when queued{/if}.
-		Approving names that head. If the pull request gains a commit before you approve, the approval is refused and the page comes back to you.
+		<span class="lead">Pull request <a href={pr.url} target="_blank" rel="noopener noreferrer">{pr.ref}</a>.</span>
+		{#if pr.head}It was at commit <code>{pr.head.slice(0, 9)}</code> when this page was queued, and your approval covers only that commit.{/if}
+		If the pull request gains a commit before you approve, the queue refuses the approval and the page comes back to you.
 	</p>
 {/if}
 <details class={['bg', !pr && 'bg-first']}>
 	<summary>
 		<PacketIcon name="chev" class="chev" />
-		<span><span class="lead">What you’re deciding.</span> Whether this draft is ready to merge: it reads right, in order, and in the page’s voice.</span>
+		<span><span class="lead">What you’re deciding.</span> Whether this draft is ready to merge.</span>
 	</summary>
 	<div class="body">
-		<p>Approving tells the session the page is ready to merge with the pull request at the head shown above.</p>
-		<p>You aren’t checking facts against the code. A fresh agent did that, and the author fixed what it found or disputed it. The notes show where that changed the page.</p>
+		<p>
+			{#if pr?.head}Approving lets the pull request merge at commit <code>{pr.head.slice(0, 9)}</code>.{:else if pr}Approving lets the pull request merge.{:else}Approving clears the page to merge.{/if}
+			Read the draft for order and voice.
+		</p>
+		<p>You aren’t checking facts against the code. A fresh agent checked each claim, and the author fixed or disputed every finding. The notes mark where a finding changed the page.</p>
 	</div>
 </details>
 <details class="bg">
 	<summary>
 		<PacketIcon name="chev" class="chev" />
-		<span><span class="lead">How to change it.</span> It’s the page file itself. Type anywhere, and each pause saves it.</span>
+		<span><span class="lead">How to change it.</span> The editor below shows the page file. Type anywhere, and the file saves each time you pause.</span>
 	</summary>
 	<div class="body">
 		<p>
-			Each save is a commit in the session’s worktree. The small <code>:fact[…]</code> tag ties a line to
+			Each save is a commit in the session’s worktree. The <code>:fact[…]</code> tag ties a line to
 			the fact behind it, so leave it on the line it came with. Ctrl+Z undoes, F8 moves to the next call for you, and Ctrl+Enter
 			approves.
 		</p>

@@ -23,38 +23,59 @@ author edits, and a send-back goes to that author with a note.
 	let { data, reviews }: Props = $props();
 
 	const KIND = { blueprint: 'Blueprint', page: 'Page' };
+	const WORDS = ['no', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten'];
+	const word = (n: number) => WORDS[n] ?? String(n);
+	const capital = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+	/**
+	 * The pull request's checks as one sentence, with the numbers spelled out as the ledes spell them.
+	 * A failure outranks a running check, which outranks a skip; `some` names k of the n checks and
+	 * picks the verb's number, so every count reads right ("Its one check", "Both of its checks").
+	 */
 	const checks = $derived.by(() => {
-		const { passed, failed, pending, rows } = data.checks;
-		if (rows.length === 0) return 'No checks.';
-		if (failed > 0) return `${failed} of ${rows.length} failed.`;
-		if (pending > 0) return `${pending} of ${rows.length} pending.`;
-		return `All ${passed} passed.`;
+		const { failed, pending, skipped, rows } = data.checks;
+		const n = rows.length;
+		if (n === 0) return 'It runs no checks.';
+		const some = (k: number, one: string, many: string) => {
+			const who =
+				k === n
+					? n === 1
+						? 'Its one check'
+						: n === 2
+							? 'Both of its checks'
+							: `All ${word(n)} of its checks`
+					: `${capital(word(k))} of its ${word(n)} checks`;
+			return `${who} ${k === 1 ? one : many}`;
+		};
+		if (failed) return `${some(failed, 'failed', 'failed')}.`;
+		if (pending) return `${some(pending, 'is still running', 'are still running')}.`;
+		if (skipped === n) return `${some(n, 'was skipped', 'were skipped')}.`;
+		if (skipped) return `${some(n - skipped, 'passed', 'passed')}, and ${word(skipped)} ${skipped === 1 ? 'was' : 'were'} skipped.`;
+		return `${some(n, 'passed', 'passed')}.`;
 	});
 	const name = (path: string) => path.split('/').pop() ?? path;
 </script>
 
 <p class="bg bg-first bg-flat prline">
-	<span class="lead">Pull request.</span>
-	{#if data.link}<a href={data.link.url} target="_blank" rel="noopener noreferrer">{data.ref}</a>{:else}{data.ref}{/if}{#if data.head}, head
-		<code>{data.head.slice(0, 9)}</code> when queued{/if}. Checks: {checks}
+	<span class="lead">Pull request {#if data.link}<a href={data.link.url} target="_blank" rel="noopener noreferrer">{data.ref}</a>{:else}{data.ref}{/if}.</span>
+	{#if data.head}It was at commit <code>{data.head.slice(0, 9)}</code> when this change was queued.{/if} {checks}
 </p>
 <details class="bg">
 	<summary>
 		<PacketIcon name="chev" class="chev" />
-		<span><span class="lead">What you’re deciding.</span> Whether this pull request can merge with the blueprints and pages it edits.</span>
+		<span><span class="lead">What you’re deciding.</span> Whether the pull request, including its edits to blueprints and pages, is ready to merge.</span>
 	</summary>
 	<div class="body">
-		<p>Approving names the head shown above, the one these documents were read at, so a commit added before you approve needs a new approval.</p>
+		<p>{#if data.head}The queue read these documents at commit <code>{data.head.slice(0, 9)}</code>, and your approval covers that commit only. {/if}If the pull request gains a commit before you approve, the change comes back for a new approval.</p>
 		<p>You aren’t checking facts against the code. The notes show where a fact check changed a document.</p>
 	</div>
 </details>
 <details class="bg">
 	<summary>
 		<PacketIcon name="chev" class="chev" />
-		<span><span class="lead">How to read it.</span> Each document is shown as it is after the change, with the lines the change edited marked.</span>
+		<span><span class="lead">How to read it.</span> Each document appears as it reads after the change, with the edited lines marked.</span>
 	</summary>
 	<div class="body">
-		<p>The diff of each document is behind its own row. The documents take no edits here: send the change back with a note, and its author makes them.</p>
+		<p>Each document’s changes are in its Diff disclosure. You can’t edit the documents here. To ask for an edit, send the change back with a note, and the change’s author makes it.</p>
 	</div>
 </details>
 
@@ -78,7 +99,7 @@ author edits, and a send-back goes to that author with a note.
 
 <section class="sec" id="code" aria-labelledby="code-h">
 	<h2 id="code-h">Code changes</h2>
-	<p class="sl">The rest of the pull request, as the PR screen shows it.</p>
+	<p class="sl">The rest of the pull request, as the pull request screen shows it.</p>
 	{#if data.groups.length}
 		<FilesDiff groups={data.groups} totals={data.totals} />
 	{:else}

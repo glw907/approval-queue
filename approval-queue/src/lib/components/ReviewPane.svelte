@@ -26,7 +26,7 @@ the lines near the viewport.
 		review,
 		correctionsTitle,
 		callWhat = { decide: 'A dispute between the author and the fact check', question: 'A question from the author' },
-		correctionWhat = 'Already fixed by the author'
+		correctionWhat = 'Fixed by the author'
 	}: Props = $props();
 
 	const callItems = $derived<PaneItem[]>(
@@ -100,7 +100,7 @@ the lines near the viewport.
 			{/each}
 		</ol>
 	</PaneSection>
-	<label class="rv-toggle"><input type="checkbox" bind:checked={review.markChanges} /> Mark the lines I changed</label>
+	<label class="rv-toggle"><input type="checkbox" bind:checked={review.markChanges} /> Mark the lines you changed</label>
 </div>
 
 <style>
