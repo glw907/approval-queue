@@ -17,7 +17,7 @@ export type KeyAction =
 	| 'submit';
 
 export interface KeyContext {
-	page: 'pr' | 'design' | 'triage' | 'packet';
+	page: 'pr' | 'design' | 'triage' | 'packet' | 'blueprint';
 	/** The event target is a field that takes text. */
 	typing: boolean;
 	singleKeys: boolean;
@@ -57,8 +57,8 @@ export function keyAction(key: string, mods: KeyMods, context: KeyContext): KeyA
 		if (held) return null;
 		if (page === 'triage') return 'submit';
 		if (noteOpen) return 'send-rejection';
-		// Locked, the handler moves focus to the first open ask, matching the button it advertises.
-		return page === 'packet' ? 'approve' : null;
+		// Locked, the handler moves to the first open ask or call, matching the button it advertises.
+		return page === 'packet' || page === 'blueprint' ? 'approve' : null;
 	}
 
 	// F8 is a function key, so like Ctrl+Enter it works from a field and ignores the single-key switch.
@@ -76,7 +76,7 @@ export function keyAction(key: string, mods: KeyMods, context: KeyContext): KeyA
 	if (key === 'k') return 'queue-prev';
 	if (key === 'z') return held ? 'undo' : null;
 	if (held) return null;
-	if (page !== 'triage' && page !== 'packet' && key === 'a') return noteOpen || approveLocked ? null : 'approve';
+	if ((page === 'pr' || page === 'design') && key === 'a') return noteOpen || approveLocked ? null : 'approve';
 	if (page !== 'triage' && key === 'r') return 'open-note';
 	if (page === 'pr' && key === '/') return 'focus-filter';
 	if (page === 'triage' && key in MOVES) return MOVES[key];

@@ -17,7 +17,7 @@ moves focus to the first open ask. A packet whose steps cannot be undone asks fo
 first, which posts as `irreversible=yes`. A withdrawn packet answers 410 with the board to offer.
 -->
 <script lang="ts">
-	import { enhance, type SubmitFunction } from '$app/forms';
+	import { deserialize, enhance, type SubmitFunction } from '$app/forms';
 	import { beforeNavigate, goto, invalidateAll } from '$app/navigation';
 	import { tick } from 'svelte';
 	import { fingerprint, gate } from '#lib/cards.ts';
@@ -26,7 +26,9 @@ first, which posts as `irreversible=yes`. A withdrawn packet answers 410 with th
 	import { nextItem } from '#lib/queue.ts';
 	import { changedCount, seedRows, type Row } from '#lib/triage.ts';
 	import { VERDICT_LOOK } from '#lib/packet-view.ts';
+	import { DocReview, type SaveResult } from '#lib/editor/review.svelte.ts';
 	import type { PageData } from '../../routes/item/[id=id]/$types';
+	import BlueprintView from './BlueprintView.svelte';
 	import BriefBlock from './BriefBlock.svelte';
 	import DecideCards from './DecideCards.svelte';
 	import DesignView from './DesignView.svelte';
@@ -42,6 +44,7 @@ first, which posts as `irreversible=yes`. A withdrawn packet answers 410 with th
 	import PacketRoutine from './PacketRoutine.svelte';
 	import PrView from './PrView.svelte';
 	import Prose from './Prose.svelte';
+	import ReviewPane from './ReviewPane.svelte';
 	import TriageView from './TriageView.svelte';
 
 	let { data }: { data: PageData } = $props();
@@ -177,8 +180,53 @@ first, which posts as `irreversible=yes`. A withdrawn packet answers 410 with th
 	});
 	const packet = $derived(data.kind === 'packet' ? data : null);
 
+	/** Posts a blueprint's text to the save action, which commits it in the worktree. */
+	async function saveBlueprint(text: string, base: string): Promise<SaveResult> {
+		const body = new FormData();
+		body.set('text', text);
+		body.set('base', base);
+		const res = await fetch('?/save', { method: 'POST', body, headers: { 'x-sveltekit-action': 'true' } });
+		const result = deserialize(await res.text());
+		if (result.type === 'success') return { ok: true, blob: String(result.data?.blob ?? '') };
+		if (result.type === 'failure') return { ok: false, message: String(result.data?.message ?? 'refused') };
+		return { ok: false, message: result.type === 'error' ? result.error.message : 'unexpected answer' };
+	}
+
+	// The page keys this component on the item id, so the review is built once per item.
+	// svelte-ignore state_referenced_locally
+	const review =
+		data.kind === 'blueprint'
+			? new DocReview({ doc: data.doc, original: data.original, blob: data.blob, notes: data.notes, save: saveBlueprint })
+			: null;
+	const blueprint = $derived(data.kind === 'blueprint' ? data : null);
+	const WORDS = ['no', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten'];
+	const word = (n: number) => WORDS[n] ?? String(n);
+	const capital = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+	const plural = (n: number, one: string, many = `${one}s`) => `${word(n)} ${n === 1 ? one : many}`;
+	/** The blueprint's lede: what kind of page it plans, then what the fact check and the author did. */
+	const blueprintLede = $derived.by(() => {
+		if (!blueprint || !review) return '';
+		const kind = blueprint.pageType ? `A ${blueprint.pageType} page` : 'A page';
+		const first = `${kind}${blueprint.track ? ` on the ${blueprint.track} track` : ''}.`;
+		const fixed = review.notes.filter((n) => n.kind === 'info').length;
+		const disputed = review.notes.filter((n) => n.kind === 'decide').length;
+		const asked = review.notes.filter((n) => n.kind === 'question').length;
+		const did = [
+			fixed ? `fixed ${plural(fixed, 'finding')} from the fact check` : '',
+			disputed ? `disputed ${word(disputed)}` : '',
+			asked ? `has ${asked === 1 ? 'a question' : `${word(asked)} questions`} for you` : ''
+		].filter(Boolean);
+		if (!did.length) return first;
+		const list = did.length === 1 ? did[0] : `${did.slice(0, -1).join(', ')}, and ${did.at(-1)}`;
+		return `${first} The author ${list}.`;
+	});
+
 	/** Moves focus to the next open call after the one holding focus, wrapping to the first. */
 	function nextCall() {
+		if (review) {
+			review.nextCall();
+			return;
+		}
 		const open = calls.filter((c) => c.open);
 		if (!open.length) return;
 		const at = open.findIndex((c) => document.getElementById(c.id)?.contains(document.activeElement));
@@ -206,7 +254,12 @@ first, which posts as `irreversible=yes`. A withdrawn packet answers 410 with th
 		if (!data.decided) {
 			desk.handlers = {
 				...desk.handlers,
-				approve: data.kind === 'packet' ? approvePacket : () => approveButton && !approveButton.disabled && form?.requestSubmit(approveButton),
+				approve:
+					data.kind === 'packet'
+						? approvePacket
+						: review
+							? approveBlueprint
+							: () => approveButton && !approveButton.disabled && form?.requestSubmit(approveButton),
 				'next-call': nextCall,
 				'open-note': openNote,
 				'close-note': closeNote,
@@ -227,7 +280,7 @@ first, which posts as `irreversible=yes`. A withdrawn packet answers 410 with th
 
 	// Its own effect: a pick must not re-run the handler registration, whose teardown clears every handler.
 	$effect(() => {
-		desk.approveLocked = data.kind === 'packet' ? openAsks.length > 0 : decided.locked;
+		desk.approveLocked = data.kind === 'packet' ? openAsks.length > 0 : review ? review.openCalls.length > 0 : decided.locked;
 		return () => (desk.approveLocked = false);
 	});
 
@@ -266,6 +319,21 @@ first, which posts as `irreversible=yes`. A withdrawn packet answers 410 with th
 		else form?.requestSubmit(approveButton);
 	}
 
+	/** Approve on a blueprint: a locked press moves to the next open call; otherwise the last edit saves first. */
+	async function approveBlueprint() {
+		if (!review || desk.held) return;
+		if (review.openCalls.length) {
+			review.nextCall();
+			return;
+		}
+		await review.flush();
+		if (review.saveFailed) {
+			desk.announce(`Not approved: ${review.saveStatus}`);
+			return;
+		}
+		form?.requestSubmit(approveButton);
+	}
+
 	async function openNote() {
 		desk.noteOpen = true;
 		await tick();
@@ -283,6 +351,7 @@ first, which posts as `irreversible=yes`. A withdrawn packet answers 410 with th
 		const name = data.meta.repo.split('/').pop();
 		if (data.kind === 'design') return `the design ${data.meta.title}`;
 		if (data.kind === 'packet') return 'the packet';
+		if (data.kind === 'blueprint') return `the plan for ${data.page}`;
 		return data.meta.number === undefined ? name : `${name} #${data.meta.number}`;
 	}
 
@@ -309,6 +378,8 @@ first, which posts as `irreversible=yes`. A withdrawn packet answers 410 with th
 	}
 
 	const decide: SubmitFunction = async ({ cancel, action, submitter }) => {
+		// A send-back carries the edits too, so the last one is committed before the hold starts.
+		if (review) await review.flush();
 		const text = decisionText(action);
 		const upNext = nextItem(data.queue, data.meta.id);
 		const packet = data.kind === 'packet';
@@ -398,7 +469,7 @@ first, which posts as `irreversible=yes`. A withdrawn packet answers 410 with th
 
 <Frame
 	where={data.meta.headline ?? data.meta.title}
-	paneLabel={data.kind === 'packet' ? 'Outline and parts' : 'Calls for you'}
+	paneLabel={data.kind === 'packet' ? 'Outline and parts' : data.kind === 'blueprint' ? 'Outline and calls' : 'Calls for you'}
 >
 	{#snippet header()}
 		{#if packet}
@@ -413,6 +484,18 @@ first, which posts as `irreversible=yes`. A withdrawn packet answers 410 with th
 				{#snippet headline()}<Prose text={packet.headline} />{/snippet}
 				{#snippet lede()}<Prose text={packet.lede} />{/snippet}
 			</FrameHeader>
+		{:else if blueprint && review}
+			<FrameHeader>
+				{#snippet crumb()}
+					<a href="/">Board</a><span aria-hidden="true">/</span><span>Blueprint</span><span aria-hidden="true">/</span><span>{blueprint.meta.repo}</span>
+				{/snippet}
+				{#snippet headline()}
+					The plan for {blueprint.page} is ready to read, with {review.openCalls.length
+						? `${plural(review.openCalls.length, 'call')} for you`
+						: 'nothing left for you'} along the way.
+				{/snippet}
+				{#snippet lede()}{blueprintLede}{/snippet}
+			</FrameHeader>
 		{/if}
 	{/snippet}
 
@@ -422,6 +505,11 @@ first, which posts as `irreversible=yes`. A withdrawn packet answers 410 with th
 			<PacketAsks asks={packet.asks} bind:answers decided={packet.decided} />
 			<PacketRoutine routine={packet.routine} parts={packet.parts} bind:verdicts decided={packet.decided} />
 		</div>
+	{:else if blueprint && review}
+		{#if blueprint.missing}
+			<p class="bg bg-first bg-flat">The worktree no longer holds {blueprint.file} at a commit, so this is the copy that was queued and takes no edits.</p>
+		{/if}
+		<BlueprintView {review} file={blueprint.file} readonly={blueprint.decided || blueprint.missing || desk.held} />
 	{:else if data.kind === 'pr'}
 		<PrView {data} bind:picks subject={subject() ?? ''} />
 	{:else if data.kind === 'design'}
@@ -454,6 +542,8 @@ first, which posts as `irreversible=yes`. A withdrawn packet answers 410 with th
 			{#if partItems.length}<PaneSection title="Parts"><PaneList items={partItems} /></PaneSection>{/if}
 			{#if yourSteps.length}<PaneSection title="Steps you run"><PaneList items={yourSteps} /></PaneSection>{/if}
 			<PaneSection title="Contents" contents><PaneList numbered items={outline} /></PaneSection>
+		{:else if review}
+			<ReviewPane {review} correctionsTitle="Corrected by the fact check" />
 		{:else if data.kind === 'triage'}
 			<PaneSection title="Calls">
 				<PaneList
@@ -496,6 +586,13 @@ first, which posts as `irreversible=yes`. A withdrawn packet answers 410 with th
 			>
 				{#if packet}
 					<input type="hidden" name="fingerprint" value={packet.fingerprint} />
+				{:else if review}
+					<input type="hidden" name="blob" value={review.blob} />
+					{#each review.calls as call (call.id)}
+						{#if review.decided[call.id] !== undefined}
+							<input type="hidden" name="call:{call.id}" value={call.choices?.[review.decided[call.id]]?.label ?? ''} />
+						{/if}
+					{/each}
 				{:else if data.kind === 'triage'}
 					{#each rows as row, i (i)}
 						<input type="hidden" name="disposition" value={row.disposition} />
@@ -508,9 +605,13 @@ first, which posts as `irreversible=yes`. A withdrawn packet answers 410 with th
 					{#snippet note()}
 						{#if desk.noteOpen}
 							<div class="sendback">
-								<label for="note" class="lead">What should the session change?</label>
+								<label for="note" class="lead">What should the {review ? 'author' : 'session'} change?</label>
 								<p class="muted">
-									{packet ? 'Your verdicts go with this note.' : 'The session reads it as the reason; leave it empty to send back without one.'}
+									{packet
+										? 'Your verdicts go with this note.'
+										: review
+											? 'Your edits are already committed, and the author reads them with this note.'
+											: 'The session reads it as the reason; leave it empty to send back without one.'}
 								</p>
 								<textarea
 									id="note"
@@ -546,6 +647,20 @@ first, which posts as `irreversible=yes`. A withdrawn packet answers 410 with th
 							{:else if withdrawn}
 								<p class="s2"><a class="link" href={withdrawn}>Open the board</a></p>
 							{/if}
+						{:else if review}
+							<p class="s1">
+								{review.openCalls.length ? `Make ${plural(review.openCalls.length, 'call')} to approve` : 'Ready to approve'}
+							</p>
+							<p class="s2">
+								{capital(
+									[
+										Object.keys(review.decided).length ? `${word(Object.keys(review.decided).length)} decided` : '',
+										review.changedLines ? `${review.changedLines} ${review.changedLines === 1 ? 'line' : 'lines'} changed` : 'no edits yet'
+									]
+										.filter(Boolean)
+										.join(', ')
+								)}
+							</p>
 						{:else if data.kind === 'triage'}
 							<p class="s1">{rows.length} calls, {changed === 0 ? 'none' : changed} changed</p>
 							<p class="s2">Submit sends your calls back to the session.</p>
@@ -592,6 +707,22 @@ first, which posts as `irreversible=yes`. A withdrawn packet answers 410 with th
 								}}
 							>
 								Approve the packet <kbd>Ctrl</kbd><kbd>Enter</kbd>
+							</button>
+						{:else if review}
+							<button
+								type="submit"
+								class="btn btn-primary bar-approve"
+								formaction="?/approve"
+								bind:this={approveButton}
+								aria-describedby="bar-state"
+								aria-disabled={review.openCalls.length > 0}
+								disabled={desk.held}
+								onclick={(e) => {
+									e.preventDefault();
+									approveBlueprint();
+								}}
+							>
+								Approve the plan <kbd>Ctrl</kbd><kbd>Enter</kbd>
 							</button>
 						{:else if data.kind === 'triage'}
 							<button class="btn btn-primary" bind:this={submitButton} disabled={desk.held}>

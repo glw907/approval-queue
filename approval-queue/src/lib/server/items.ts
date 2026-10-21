@@ -2,7 +2,9 @@ import { createHash, randomUUID } from 'node:crypto';
 import { link, open, readFile, readdir, rename, stat, unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Proposed, Triage } from '#lib/brief.ts';
+import type { Note } from '#lib/editor/notes.ts';
 import type { Packet } from '#lib/packet.ts';
+import { committed } from './blueprint.ts';
 
 export type Disposition = Proposed;
 
@@ -15,7 +17,7 @@ export interface SubmittedRow {
 
 export interface ItemMeta {
 	id: string;
-	kind: 'pr' | 'design' | 'triage' | 'packet';
+	kind: 'pr' | 'design' | 'triage' | 'packet' | 'blueprint';
 	repo: string;
 	title: string;
 	/** The brief's headline, written by the command; absent on an item it wrote before briefs. */
@@ -26,8 +28,12 @@ export interface ItemMeta {
 	head?: string;
 	/** A PR's number; absent on an item the old command wrote. */
 	number?: number;
-	/** A design's source file name; absent on an item the old command wrote. */
+	/** A design's source file name, or a blueprint's path relative to its worktree. */
 	file?: string;
+	/** A blueprint's worktree, an absolute path; the app reads, saves, and commits the file there. */
+	worktree?: string;
+	/** A blueprint's blob at HEAD when it was queued. */
+	blob?: string;
 	/** A packet's initiative id, or `none`; the sidebar and the board group by it. */
 	initiative?: string;
 	/** The initiative record's title; empty for `none`. */
@@ -66,6 +72,20 @@ export type ItemContent =
 	| { kind: 'pr'; body: string; diff: string; pr?: PrMeta }
 	| { kind: 'design'; doc: string }
 	| { kind: 'packet'; packet: Packet; parts: PacketPart[] }
+	| {
+			kind: 'blueprint';
+			/** The file as committed at the worktree's HEAD now, with its blob and that commit. */
+			doc: string;
+			blob: string;
+			commit: string;
+			/** The file as it was queued, which the review marks changed lines against. */
+			original: string;
+			notes: Note[];
+			worktree: string;
+			file: string;
+			/** The worktree or the file is gone, so the review shows the queued copy and takes no edits. */
+			missing: boolean;
+	  }
 	| ({ kind: 'triage' } & Triage);
 
 export type Decision =
@@ -75,6 +95,13 @@ export type Decision =
 			/** A packet's per-part verdicts and per-ask answers; the command joins the heads and hashes. */
 			parts?: Array<{ ref: string; verdict: string }>;
 			asks?: Array<{ index: number; choice: string }>;
+			/** A blueprint's answered calls by note id, with the choice label. */
+			calls?: Array<{ id: string; choice: string }>;
+			/** A blueprint's disputed notes answered by keeping the author's text, with the reason. */
+			waived?: Array<{ id: string; choice: string; reason: string }>;
+			/** A blueprint's worktree HEAD at approval, and the file's blob there. */
+			commit?: string;
+			blob?: string;
 	  }
 	| { decision: 'reject'; note: string }
 	| { decision: 'submit'; rows: SubmittedRow[] };
@@ -161,6 +188,8 @@ export async function readItem(root: string, id: string): Promise<Item | undefin
 		content = { kind: 'design', doc: await readFile(join(dir, 'doc.md'), 'utf8') };
 	} else if (meta.kind === 'packet') {
 		content = await readPacket(dir);
+	} else if (meta.kind === 'blueprint') {
+		content = await readBlueprint(dir, meta);
 	} else if (meta.kind === 'triage') {
 		const triage = await readJson<Triage>(join(dir, 'triage.json'));
 		// The command validates the file before writing it; a missing or old-shape file renders as empty.
@@ -198,6 +227,22 @@ async function readPacket(dir: string): Promise<ItemContent> {
 		} else parts.push(base);
 	}
 	return { kind: 'packet', packet, parts };
+}
+
+/** Reads a blueprint item: the stored notes and queued copy, and the file as its worktree now commits it. */
+async function readBlueprint(dir: string, meta: ItemMeta): Promise<ItemContent> {
+	// The editor works in LF, so the anchors are resolved and the lines compared in LF too.
+	const lf = (text: string) => text.replace(/\r\n/g, '\n');
+	const original = lf(await readFile(join(dir, 'doc.md'), 'utf8'));
+	const notes = (await readJson<Note[]>(join(dir, 'notes.json'))) ?? [];
+	const worktree = meta.worktree ?? '';
+	const file = meta.file ?? '';
+	try {
+		const now = await committed(worktree, file);
+		return { kind: 'blueprint', doc: lf(now.text), blob: now.blob, commit: now.commit, original, notes, worktree, file, missing: false };
+	} catch {
+		return { kind: 'blueprint', doc: original, blob: meta.blob ?? '', commit: '', original, notes, worktree, file, missing: true };
+	}
 }
 
 /** Writes `decision.json` through a temp file in the item directory, so the waiting command never reads a partial file. */

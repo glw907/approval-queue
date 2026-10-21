@@ -5,7 +5,7 @@ Design & PR Approvals: a local SvelteKit app and a command that put a packet (on
 ## Layout
 
 - `approval-queue/` is the SvelteKit app (Svelte 5, DaisyUI, adapter-node).
-- `bin/.local/bin/approval-queue` is the command: `approval-queue <pr|design|triage> <repo> <title> <source>` or `approval-queue packet [--check] <initiative> <file>`. It checks the item's brief or the packet file, queues it under `~/.local/state/approval-queue/items/`, starts the app if it isn't up, opens a tab, and waits for `decision.json`.
+- `bin/.local/bin/approval-queue` is the command: `approval-queue <pr|design|triage> <repo> <title> <source>`, `approval-queue packet [--check] <initiative> <file>`, or `approval-queue blueprint <worktree> <title> <file> [--notes <notes.json>]`. It checks the item's brief, the packet file, or the blueprint, queues it under `~/.local/state/approval-queue/items/`, starts the app if it isn't up, opens a tab, and waits for `decision.json`.
 - `bin/.local/bin/claude-approval-queue-reminder` is the PostToolUse hook script that reminds a session to include a new PR in its hand-over packet.
 - `docs/decision-review/` holds the monthly decision review's prompt and its log.
 - `tests/` holds the shell tests, and `tests/fixtures/e2e-brief.md` is the brief the end-to-end check hands over.
@@ -46,6 +46,34 @@ The home page is the board of waiting packets, grouped by initiative, with the s
 An approve prints one line of JSON that lists every part once, with each PR's `head` or each design's `sha256` joined from the stored copy, and each ask's chosen label. A reject prints `{"decision": "reject", "note": "<text>"}` and merges nothing. A session merges each approved PR with `gh pr merge <n> --repo <repo> --merge --match-head-commit <head>`, stops at the first failure, and reports back.
 
 Every decision also appends one line per part, plus one per ask with no part, to `decisions.jsonl` in the state directory (`~/.local/state/approval-queue/` by default). The `pr` and `design` kinds log one line each with `"lane": "single"`. The log never authorizes or blocks a merge. The monthly decision review reads it, per `docs/decision-review/prompt.txt`.
+
+## The blueprint kind
+
+A blueprint is a page plan Geoff reads and edits in place. The screen opens the file in an editor with each note from the author or the fact check under the line it is about, and every pause in typing (or Ctrl+S) writes the file and commits it with `Edit <file> in review`.
+
+```sh
+approval-queue blueprint <worktree> <title> <file> [--notes <notes.json>]
+```
+
+`<worktree>` is the top of a git worktree, and `<file>` is relative to it. The command refuses a file that is not committed, a file with uncommitted changes, and a notes file that is not a JSON array of notes in the shape `{id, kind, anchor, title, body}`: `kind` is `info`, `decide`, or `question`, `body` is an array of paragraphs, and a note may add `was` and `now`, `sides` (`[{who, text}]`), and `choices` (`[{label, text?, done, edit?}]`). A `decide` or `question` note must carry choices. Each refusal names the problem and exits 2 before anything is queued.
+
+A note's `anchor` names a place in the file: `<slug>.heading` for a heading, `<slug>.p<n>` for the nth bullet, numbered step, or `:::row` block under that heading, and `<slug>.p<n>.symptom`, `.cause`, or `.fix` for one part of a row. The slug is the heading with backticks dropped, lowercased, each run of characters outside a-z and 0-9 turned into one hyphen, and hyphens trimmed from the ends. A note whose anchor names no place shows at the top of the file.
+
+Approve stays locked until every `decide` and `question` note has a choice. An approve prints:
+
+```json
+{"decision":"approve","file":"<file>","commit":"<HEAD at approval>","blob":"<git rev-parse commit:file>","calls":[{"id":"B3","choice":"<label>"}]}
+```
+
+A send-back prints `{"decision":"reject","note":"<text>"}`; the screen's button reads "Send back with note". Either way the decision log gains one line with `"kind": "blueprint"`, `"ref": "<repo>:<file>"`, the blob and commit, and `waived`: each `decide` note answered with a choice that leaves the line as it was, with that choice's `done` text as the reason.
+
+### approved
+
+```sh
+approval-queue approved <file> <blob>
+```
+
+Exits 0 when the decision log under `$XDG_STATE_HOME/approval-queue/` holds an approve of `<file>` (matched on the part of the ref after the repo) at `<blob>`, and 1 otherwise. A tool that builds from a blueprint runs it against `git rev-parse HEAD:<file>`, so it builds only from the version Geoff approved.
 
 ## Gate
 
