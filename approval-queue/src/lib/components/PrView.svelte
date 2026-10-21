@@ -1,7 +1,7 @@
 <!-- @component
-A PR in the order its reader needs it: the headline block (headline, lede, what changes, what approving
+A PR in the order its reader needs it: the headline block (Survey header, what changes, what approving
 does, and one footnote), the "Decide first" cards, the brief's detail rows, then the evidence rows.
-Color marks only the two must-act alert tints and the diff signs.
+Color marks only the must-act note rules and the diff signs.
 
 `picks` passes through to `DecideCards` and is bound up to the panel so its bar can unlock Approve.
 A PR whose body has no brief shows its title and the rows it still has.
@@ -93,29 +93,30 @@ A PR whose body has no brief shows its title and the rows it still has.
 	}
 </script>
 
-<p class="mb-2 text-xs tracking-wide text-(--color-muted)">
-	{subject}
-	{#if data.link}
-		· {data.link.head} → {data.link.base} ·
-		<a class="link" href={data.link.url} target="_blank" rel="noopener noreferrer">GitHub</a>
-	{/if}
-</p>
-
 <BriefBlock
 	headlineHtml={data.headlineHtml}
 	ledeHtml={data.ledeHtml}
 	whatChanges={data.whatChanges}
 	ifYouApprove={data.ifYouApprove}
 	worthKnowing={data.worthKnowing}
-/>
+>
+	{#snippet trail()}
+		<a href="/">Board</a><span aria-hidden="true">/</span><span>Pull request</span><span aria-hidden="true">/</span><span>{subject}</span>
+		{#if data.link}
+			<span aria-hidden="true">/</span><span>{data.link.head} → {data.link.base}</span>
+			<a href={data.link.url} target="_blank" rel="noopener noreferrer">GitHub</a>
+		{/if}
+	{/snippet}
+</BriefBlock>
 
 <DecideCards cards={data.cards} bind:picks decided={data.decided} />
 
 <DetailRows details={data.details} />
 
-<section class="mt-8" aria-labelledby="evidence-h">
-	<h2 id="evidence-h" class="mb-1 text-[0.7rem] font-semibold tracking-[0.08em] text-(--color-muted) uppercase">Evidence</h2>
-	<Disclosure name="Checks" summaryHtml={checksSummaryText} quiet wide>
+<section class="sec" id="evidence" aria-labelledby="evidence-h">
+	<h2 id="evidence-h">Evidence</h2>
+	<p class="sl">Closed by default; each row says where it stands.</p>
+	<Disclosure name="Checks" summaryHtml={checksSummaryText} wide>
 		{#if data.checks.rows.length}
 			<ul class="grid gap-x-6 text-[0.84rem] sm:grid-cols-2">
 				{#each data.checks.rows as row, i (i)}
@@ -127,15 +128,15 @@ A PR whose body has no brief shows its title and the rows it still has.
 			</ul>
 		{/if}
 	</Disclosure>
-	<Disclosure name="Review" summaryHtml={reviewSummary} quiet>
+	<Disclosure name="Review" summaryHtml={reviewSummary}>
 		{#if data.reviewHtml}<div class="desk-md">{@html data.reviewHtml}</div>{/if}
 	</Disclosure>
 	{#if data.technicalHtml}
-		<Disclosure name="Technical notes" summaryHtml="What landed and the gate." quiet>
+		<Disclosure name="Technical notes" summaryHtml="What landed and the gate.">
 			<div class="desk-md">{@html data.technicalHtml}</div>
 		</Disclosure>
 	{/if}
-	<Disclosure name="Files" summaryHtml={filesSummary} quiet wide bind:open={filesOpen}>
+	<Disclosure name="Files" summaryHtml={filesSummary} wide bind:open={filesOpen}>
 		<div class="flex flex-wrap items-center gap-x-4 gap-y-2">
 			<span class="text-sm text-(--color-muted)" role="status">{summary}</span>
 			<label class="input input-sm ml-auto w-full sm:w-72">

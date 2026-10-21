@@ -1,5 +1,5 @@
 <!-- @component
-The brief's detail sections as chevron rows under a "Details" eyebrow: each row shows the section's
+The brief's detail sections as a "Details" section of disclosure rows: each row shows the section's
 name and first sentence, and opens to the rest. A section that opens with a table shows its
 name alone. Renders nothing when the brief has none.
 -->
@@ -12,8 +12,9 @@ name alone. Renders nothing when the brief has none.
 </script>
 
 {#if details.length}
-	<section class="mt-10" aria-labelledby="details-h">
-		<h2 id="details-h" class="mb-1 text-[0.7rem] font-semibold tracking-[0.08em] text-(--color-muted) uppercase">Details</h2>
+	<section class="sec" id="details" aria-labelledby="details-h">
+		<h2 id="details-h">Details</h2>
+		<p class="sl">{details.length} {details.length === 1 ? 'section' : 'sections'}, each opens to the rest.</p>
 		{#each details as detail, i (i)}
 			<Disclosure name={detail.label} summaryHtml={detail.summaryHtml}>
 				<div class="desk-code">{@html detail.bodyHtml}</div>

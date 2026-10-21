@@ -1,12 +1,15 @@
 <!-- @component
-A design document at a reading measure. The document's own `h1` is hidden because the item
-header already carries the title.
+A design document at a reading measure, as the last section of the screen. The document's own `h1`
+is hidden because the Survey header already carries the title.
 -->
 <script lang="ts">
 	let { docHtml }: { docHtml: string } = $props();
 </script>
 
-<article class="desk-read">{@html docHtml}</article>
+<section class="sec" id="design" aria-labelledby="design-h">
+	<h2 id="design-h">The design</h2>
+	<article class="desk-read">{@html docHtml}</article>
+</section>
 
 <style>
 	.desk-read {
@@ -14,6 +17,8 @@ header already carries the title.
 		font-size: 1.06rem;
 		line-height: 1.72;
 		max-width: 68ch;
+		margin-top: 10px;
+		overflow-wrap: anywhere;
 	}
 	.desk-read :global(h1) {
 		display: none;
