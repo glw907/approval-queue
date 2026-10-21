@@ -18,7 +18,7 @@ class Desk {
 	paneOpen = $state(false);
 	/** Approve is disabled, so the `a` key must not post it either. */
 	approveLocked = $state(false);
-	page = $state<'pr' | 'design' | 'triage' | 'packet'>('design');
+	page = $state<'pr' | 'design' | 'triage' | 'packet' | 'blueprint'>('design');
 	/** The toast's text; null hides it. */
 	toast = $state<string | null>(null);
 	/** The toast reports a post that failed. */

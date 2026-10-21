@@ -1,12 +1,41 @@
 #!/usr/bin/env bash
-# approval-queue: put one item (a PR, a design, a triage list) in front of Geoff in the Design & PR Approvals app
-# and print his decision as JSON on stdout. Build, server, and browser output go to server.log.
+# approval-queue: put one item (a PR, a design, a triage list, a packet, a blueprint) in front of Geoff in the
+# Design & PR Approvals app and print his decision as JSON on stdout. Build, server, and browser output go to
+# server.log. `approval-queue approved <file> <blob>` answers whether the log holds an approve of that blob.
 set -euo pipefail
 
 usage="usage: approval-queue <pr|design|triage> <repo> <title> <source>
-       approval-queue packet [--check] <initiative> <file>"
-check="" initiative="" repo="" title="" source=""
-if [ "${1:-}" = packet ]; then
+       approval-queue packet [--check] <initiative> <file>
+       approval-queue blueprint <worktree> <title> <file> [--notes <notes.json>]
+       approval-queue approved <file> <blob>"
+root="${XDG_STATE_HOME:-$HOME/.local/state}/approval-queue"
+
+# approved <file> <blob>: exit 0 when decisions.jsonl holds an approve whose ref names <file> after the repo
+# and whose blob is <blob>, else 1. A line that does not parse is skipped.
+if [ "${1:-}" = approved ]; then
+  if [ $# -ne 3 ]; then echo "$usage" >&2; exit 2; fi
+  [ -e "$root/decisions.jsonl" ] || exit 1
+  jq -R -n -e --arg f "${2#./}" --arg b "$3" '
+    any(inputs | fromjson? | objects;
+      .verdict == "approve" and .blob == $b
+      and ((.ref // "") | tostring | sub("^[^:]*:"; "") | ltrimstr("./")) == $f)' "$root/decisions.jsonl" >/dev/null \
+    && exit 0
+  exit 1
+fi
+
+check="" initiative="" repo="" title="" source="" worktree="" notes=""
+if [ "${1:-}" = blueprint ]; then
+  shift
+  args=()
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --notes) [ $# -ge 2 ] || { echo "$usage" >&2; exit 2; }; notes=$2; shift 2 ;;
+      *) args+=("$1"); shift ;;
+    esac
+  done
+  if [ "${#args[@]}" -ne 3 ]; then echo "$usage" >&2; exit 2; fi
+  kind=blueprint worktree=${args[0]} title=${args[1]} source=${args[2]#./}
+elif [ "${1:-}" = packet ]; then
   shift
   if [ "${1:-}" = --check ]; then check=1; shift; fi
   if [ $# -ne 2 ]; then echo "$usage" >&2; exit 2; fi
@@ -17,7 +46,6 @@ else
   case "$kind" in pr | design | triage) ;; *) echo "$usage" >&2; exit 2 ;; esac
 fi
 
-root="${XDG_STATE_HOME:-$HOME/.local/state}/approval-queue"
 log="$root/server.log"
 id="$(date +%Y%m%dT%H%M%S)-$$"
 item="$root/items/$id"
@@ -184,6 +212,76 @@ queue_packet() {
   exec 8>&-
 }
 
+# The shape blueprint-notes.json sets: each note's fields and types, the kinds, and unique ids. Prints one
+# defect per line, so a refusal names every problem at once.
+notes_program=$(cat <<'JQ'
+def str: type == "string";
+def opt($k; f): (has($k) | not) or (.[$k] | f);
+def name($i): "note \($i + 1)" + (if (.id? | type) == "string" then " (\(.id))" else "" end);
+if type != "array" then "the file must hold a JSON array of notes"
+else
+  (to_entries[] | .key as $i | .value
+   | if type != "object" then "note \($i + 1) is not an object"
+     else name($i) as $n
+     | ((keys - ["id", "kind", "anchor", "title", "body", "was", "now", "sides", "choices"])[] | "\($n) has an unknown field \(.)"),
+       (if (.id | str) and .id != "" then empty else "\($n) needs an id string" end),
+       (if .kind | IN("info", "decide", "question") then empty else "\($n) has kind \(.kind | tojson); kind is info, decide, or question" end),
+       (if (.anchor | str) and .anchor != "" then empty else "\($n) needs an anchor string" end),
+       (if .title | str then empty else "\($n) needs a title string" end),
+       (if (.body | type) == "array" and all(.body[]; str) then empty else "\($n) needs a body that is an array of strings" end),
+       (if opt("was"; str) and opt("now"; str) then empty else "\($n) has a was or now that is not a string" end),
+       (if has("was") == has("now") then empty else "\($n) has one of was and now without the other" end),
+       (if opt("sides"; type == "array" and all(.[]; type == "object" and (.who | str) and (.text | str))) then empty
+        else "\($n) needs sides as an array of {who, text} strings" end),
+       (if opt("choices"; type == "array" and all(.[]; type == "object" and (.label | str) and (.done | str)
+            and opt("text"; str) and opt("edit"; type == "boolean")
+            and ((keys - ["label", "text", "done", "edit"]) | length == 0))) then empty
+        else "\($n) needs choices as an array of {label, text?, done, edit?}" end),
+       (if .kind == "info" or ((.choices | type) == "array" and (.choices | length) > 0) then empty
+        else "\($n) is a \(.kind) note with no choices, so it could never be answered" end)
+     end),
+  ([.[] | objects | .id | strings] | group_by(.)[] | select(length > 1) | "the id \(.[0] | tojson) is used \(length) times")
+end
+JQ
+)
+
+# check_blueprint: refuses (exit 2) a worktree that is not a git worktree's top, a file that is not committed
+# there or has uncommitted changes, and a notes file that does not match the notes shape. Sets worktree to
+# its absolute path, repo to the repository's name, and blob to the file's blob at HEAD.
+blob=""
+check_blueprint() {
+  local top common defects
+  if ! top=$(git -C "$worktree" rev-parse --show-toplevel 2>/dev/null); then
+    echo "approval-queue: $worktree is not a git worktree" >&2; exit 2
+  fi
+  if [ "$(cd "$worktree" && pwd -P)" != "$(cd "$top" && pwd -P)" ]; then
+    echo "approval-queue: $worktree is inside a worktree; give the worktree's top, $top" >&2; exit 2
+  fi
+  worktree=$(cd "$top" && pwd -P)
+  case "$source" in
+    /* | ../* | */../* | "") echo "approval-queue: give the file as a path inside the worktree, not $source" >&2; exit 2 ;;
+  esac
+  if ! blob=$(git -C "$worktree" rev-parse --verify --quiet "HEAD:$source"); then
+    echo "approval-queue: $source is not committed in $worktree; commit it first" >&2; exit 2
+  fi
+  if ! git -C "$worktree" diff --quiet HEAD -- "$source"; then
+    echo "approval-queue: $source has uncommitted changes in $worktree; commit them first" >&2; exit 2
+  fi
+  if [ -n "$notes" ]; then
+    if [ ! -f "$notes" ]; then echo "approval-queue: no notes file at $notes" >&2; exit 2; fi
+    if ! defects=$(jq -r "$notes_program" "$notes" 2>/dev/null); then
+      echo "approval-queue: $notes is not JSON" >&2; exit 2
+    fi
+    if [ -n "$defects" ]; then
+      printf 'approval-queue: %s does not match the notes shape (see blueprint-notes.json):\n' "$notes" >&2
+      printf '  %s\n' "$defects" >&2
+      exit 2
+    fi
+  fi
+  common=$(git -C "$worktree" rev-parse --path-format=absolute --git-common-dir)
+  repo=$(basename "$(dirname "$common")")
+}
+
 head="" number="" file=""
 case "$kind" in
   pr)
@@ -208,9 +306,21 @@ case "$kind" in
   design) check_brief "$source"; mkdir -p "$item"; cp "$source" "$item/doc.md"; file=$(basename "$source") ;;
   triage) check_brief "$source"; mkdir -p "$item"; cp "$source" "$item/triage.json" ;;
   packet) queue_packet ;;
+  blueprint)
+    check_blueprint
+    mkdir -p "$item"
+    git -C "$worktree" cat-file blob "$blob" >"$item/doc.md"
+    if [ -n "$notes" ]; then jq -c . "$notes" >"$item/notes.json"; else echo '[]' >"$item/notes.json"; fi
+    jq -n --arg id "$id" --arg repo "$repo" --arg title "$title" --arg created "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+      --arg worktree "$worktree" --arg file "$source" --arg blob "$blob" \
+      '{id: $id, kind: "blueprint", repo: $repo, title: $title, headline: $title, created: $created,
+        worktree: $worktree, file: $file, blob: $blob}' \
+      >"$item/item.json.tmp"
+    mv "$item/item.json.tmp" "$item/item.json"
+    ;;
 esac
 
-if [ "$kind" != packet ]; then
+if [ "$kind" != packet ] && [ "$kind" != blueprint ]; then
   jq -n --arg id "$id" --arg kind "$kind" --arg repo "$repo" --arg title "$title" \
     --arg created "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg head "$head" \
     --arg number "$number" --arg file "$file" --arg headline "$headline" \
@@ -371,6 +481,34 @@ single_log() {
     '{time: $t, packet: $id, initiative: null, ref: $ref, kind: $kind, lane: "single", verdict: $v, ($k): $val}' | append_log
 }
 
+# blueprint_decision: an approve names the commit the app recorded at HEAD when Geoff approved, and the blob
+# is read from the worktree at that commit; a send-back names the HEAD it left. Both log one line keyed to
+# the blob, with each disputed note Geoff waived and its reason.
+blueprint_decision() {
+  local d verdict commit bl
+  d="$item/decision.json"
+  verdict=$(jq -r '.decision // empty' "$d")
+  case "$verdict" in
+    approve) commit=$(jq -r '.commit // empty' "$d") ;;
+    reject) commit=$(git -C "$worktree" rev-parse HEAD 2>/dev/null) || commit="" ;;
+    *) echo "approval-queue: decision.json holds no approve or reject; nothing was logged" >&2; exit 1 ;;
+  esac
+  if [ -z "$commit" ] || ! bl=$(git -C "$worktree" rev-parse --verify --quiet "$commit:$source"); then
+    echo "approval-queue: $source has no blob at ${commit:-HEAD} in $worktree; nothing was logged" >&2
+    exit 1
+  fi
+  jq -c --arg t "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg id "$id" --arg ref "$repo:$source" --arg v "$verdict" \
+    --arg blob "$bl" --arg commit "$commit" \
+    '{time: $t, packet: $id, initiative: null, ref: $ref, kind: "blueprint", lane: "single", verdict: $v,
+      blob: $blob, commit: $commit, waived: (.waived // [])}' "$d" | append_log
+  if [ "$verdict" = approve ]; then
+    jq -c --arg file "$source" --arg commit "$commit" --arg blob "$bl" \
+      '{decision: "approve", file: $file, commit: $commit, blob: $blob, calls: (.calls // [])}' "$d"
+  else
+    jq -c '{decision: "reject", note: (.note // "")}' "$d"
+  fi
+}
+
 while [ ! -e "$item/decision.json" ]; do sleep 1; done
 case "$kind" in
   packet) packet_decision ;;
@@ -378,6 +516,7 @@ case "$kind" in
     single_log "$repo#$number" pr "$(jq -r '.decision // empty' "$item/decision.json")" head "$head"
     jq -c --arg h "$head" '. + {head: $h}' "$item/decision.json"
     ;;
+  blueprint) blueprint_decision ;;
   design)
     single_log "$repo:$file" design "$(jq -r '.decision // empty' "$item/decision.json")" sha256 "$(sha256sum "$item/doc.md" | cut -d' ' -f1)"
     jq -c . "$item/decision.json"

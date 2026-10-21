@@ -11,6 +11,7 @@ vi.mock('$app/env/private', () => ({
 	}
 }));
 
+import { git, SAMPLE_DOC, SAMPLE_FILE, seedBlueprintItem, seedRepo } from '#lib/fixtures/seed-blueprint.ts';
 import { seedPacket } from '#lib/fixtures/seed-packet.ts';
 import { actions, load } from './+page.server.ts';
 
@@ -558,5 +559,75 @@ describe('a packet', () => {
 
 	it('refuses submit, which is the triage action', async () => {
 		expect(await call('submit')).toMatchObject({ status: 400 });
+	});
+});
+
+describe('a blueprint', () => {
+	let repo: string;
+	let base: string;
+	beforeEach(async () => {
+		repo = await mkdtemp(join(tmpdir(), 'approval-queue-route-repo-'));
+		base = await seedRepo(repo);
+		await seedBlueprintItem(state.root, ID, repo, base);
+	});
+	afterEach(() => rm(repo, { recursive: true, force: true }));
+
+	const answered = (blob: string): [string, string][] => [
+		['call:D1', "Use the code's cause"],
+		['call:Q1', 'Fold it in'],
+		['blob', blob]
+	];
+
+	it('load returns the file at HEAD, its blob, the front matter, and each note on its anchor', async () => {
+		const data = (await load({ params: { id: ID } } as never)) as Record<string, any>;
+		expect(data).toMatchObject({
+			kind: 'blueprint',
+			doc: SAMPLE_DOC,
+			original: SAMPLE_DOC,
+			blob: base,
+			page: 'Fix a slow build',
+			pageType: 'troubleshooting',
+			missing: false
+		});
+		const d1 = data.notes.find((n: { id: string }) => n.id === 'D1');
+		expect(SAMPLE_DOC.slice(d1.range[0], d1.range[1])).toBe('Every image is resized on every build.');
+		expect(data.notes.find((n: { id: string }) => n.id === 'X1').range).toBeNull();
+	});
+
+	it('save commits the text in the worktree and answers the new blob; a stale base answers 409', async () => {
+		const text = SAMPLE_DOC.replace('a minute', 'two minutes');
+		const saved = (await call('save', [['text', text], ['base', base]])) as { blob: string; commit: string };
+		expect(saved.blob).toBe(git(repo, 'rev-parse', `HEAD:${SAMPLE_FILE}`));
+		expect(saved.commit).toBe(git(repo, 'rev-parse', 'HEAD'));
+		expect(await readFile(join(repo, SAMPLE_FILE), 'utf8')).toBe(text);
+		expect(await call('save', [['text', `${text}x`], ['base', base]])).toMatchObject({ status: 409 });
+	});
+
+	it('approve after a save records the calls and the commit and blob at HEAD, and a second post answers 409', async () => {
+		const saved = (await call('save', [['text', `${SAMPLE_DOC}more\n`], ['base', base]])) as { blob: string };
+		await call('approve', answered(saved.blob));
+		expect(await decision()).toEqual({
+			decision: 'approve',
+			calls: [
+				{ id: 'D1', choice: "Use the code's cause" },
+				{ id: 'Q1', choice: 'Fold it in' }
+			],
+			waived: [],
+			commit: git(repo, 'rev-parse', 'HEAD'),
+			blob: saved.blob
+		});
+		expect(await call('approve', answered(saved.blob))).toMatchObject({ status: 409 });
+	});
+
+	it('approve with an open call, or against a stale blob, answers 400 and writes nothing', async () => {
+		expect(await call('approve', [['call:Q1', 'Keep it'], ['blob', base]])).toMatchObject({ status: 400 });
+		await call('save', [['text', `${SAMPLE_DOC}more\n`], ['base', base]]);
+		expect(await call('approve', answered(base))).toMatchObject({ status: 400 });
+		await expect(decision()).rejects.toThrow();
+	});
+
+	it('reject writes the note', async () => {
+		await call('reject', [['note', 'Fold the event section in.']]);
+		expect(await decision()).toEqual({ decision: 'reject', note: 'Fold the event section in.' });
 	});
 });

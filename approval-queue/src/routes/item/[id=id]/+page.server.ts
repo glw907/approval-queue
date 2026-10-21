@@ -6,6 +6,8 @@ import { fileGroups } from '#lib/diff.ts';
 import { render, renderInline } from '#lib/markdown.ts';
 import { checksSummary, reviewSection, reviewVerdict, technicalNotes, withoutBrief } from '#lib/pr-summary.ts';
 import { nextItem } from '#lib/queue.ts';
+import { frontMatter, placeNotes } from '#lib/editor/notes.ts';
+import { buildBlueprintApprove, isClean, saveFile } from '#lib/server/blueprint.ts';
 import { buildApprove, isIrreversible, packetFingerprint } from '#lib/server/packet-decision.ts';
 import {
 	listWaiting,
@@ -126,6 +128,25 @@ export const load: PageServerLoad = async ({ params }) => {
 			minutes: Math.ceil(words / 230)
 		};
 	}
+	if (content.kind === 'blueprint') {
+		const front = frontMatter(content.original);
+		return {
+			meta,
+			decided,
+			kind: 'blueprint' as const,
+			doc: content.doc,
+			original: content.original,
+			blob: content.blob,
+			file: content.file,
+			missing: content.missing,
+			page: front.page || content.file.split('/').pop() || meta.title,
+			pageType: front.type ?? '',
+			track: front.track ?? '',
+			// Anchors resolve against the file as it is now, so a note follows a line an earlier save moved.
+			notes: placeNotes(content.doc, content.notes),
+			decision
+		};
+	}
 	if (content.kind === 'packet') {
 		const { packet, parts } = content;
 		return {
@@ -195,9 +216,19 @@ export const actions: Actions = {
 			const built = buildApprove(found.content, form);
 			return built.ok ? decideOnce(params.id, built.decision) : fail(400, { message: built.message });
 		}
+		if (found.content.kind === 'blueprint') {
+			const { content } = found;
+			if (found.decided) return fail(409, ALREADY_DECIDED);
+			if (content.missing) return fail(409, { message: `${content.file} is no longer committed in its worktree` });
+			const form = await request.formData().catch(() => null);
+			if (!form) return fail(400, { message: 'Not a form post' });
+			const clean = await isClean(content.worktree, content.file);
+			const built = buildBlueprintApprove(content.notes, form, { ...content, text: content.doc, clean });
+			return built.ok ? decideOnce(params.id, built.decision) : fail(400, { message: built.message });
+		}
 		const item = await readWaiting(params.id);
 		const { content } = item;
-		if (content.kind === 'triage' || content.kind === 'packet') return fail(400, { message: 'Nothing to approve' });
+		if (content.kind === 'triage' || content.kind === 'packet' || content.kind === 'blueprint') return fail(400, { message: 'Nothing to approve' });
 		// The page disables Approve, but a post can still arrive without it; the server rebuilds the
 		// cards from the body and checks every pick itself.
 		const form = await request.formData().catch(() => null);
@@ -220,10 +251,27 @@ export const actions: Actions = {
 			const note = form.get('note');
 			return decideOnce(params.id, { decision: 'reject', note: typeof note === 'string' ? note : '' });
 		}
+		if (found.content.kind === 'blueprint') {
+			if (found.decided) return fail(409, ALREADY_DECIDED);
+			const note = (await request.formData().catch(() => null))?.get('note');
+			return decideOnce(params.id, { decision: 'reject', note: typeof note === 'string' ? note : '' });
+		}
 		const item = await readWaiting(params.id);
 		if (item.content.kind === 'triage') return fail(400, { message: 'Nothing to reject' });
 		const note = (await request.formData()).get('note');
 		return decide(params.id, { decision: 'reject', note: typeof note === 'string' ? note : '' });
+	},
+	/** Writes a blueprint's text and commits it in its worktree, checked against the blob the page last saved. */
+	save: async ({ params, request }) => {
+		const item = await readWaiting(params.id);
+		if (item.content.kind !== 'blueprint') return fail(400, { message: 'Not a blueprint item' });
+		if (item.content.missing) return fail(409, { message: `${item.content.file} is no longer committed in its worktree` });
+		const form = await request.formData().catch(() => null);
+		const text = form?.get('text');
+		const base = form?.get('base');
+		if (typeof text !== 'string' || typeof base !== 'string') return fail(400, { message: 'Not a save' });
+		const saved = await saveFile(item.content.worktree, item.content.file, text, base);
+		return saved.ok ? { blob: saved.blob, commit: saved.commit } : fail(saved.status, { message: saved.message });
 	},
 	submit: async ({ params, request }) => {
 		const item = await readWaiting(params.id);
