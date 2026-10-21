@@ -53,6 +53,10 @@ html.desk-no-sk .desk-sk {
 .desk-toast {
 	bottom: max(1rem, calc(var(--desk-bar-pad, 9rem) - 96px));
 }
+/* The toast sits above the content, so it takes the weight ladder's one float shadow. */
+.desk-toast > .alert {
+	box-shadow: var(--bar-shadow);
+}
 
 /* A focused control stays clear of the sticky bar and the toast; ItemPanel sets the pad. */
 html {
