@@ -10,7 +10,6 @@ label; `answers` is bound up so the bar can count what is left. The server rebui
 and refuses a post that leaves one unanswered. Renders nothing for a packet with no asks.
 -->
 <script lang="ts">
-	import { desk } from '#lib/desk.svelte.ts';
 	import { RULE_LOOK, refKind } from '#lib/packet-view.ts';
 	import { splitLead } from '#lib/prose.ts';
 	import type { PageData } from '../../routes/item/[id=id]/$types';
@@ -110,7 +109,7 @@ and refuses a post that leaves one unanswered. Renders nothing for a packet with
 									form="decision-form"
 									aria-labelledby="ask-{ask.index}-l{j}"
 									aria-describedby={choice.consequence ? `ask-${ask.index}-c${j}` : undefined}
-									disabled={desk.held || decided}
+									disabled={decided}
 									bind:group={answers[ask.index]}
 								/>
 								<span class="flex-1 leading-snug">

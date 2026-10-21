@@ -93,7 +93,7 @@ describe('keyAction', () => {
 		expect(keyAction('Enter', mod, packet)).toBe('approve');
 		expect(keyAction('Enter', { ...none, meta: true }, packet)).toBe('approve');
 		expect(keyAction('Enter', mod, ctx({ page: 'packet', approveLocked: true }))).toBe('approve');
-		expect(keyAction('Enter', mod, ctx({ page: 'packet', held: true }))).toBeNull();
+		expect(keyAction('Enter', mod, ctx({ page: 'packet', held: true }))).toBe('approve');
 		expect(keyAction('Enter', none, packet)).toBeNull();
 		expect(keyAction('a', none, packet)).toBeNull();
 		expect(keyAction('r', none, packet)).toBe('open-note');
@@ -106,7 +106,7 @@ describe('keyAction', () => {
 			const editing = ctx({ page, typing: true });
 			expect(keyAction('Enter', mod, editing)).toBe('approve');
 			expect(keyAction('Enter', mod, ctx({ page, approveLocked: true }))).toBe('approve');
-			expect(keyAction('Enter', mod, ctx({ page, held: true }))).toBeNull();
+			expect(keyAction('Enter', mod, ctx({ page, held: true }))).toBe('approve');
 			if (page !== 'pr' && page !== 'design') expect(keyAction('a', none, ctx({ page }))).toBeNull();
 			expect(keyAction('F8', none, editing)).toBe('next-call');
 		}
@@ -122,14 +122,17 @@ describe('keyAction', () => {
 		expect(keyAction('Enter', { ...none, ctrl: true }, base)).toBe('approve');
 	});
 
-	it('ignores every decision key while a decision is held', () => {
-		const held = ctx({ held: true, noteOpen: true });
-		expect(keyAction('a', none, held)).toBeNull();
-		expect(keyAction('r', none, held)).toBeNull();
-		expect(keyAction('Enter', { ...none, ctrl: true }, held)).toBeNull();
+	it('takes every decision key on the open item while another item’s decision is held', () => {
+		const held = ctx({ held: true });
+		expect(keyAction('a', none, held)).toBe('approve');
+		expect(keyAction('r', none, held)).toBe('open-note');
+		expect(keyAction('Enter', { ...none, ctrl: true }, held)).toBe('approve');
+		expect(keyAction('Enter', { ...none, ctrl: true }, ctx({ held: true, noteOpen: true }))).toBe('send-rejection');
+		expect(keyAction('j', none, held)).toBe('queue-next');
 		const t = ctx({ page: 'triage', held: true });
-		expect(keyAction('2', none, t)).toBeNull();
-		expect(keyAction('Enter', { ...none, ctrl: true }, t)).toBeNull();
+		expect(keyAction('2', none, t)).toBe('move-defer');
+		expect(keyAction('Enter', { ...none, ctrl: true }, t)).toBe('submit');
+		expect(keyAction('z', none, t)).toBe('undo');
 	});
 
 	it('toggles the sheet with ?, closed or open, and nothing else works while open', () => {

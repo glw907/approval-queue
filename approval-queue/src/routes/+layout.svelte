@@ -1,17 +1,24 @@
 <!-- @component
 The page skeleton: the queue rail pinned left and the open screen beside it, then the shortcut
-sheet, the live region, and the undo toast. Below 1024px the rail is a modal drawer opened from the
+sheet, the live region, and the toast. Below 1024px the rail is a modal drawer opened from the
 app bar. One `keydown` listener on the document turns every key into a `keyAction`; the rail, the
-drawers, and the sheet act on it here, and the open screen acts on the rest through `desk.handlers`.
+drawers, the sheet, and Undo act on it here, and the open screen acts on the rest through
+`desk.handlers`.
+
+The toast shows the decision `held` is counting down, with Undo, and its clock stops while the
+pointer or focus is on it. A held or posting item leaves the waiting list and shows under "Decided
+this session" until the queue reload lists it there itself.
 -->
 <script lang="ts">
 	import '../app.css';
 	import { afterNavigate, invalidate } from '$app/navigation';
 	import { page } from '$app/state';
 	import { onMount } from 'svelte';
+	import { fade } from 'svelte/transition';
 	import { age, SINGLES } from '#lib/board.ts';
 	import { closeDrawers, setDrawer } from '#lib/components/frame/drawers.ts';
 	import { desk } from '#lib/desk.svelte.ts';
+	import { held } from '#lib/held.svelte.ts';
 	import { keyAction } from '#lib/keys.ts';
 
 	let { children, data } = $props();
@@ -22,6 +29,19 @@ drawers, and the sheet act on it here, and the open screen acts on the rest thro
 	let sheet: HTMLDialogElement;
 	let railButton = $state<HTMLButtonElement>();
 	const currentId = $derived(page.params.id);
+	const waiting = $derived(data.queue.filter((item) => !held.ids.has(item.id)));
+	/** This session's decisions, newest first: the held and posting ones, then what the server lists. */
+	const decided = $derived.by(() => {
+		const mine = [...(held.current ? [held.current] : []), ...held.sending.toReversed()].map((d) => ({
+			id: d.id,
+			title: d.title,
+			outcome: OUTCOMES[d.outcome]
+		}));
+		const listed = data.decided
+			.filter(({ meta }) => !mine.some((d) => d.id === meta.id))
+			.map(({ meta, decision }) => ({ id: meta.id, title: meta.headline ?? meta.title, outcome: OUTCOMES[decision] }));
+		return [...mine, ...listed];
+	});
 
 	/** The queue by initiative, with every item that is not a packet under "Single items" last. */
 	const sidebar = $derived.by(() => {
@@ -29,8 +49,8 @@ drawers, and the sheet act on it here, and the open screen acts on the rest thro
 			item.kind !== 'packet'
 				? SINGLES
 				: item.initiativeTitle || (item.initiative && item.initiative !== 'none' ? item.initiative : 'No initiative');
-		const groups = new Map<string, typeof data.queue>();
-		for (const item of data.queue) groups.set(initiativeOf(item), [...(groups.get(initiativeOf(item)) ?? []), item]);
+		const groups = new Map<string, typeof waiting>();
+		for (const item of waiting) groups.set(initiativeOf(item), [...(groups.get(initiativeOf(item)) ?? []), item]);
 		return [...groups]
 			.map(([title, items]) => ({ title, items }))
 			.sort((a, b) => Number(a.title === SINGLES) - Number(b.title === SINGLES));
@@ -43,7 +63,7 @@ drawers, and the sheet act on it here, and the open screen acts on the rest thro
 		const anywhere: SheetRow[] = [
 			{ keys: ['j'], text: 'Next item in the queue', single: true },
 			{ keys: ['k'], text: 'Previous item in the queue', single: true },
-			{ keys: ['z'], text: 'Undo the last decision, until the next item loads', single: true },
+			{ keys: ['z'], text: 'Undo the last decision, within five seconds of it', single: true },
 			{ keys: ['?'], text: 'Show or hide this sheet', single: true },
 			{ keys: ['Esc'], text: 'Close the sheet, a panel, or the note' }
 		];
@@ -162,6 +182,11 @@ drawers, and the sheet act on it here, and the open screen acts on the rest thro
 		links[Math.min(links.length - 1, Math.max(0, from + step))].focus();
 	}
 
+	/** Motion rule 4: a toast that leaves on its timer fades out; one Undo ends, or any under reduced motion, goes at once. */
+	const toastOut = (timed: boolean) => ({
+		duration: timed && !matchMedia('(prefers-reduced-motion: reduce)').matches ? 150 : 0
+	});
+
 	function isTyping(el: HTMLElement | null) {
 		if (!el) return false;
 		if (el.isContentEditable || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT') return true;
@@ -187,7 +212,7 @@ drawers, and the sheet act on it here, and the open screen acts on the rest thro
 				typing: isTyping(e.target as HTMLElement | null),
 				singleKeys: desk.singleKeys,
 				sheetOpen: desk.sheetOpen,
-				held: desk.held,
+				held: held.current !== null,
 				noteOpen: desk.noteOpen,
 				approveLocked: desk.approveLocked
 			}
@@ -200,7 +225,9 @@ drawers, and the sheet act on it here, and the open screen acts on the rest thro
 					? () => moveQueue(1)
 					: action === 'queue-prev'
 						? () => moveQueue(-1)
-						: desk.handlers[action];
+						: action === 'undo'
+							? () => void held.undo()
+							: desk.handlers[action];
 		if (!run) return;
 		e.preventDefault();
 		run();
@@ -221,7 +248,7 @@ drawers, and the sheet act on it here, and the open screen acts on the rest thro
 			<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
 		</button>
 		<div class="title"><a href="/" data-sveltekit-replacestate>Design &amp; PR Approvals</a></div>
-		<div class="sub" aria-live="polite">{data.queue.length} waiting</div>
+		<div class="sub" aria-live="polite">{waiting.length} waiting</div>
 		{#each sidebar as group, g (group.title)}
 			<h2 class="group" id="nav-{g}">{group.title}</h2>
 			<ul class="rail-list" aria-labelledby="nav-{g}">
@@ -245,13 +272,13 @@ drawers, and the sheet act on it here, and the open screen acts on the rest thro
 		{:else}
 			<p class="dq">Nothing waiting.</p>
 		{/each}
-		{#if data.decided.length}
+		{#if decided.length}
 			<h2 class="group">Decided this session</h2>
 			<ul class="rail-list">
-				{#each data.decided as { meta, decision } (meta.id)}
+				{#each decided as row (row.id)}
 					<li class="dq">
-						<span title={meta.headline ?? meta.title}>{meta.headline ?? meta.title}</span>
-						<span>{OUTCOMES[decision]}</span>
+						<span>{row.title}</span>
+						<span>{row.outcome}</span>
 					</li>
 				{/each}
 			</ul>
@@ -276,7 +303,7 @@ drawers, and the sheet act on it here, and the open screen acts on the rest thro
 				onclick={() => setDrawer('rail', true, railButton)}
 			>
 				<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16" /></svg>
-				<span>Queue</span><span class="count">{data.queue.length}</span>
+				<span>Queue</span><span class="count">{waiting.length}</span>
 			</button>
 			<span class="appname">Design &amp; PR Approvals</span>
 		</div>
@@ -344,18 +371,36 @@ drawers, and the sheet act on it here, and the open screen acts on the rest thro
 
 <div class="sr-only" role="status" aria-live="polite" id="sr-status">{desk.status}</div>
 
-{#if desk.toast !== null}
-	<!-- Just above the decision bar, whose height ItemPanel publishes as the pad, so the toast never covers it. -->
+<!-- Just above the decision bar, whose height ItemPanel publishes as the pad, so the toast never covers it. -->
+{#if held.current}
+	<div
+		class="toast toast-center desk-toast z-40"
+		role="group"
+		aria-label="Decision held"
+		out:fade={toastOut(held.ended === 'sent')}
+		onpointerenter={() => held.pause('pointer')}
+		onpointerleave={() => held.resume('pointer')}
+		onfocusin={() => held.pause('focus')}
+		onfocusout={() => held.resume('focus')}
+	>
+		<div class="alert alert-info border border-base-300 text-sm">
+			<span>{held.current.toast}</span>
+			<button type="button" class="btn btn-sm" id="undo" onclick={() => void held.undo()}>
+				Undo <kbd class="kbd kbd-xs desk-kbd desk-sk">z</kbd>
+			</button>
+		</div>
+	</div>
+{:else if held.failure}
 	<div class="toast toast-center desk-toast z-40">
-		<div
-			class={['alert border border-base-300 text-sm', desk.toastError ? 'alert-error' : 'alert-info']}
-		>
+		<div class="alert alert-error border border-base-300 text-sm">
+			<span>{held.failure.text}</span>
+			<a class="link" href={held.failure.href} data-sveltekit-replacestate onclick={() => (held.failure = null)}>{held.failure.link}</a>
+		</div>
+	</div>
+{:else if desk.toast !== null}
+	<div class="toast toast-center desk-toast z-40" out:fade={toastOut(true)}>
+		<div class="alert alert-info border border-base-300 text-sm">
 			<span>{desk.toast}</span>
-			{#if desk.counting}
-				<button type="button" class="btn btn-sm" id="undo" onclick={() => desk.undo?.()}>
-					Undo <kbd class="kbd kbd-xs desk-kbd desk-sk">z</kbd>
-				</button>
-			{/if}
 		</div>
 	</div>
 {/if}

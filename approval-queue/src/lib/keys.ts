@@ -22,7 +22,7 @@ export interface KeyContext {
 	typing: boolean;
 	singleKeys: boolean;
 	sheetOpen: boolean;
-	/** A decision is counting down in the toast. */
+	/** A decision is counting down in the toast, so `z` undoes it. Every other key works as usual. */
 	held: boolean;
 	noteOpen: boolean;
 	/**
@@ -45,7 +45,7 @@ const MOVES: Record<string, KeyAction> = { '1': 'move-now', '2': 'move-defer', '
 /**
  * Follows the catalogue's global handler order: the open sheet takes everything but `?`, then
  * Escape and Ctrl+Enter (which work from a field), then the typing and single-key gates.
- * A held decision ignores every decision key, since the buttons lock but a key would not.
+ * A held decision belongs to an item already left behind, so it gates nothing on the open one.
  */
 export function keyAction(key: string, mods: KeyMods, context: KeyContext): KeyAction | null {
 	const { page, typing, singleKeys, sheetOpen, held, noteOpen, approveLocked } = context;
@@ -54,7 +54,6 @@ export function keyAction(key: string, mods: KeyMods, context: KeyContext): KeyA
 
 	if (key === 'Escape') return page !== 'triage' && noteOpen ? 'close-note' : null;
 	if (key === 'Enter' && (mods.ctrl || mods.meta)) {
-		if (held) return null;
 		if (page === 'triage') return 'submit';
 		if (noteOpen) return 'send-rejection';
 		// Locked, the handler moves to the first open ask or call, matching the button it advertises.
@@ -75,7 +74,6 @@ export function keyAction(key: string, mods: KeyMods, context: KeyContext): KeyA
 	if (key === 'j') return 'queue-next';
 	if (key === 'k') return 'queue-prev';
 	if (key === 'z') return held ? 'undo' : null;
-	if (held) return null;
 	if ((page === 'pr' || page === 'design') && key === 'a') return noteOpen || approveLocked ? null : 'approve';
 	if (page !== 'triage' && key === 'r') return 'open-note';
 	if ((page === 'pr' || page === 'change') && key === '/') return 'focus-filter';

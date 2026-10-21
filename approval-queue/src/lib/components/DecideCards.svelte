@@ -9,7 +9,6 @@ server rebuilds the same list and refuses a post whose picks don't cover it.
 -->
 <script lang="ts">
 	import { gate, type Card } from '#lib/cards.ts';
-	import { desk } from '#lib/desk.svelte.ts';
 	import PacketIcon from './PacketIcon.svelte';
 	import Prose from './Prose.svelte';
 
@@ -67,7 +66,7 @@ server rebuilds the same list and refuses a post whose picks don't cover it.
 									name="c{i}"
 									value={j}
 									form="decision-form"
-									disabled={desk.held || decided}
+									disabled={decided}
 									bind:group={picks[i]}
 								/>
 								<span class="flex-1 leading-snug font-semibold"><Prose text={choice.label} /></span>
