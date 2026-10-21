@@ -17,11 +17,20 @@ const notes: PlacedNote[] = [
 			{ label: 'Use the code reason', text: 'Rewritten line.', done: 'Used it' },
 			{ label: 'Keep it', done: 'Kept it' }
 		]
+	},
+	{
+		id: 'Q1',
+		kind: 'question',
+		anchor: 'a.p2',
+		title: 'Keep it here?',
+		body: [],
+		range: null,
+		choices: [{ label: 'Keep it here', done: 'Kept here' }]
 	}
 ];
 
-function review(blob: string, save: ReviewInit['save'] = async () => ({ ok: true, blob: 'saved' })) {
-	return new DocReview({ doc: 'Old line.', original: 'Old line.', blob, notes, save, remember: KEY });
+function review(blob: string, save: ReviewInit['save'] = async () => ({ ok: true, blob: 'saved' }), doc = 'Old line.') {
+	return new DocReview({ doc, original: 'Old line.', blob, notes, save, remember: KEY });
 }
 
 /** What the editor's change hook is handed when a choice rewrites its line. */
@@ -67,6 +76,22 @@ describe('DocReview remembered choices', () => {
 		r.choose('B3', 0);
 		await r.flush();
 		expect(review('b1').decided).toEqual({});
-		expect(review('saved').decided).toEqual({ B3: 0 });
+		expect(review('saved', undefined, 'Rewritten line.').decided).toEqual({ B3: 0 });
+	});
+
+	it('keeps a rewriting choice open after a failed save, whatever is chosen next', async () => {
+		const failing = async (): Promise<SaveResult> => ({ ok: false, message: 'refused' });
+		const r = review('b1', failing);
+		r.hooks.change(edited);
+		r.choose('B3', 0);
+		await r.flush();
+		r.choose('Q1', 0);
+		expect(review('b1').decided).not.toHaveProperty('B3');
+	});
+
+	it('recalls a rewriting choice only when the loaded file holds its text', () => {
+		localStorage.setItem(KEY, JSON.stringify({ blob: 'b1', decided: { B3: 0, Q1: 0 } }));
+		expect(review('b1').decided).toEqual({ Q1: 0 });
+		expect(review('b1', undefined, 'Rewritten line.').decided).toEqual({ B3: 0, Q1: 0 });
 	});
 });

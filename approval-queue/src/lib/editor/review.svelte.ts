@@ -30,11 +30,11 @@ const PAUSE_MS = 800;
 
 /**
  * The stored choices, when they were stored against `blob` and still name one of these notes'
- * choices. A choice made while an edit was unsaved is stored with no blob until a save holds it, so
- * a reload that lost the edit (the line a choice rewrote, say) opens the calls again rather than
- * approve them beside a file that lacks their text.
+ * choices. A choice that rewrites its line comes back only when `doc` holds the rewrite, whatever
+ * the store says: a reload that lost the edit opens the call again rather than approve it beside a
+ * file that lacks its text.
  */
-function recalled(key: string | undefined, notes: PlacedNote[], blob: string): Record<string, number> {
+function recalled(key: string | undefined, notes: PlacedNote[], blob: string, doc: string): Record<string, number> {
 	if (!key) return {};
 	let stored: unknown;
 	try {
@@ -45,7 +45,11 @@ function recalled(key: string | undefined, notes: PlacedNote[], blob: string): R
 	if (!stored || typeof stored !== 'object' || !('blob' in stored) || stored.blob !== blob) return {};
 	if (!('decided' in stored) || !stored.decided || typeof stored.decided !== 'object') return {};
 	return Object.fromEntries(
-		Object.entries(stored.decided).filter(([id, i]) => typeof i === 'number' && notes.find((n) => n.id === id && isCall(n))?.choices?.[i])
+		Object.entries(stored.decided).filter(([id, i]) => {
+			if (typeof i !== 'number') return false;
+			const c = notes.find((n) => n.id === id && isCall(n))?.choices?.[i];
+			return c !== undefined && (c.text === undefined || doc.includes(c.text));
+		})
 	);
 }
 
@@ -94,7 +98,7 @@ export class DocReview {
 		this.remember = init.remember;
 		this.fixedReadonly = init.readonly ?? false;
 		this.readonly = this.fixedReadonly;
-		this.decided = init.decided ?? recalled(init.remember, init.notes, init.blob);
+		this.decided = init.decided ?? recalled(init.remember, init.notes, init.blob, init.doc);
 		this.starts = Object.fromEntries(init.notes.map((n) => [n.id, n.range?.[0] ?? null]));
 		this.calls = init.notes.filter(isCall);
 		this.openCalls = $derived(this.calls.filter((n) => this.decided[n.id] === undefined));
@@ -147,7 +151,7 @@ export class DocReview {
 	private setChoices(decided: Record<string, number>) {
 		this.decided = decided;
 		if (this.view) setDecided(this.view, decided);
-		this.store(this.pending ? null : this.blob);
+		this.store(this.pending || this.saveFailed ? null : this.blob);
 	}
 
 	/** Remembers the choices with the blob that holds every edit so far, or with none while one is unsaved. */
