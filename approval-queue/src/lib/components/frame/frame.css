@@ -44,7 +44,8 @@
 		border-color var(--motion-quick) var(--motion-ease);
 }
 /* Rule 2: opened surfaces enter in base time, a fade with a 4px rise; a scrim or a fold's body
-   fades without it. Rule 4: leaving is instant, so none of these animates out. */
+   fades without it. Rule 4: leaving is instant, so none of these animates out, except the toast,
+   which the layout fades. */
 .sendback,
 .desk-toast > .alert,
 dialog.modal[open] > .modal-box {
@@ -1470,8 +1471,9 @@ a {
 	flex: none;
 	align-self: center;
 }
+/* The ink, not the fill: the warning fill is too light to read as a dot on the light theme. */
 :is(.rail-toc, .toc) .mk.call {
-	background: var(--color-warning);
+	background: var(--cairn-warning-ink);
 }
 :is(.rail-toc, .toc) .mk.fix {
 	background: var(--color-info);

@@ -22,16 +22,17 @@ for that save first, and closing the tab then asks before leaving.
 <script lang="ts">
 	import { deserialize, enhance, type SubmitFunction } from '$app/forms';
 	import { beforeNavigate, goto } from '$app/navigation';
-	import { tick } from 'svelte';
+	import { tick, untrack } from 'svelte';
 	import { fingerprint, gate } from '#lib/cards.ts';
-	import { closeDrawersForLink, setDrawer } from '#lib/components/frame/drawers.ts';
+	import { setDrawer } from '#lib/components/frame/drawers.ts';
 	import { desk, type OutlineEntry } from '#lib/desk.svelte.ts';
 	import { held, seedFrom, UNDONE } from '#lib/held.svelte.ts';
 	import { nextItem } from '#lib/queue.ts';
 	import { changedCount, seedRows, type Row } from '#lib/triage.ts';
 	import { VERDICT_LOOK } from '#lib/packet-view.ts';
 	import type { PlacedNote } from '#lib/editor/notes.ts';
-	import { boxes, DocReview, refuseOpenBox, type CommentAnswer, type SaveResult } from '#lib/editor/review.svelte.ts';	import type { PageData } from '../../routes/item/[id=id]/$types';
+	import { boxes, DocReview, refuseOpenBox, type CommentAnswer, type SaveResult } from '#lib/editor/review.svelte.ts';
+	import type { PageData } from '../../routes/item/[id=id]/$types';
 	import BlueprintView from './BlueprintView.svelte';
 	import BriefBlock from './BriefBlock.svelte';
 	import ChangeView from './ChangeView.svelte';
@@ -306,10 +307,12 @@ for that save first, and closing the tab then asks before leaving.
 		}
 		review?.setReadonly(frozen || missing);
 	});
-	// A box left open on the item being left must not refuse decisions on the next one.
+	// A box left open on the item being left must not refuse decisions on the next one, and a toast's
+	// Undo, such as a deleted comment's, must not act on this item from the next.
 	$effect(() => () => {
 		if (boxes.open && docReviews.includes(boxes.open)) boxes.open = null;
 		desk.commentOpen = false;
+		if (desk.toastUndo) desk.toast = null;
 	});
 
 	/** Geoff's comments and replies across the screen's documents, which go to the author with the decision. */
@@ -413,7 +416,7 @@ for that save first, and closing the tab then asks before leaving.
 	/** Moves to the next or previous comment; a change walks on through its documents, wrapping at the ends. */
 	function moveComment(dir: 1 | -1) {
 		const start = activeReview();
-		if (!start) return;
+		if (!start || refuseOpenBox()) return;
 		if (docReviews.length === 1) {
 			start.nextComment(dir);
 			return;
@@ -428,16 +431,27 @@ for that save first, and closing the tab then asks before leaving.
 
 	/** Motion rule 5: a jump scrolls smoothly, unless the reader asked for reduced motion. */
 	const jump = (): ScrollBehavior => (matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth');
-	// An item Undo opened again says so, and a send-back reopens its note as it was.
+	// An item Undo opened again says so, once: a send-back reopens its note as it was, and any other
+	// decision puts focus in the item, as opening it after a decision does. Nothing here is tracked,
+	// so typing in the note never runs it again.
 	$effect(() => {
 		if (!restored) return;
-		desk.toast = UNDONE;
-		desk.announce(UNDONE);
-		if (restored.outcome === 'reject') void openNote();
+		untrack(() => {
+			desk.toast = UNDONE;
+			desk.announce(UNDONE);
+			if (restored.outcome === 'reject') void openNote();
+			else {
+				const main = document.getElementById('main');
+				if (main && !main.contains(document.activeElement)) main.focus();
+			}
+		});
 		const clear = setTimeout(() => {
 			if (desk.toast === UNDONE) desk.toast = null;
 		}, 3200);
-		return () => clearTimeout(clear);
+		return () => {
+			clearTimeout(clear);
+			if (desk.toast === UNDONE) desk.toast = null;
+		};
 	});
 	// A failed post links here, so opening the item ends the toast that named it.
 	$effect(() => {
@@ -607,6 +621,12 @@ for that save first, and closing the tab then asks before leaving.
 	let leaveAfterSave: (() => void) | null = null;
 
 	beforeNavigate((navigation) => {
+		// A comment box holding text would be dropped unsaved, so leaving waits until it is saved or cancelled.
+		if (boxes.open && docReviews.includes(boxes.open) && boxes.open.box?.text.trim()) {
+			navigation.cancel();
+			if (!navigation.willUnload) refuseOpenBox();
+			return;
+		}
 		if (!review?.pending) return;
 		// A closing tab cannot wait for the save, so the browser asks first.
 		navigation.cancel();
@@ -662,6 +682,7 @@ for that save first, and closing the tab then asks before leaving.
 			nextCall();
 			return;
 		}
+		for (const r of docReviews) await r.settled();
 		if (review) {
 			await review.flush();
 			if (review.saveFailed) {
@@ -733,30 +754,35 @@ for that save first, and closing the tab then asks before leaving.
 		cancel();
 		if (deciding || refuseOpenBox()) return;
 		deciding = true;
-		// A send-back carries the edits too, so the last one is committed first, and the post names
-		// the blob that save returned rather than the one the form rendered with.
-		if (review) {
-			await review.flush();
-			formData.set('blob', review.blob);
+		try {
+			// A comment op on its way lands before the decision, so the decision reads it.
+			for (const r of docReviews) await r.settled();
+			// A send-back carries the edits too, so the last one is committed first, and the post names
+			// the blob that save returned rather than the one the form rendered with.
+			if (review) {
+				await review.flush();
+				formData.set('blob', review.blob);
+			}
+			const outcome = action.search === '?/approve' ? 'approve' : action.search === '?/reject' ? 'reject' : 'submit';
+			// Every held item is left out, so the next one is never an item whose decision is still counting.
+			const waiting = data.queue.filter((item) => item.id === data.meta.id || !held.ids.has(item.id));
+			const upNext = nextItem(waiting, data.meta.id);
+			const text = decisionText(action);
+			held.hold({
+				id: data.meta.id,
+				title: data.meta.headline ?? data.meta.title,
+				kind: data.kind,
+				subject: subject() ?? data.meta.repo,
+				href: action.href,
+				form: formData,
+				outcome,
+				toast: text
+			});
+			desk.announce(`${text} ${desk.singleKeys ? 'Press z or the Undo button' : 'Press the Undo button'} to undo.`);
+			await goto(upNext ? `/item/${encodeURIComponent(upNext.id)}` : '/', { replace: true });
+		} finally {
+			deciding = false;
 		}
-		const outcome = action.search === '?/approve' ? 'approve' : action.search === '?/reject' ? 'reject' : 'submit';
-		// Every held item is left out, so the next one is never an item whose decision is still counting.
-		const waiting = data.queue.filter((item) => item.id === data.meta.id || !held.ids.has(item.id));
-		const upNext = nextItem(waiting, data.meta.id);
-		const text = decisionText(action);
-		held.hold({
-			id: data.meta.id,
-			title: data.meta.headline ?? data.meta.title,
-			kind: data.kind,
-			subject: subject() ?? data.meta.repo,
-			href: action.href,
-			form: formData,
-			outcome,
-			toast: text
-		});
-		desk.announce(`${text} ${desk.singleKeys ? 'Press z or the Undo button' : 'Press the Undo button'} to undo.`);
-		await goto(upNext ? `/item/${encodeURIComponent(upNext.id)}` : '/', { replace: true });
-		deciding = false;
 		// The empty state puts focus on Keep itself, so only a main that holds no focus gets it.
 		const main = document.getElementById('main');
 		if (main && !main.contains(document.activeElement)) main.focus();
@@ -790,8 +816,9 @@ for that save first, and closing the tab then asks before leaving.
 									}}
 									><span class="n">{e.n}</span><span class="t">{e.text}</span>{#if e.mark}<span
 											class="mk {e.mark}"
+											aria-hidden="true"
 											title={e.mark === 'call' ? 'A call for you' : 'Corrected'}
-										></span>{/if}</a
+										></span><span class="sr-only">{e.mark === 'call' ? ', a call for you' : ', corrected'}</span>{/if}</a
 								>
 							</li>
 						{/each}

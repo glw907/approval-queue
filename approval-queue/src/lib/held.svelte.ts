@@ -109,7 +109,8 @@ export class Held {
 		this.failure = null;
 		if (!showing) this.#pausers.clear();
 		this.current = decision;
-		this.#timer = startHold(HOLD_MS, { tick: () => {}, fire: () => void this.#send() });
+		// Only the queue reload after a sent decision can reject, and the layout's poll reloads it again.
+		this.#timer = startHold(HOLD_MS, { tick: () => {}, fire: () => void this.#send().catch(() => {}) });
 		if (this.#pausers.size) this.#timer.pause();
 	}
 

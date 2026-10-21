@@ -5,8 +5,8 @@ app bar. One `keydown` listener on the document turns every key into a `keyActio
 drawers, the sheet, and Undo act on it here, and the open screen acts on the rest through
 `desk.handlers`.
 
-The toast shows the decision `held` is counting down, with Undo, and its clock stops while the
-pointer or focus is on it. A held or posting item leaves the waiting list and shows under "Decided
+The toast shows the decision `held` is counting down, with Undo, and its clock stops once the
+pointer moves over it or while focus is on it. A held or posting item leaves the waiting list and shows under "Decided
 this session" until the queue reload lists it there itself.
 -->
 <script lang="ts">
@@ -216,7 +216,7 @@ this session" until the queue reload lists it there itself.
 		}
 		const action = keyAction(
 			e.key,
-			{ ctrl: e.ctrlKey, meta: e.metaKey, alt: e.altKey, shift: e.shiftKey },
+			{ ctrl: e.ctrlKey, meta: e.metaKey, alt: e.altKey, shift: e.shiftKey, code: e.code },
 			{
 				page: desk.page,
 				typing: isTyping(e.target as HTMLElement | null),
@@ -292,8 +292,9 @@ this session" until the queue reload lists it there itself.
 											}}
 											><span class="n">{e.n}</span><span class="t">{e.text}</span>{#if e.mark}<span
 													class="mk {e.mark}"
+													aria-hidden="true"
 													title={e.mark === 'call' ? 'A call for you' : 'Corrected'}
-												></span>{/if}</a
+												></span><span class="sr-only">{e.mark === 'call' ? ', a call for you' : ', corrected'}</span>{/if}</a
 										>
 									</li>
 								{/each}
@@ -412,7 +413,13 @@ this session" until the queue reload lists it there itself.
 		role="group"
 		aria-label="Decision held"
 		out:fade={toastOut(held.ended === 'sent')}
-		onpointerenter={() => held.pause('pointer')}
+		onoutrostart={(e) => (e.currentTarget.inert = true)}
+		onpointermove={(e) => {
+			// Only a pointer that moves over the toast stops its clock: one that rests where an earlier
+			// toast's Undo was pressed sends the toast a pointerenter without moving, and the decision
+			// would never post.
+			if (e.movementX || e.movementY) held.pause('pointer');
+		}}
 		onpointerleave={() => held.resume('pointer')}
 		onfocusin={() => held.pause('focus')}
 		onfocusout={() => held.resume('focus')}
@@ -432,7 +439,7 @@ this session" until the queue reload lists it there itself.
 		</div>
 	</div>
 {:else if desk.toast !== null}
-	<div class="toast toast-center desk-toast z-40" out:fade={toastOut(true)}>
+	<div class="toast toast-center desk-toast z-40" out:fade={toastOut(true)} onoutrostart={(e) => (e.currentTarget.inert = true)}>
 		<div class="alert alert-info border border-base-300 text-sm">
 			<span>{desk.toast}</span>
 			{#if desk.toastUndo}
