@@ -12,6 +12,10 @@ class Desk {
 	/** A decision is counting down in the toast, so every decision key is dead. */
 	held = $state(false);
 	noteOpen = $state(false);
+	/** The queue rail is open as a drawer (below 1024px). */
+	railOpen = $state(false);
+	/** The review pane is open as a drawer (below 1260px). */
+	paneOpen = $state(false);
 	/** Approve is disabled, so the `a` key must not post it either. */
 	approveLocked = $state(false);
 	page = $state<'pr' | 'design' | 'triage' | 'packet'>('design');

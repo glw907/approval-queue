@@ -6,6 +6,7 @@ export type KeyAction =
 	| 'approve'
 	| 'open-note'
 	| 'close-note'
+	| 'next-call'
 	| 'send-rejection'
 	| 'focus-filter'
 	| 'row-next'
@@ -59,6 +60,9 @@ export function keyAction(key: string, mods: KeyMods, context: KeyContext): KeyA
 		// Locked, the handler moves focus to the first open ask, matching the button it advertises.
 		return page === 'packet' ? 'approve' : null;
 	}
+
+	// F8 is a function key, so like Ctrl+Enter it works from a field and ignores the single-key switch.
+	if (key === 'F8' && plain && !mods.shift) return 'next-call';
 
 	if (typing) return null;
 	if (page === 'triage' && plain) {

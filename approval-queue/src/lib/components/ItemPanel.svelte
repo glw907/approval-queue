@@ -1,5 +1,6 @@
 <!-- @component
-One open item: its header, its view, and the sticky decision bar. The page renders it inside a
+One open item in the three-pane frame: a switch on the item's kind picks its work, its review
+pane, and the decision bar's labels, and the frame supplies the rest. The page renders it inside a
 `{#key}` on the item's id, so per-item state here (the note, a failed post) starts fresh when the
 next item loads. Triage calls are the exception: unsent ones are kept in `desk.drafts`, so
 opening another item and coming back keeps them.
@@ -24,11 +25,17 @@ first, which posts as `irreversible=yes`. A withdrawn packet answers 410 with th
 	import { startHold } from '#lib/hold.ts';
 	import { nextItem } from '#lib/queue.ts';
 	import { changedCount, seedRows, type Row } from '#lib/triage.ts';
+	import { VERDICT_LOOK } from '#lib/packet-view.ts';
 	import type { PageData } from '../../routes/item/[id=id]/$types';
 	import BriefBlock from './BriefBlock.svelte';
 	import DecideCards from './DecideCards.svelte';
 	import DesignView from './DesignView.svelte';
 	import DetailRows from './DetailRows.svelte';
+	import DecisionBar from './frame/DecisionBar.svelte';
+	import Frame from './frame/Frame.svelte';
+	import FrameHeader from './frame/FrameHeader.svelte';
+	import PaneList, { type PaneItem } from './frame/PaneList.svelte';
+	import PaneSection from './frame/PaneSection.svelte';
 	import PacketAsks from './PacketAsks.svelte';
 	import PacketBrief from './PacketBrief.svelte';
 	import PacketIcon from './PacketIcon.svelte';
@@ -38,12 +45,6 @@ first, which posts as `irreversible=yes`. A withdrawn packet answers 410 with th
 	import TriageView from './TriageView.svelte';
 
 	let { data }: { data: PageData } = $props();
-
-	const BAR =
-		'flex max-w-3xl flex-wrap items-center gap-x-4 gap-y-3 rounded-box border border-base-300 bg-base-100 px-5 py-3.5 shadow-[0_8px_28px_-6px_rgb(0_0_0/0.22),0_2px_6px_-2px_rgb(0_0_0/0.10)]';
-	const PACKET_BAR =
-		'bar flex max-w-4xl flex-wrap items-center gap-x-4 gap-y-3 rounded-box border border-base-300 bg-base-100 px-5 py-3.5';
-	const KEY = 'kbd kbd-xs border-current/25 bg-transparent text-current opacity-85';
 
 	let form = $state<HTMLFormElement>();
 	let noteField = $state<HTMLTextAreaElement>();
@@ -116,11 +117,75 @@ first, which posts as `irreversible=yes`. A withdrawn packet answers 410 with th
 			: 'Ready to approve'
 	);
 	const packetSub = $derived.by(() => {
-		if (openAsks.length) return 'to unlock Approve packet';
-		if (data.kind !== 'packet') return '';
-		const n = data.routine.length;
-		return `${n} routine ${n === 1 ? 'part' : 'parts'}, ${packetChanged === 0 ? 'none' : packetChanged} changed`;
+		if (openAsks.length) return 'to unlock Approve the packet';
+		return packetChanged === 0 ? 'No verdicts changed' : `${packetChanged} ${packetChanged === 1 ? 'verdict' : 'verdicts'} changed`;
 	});
+
+	/** The decisions the screen asks for, in page order: what the pane lists and F8 walks. */
+	const calls = $derived.by((): Array<{ id: string; label: string; what: string; open: boolean }> => {
+		if (data.kind === 'packet') {
+			return data.asks.map((ask) => {
+				const picked = answers[ask.index];
+				return {
+					id: `ask-${ask.index}`,
+					label: ask.question,
+					what: picked === undefined ? 'Open, pick one' : `Answered: ${picked}`,
+					open: picked === undefined
+				};
+			});
+		}
+		return cards.map((card, i) => ({
+			id: `card-${i}`,
+			label: card.title,
+			what: picks[i] === undefined ? 'Open' : 'Decided',
+			open: picks[i] === undefined
+		}));
+	});
+	const callItems = $derived<PaneItem[]>(
+		calls.map((c) => ({ href: `#${c.id}`, label: c.label, what: c.what, dot: c.open ? 'call' : 'done' }))
+	);
+	const verdictWord = (ref: string, session: string) =>
+		verdicts[ref] === session ? `${VERDICT_LOOK[session].label}, the session’s verdict` : `${VERDICT_LOOK[verdicts[ref]].label}, your change`;
+	/** The packet's routine parts that are not plan steps; a step's verdict sits on its step. */
+	const partRows = $derived(data.kind === 'packet' ? data.routine.filter((row) => row.kind !== 'step') : []);
+	const partId = (ref: string) => `part-${ref.replace(/[^\w-]+/g, '-')}`;
+	const TRIAGE_WORD = { now: 'Do now', defer: 'Do later', drop: 'Don’t do' };
+	const partItems = $derived<PaneItem[]>(
+		partRows.map((row) => ({
+			href: `#${partId(row.ref)}`,
+			label: row.ref,
+			what: verdictWord(row.ref, row.verdict),
+			dot: verdicts[row.ref] === row.verdict ? 'done' : 'call'
+		}))
+	);
+	const yourSteps = $derived<PaneItem[]>(
+		data.kind === 'packet'
+			? data.steps.filter((s) => s.tag === 'you').map((s) => ({ href: `#step-${s.n}`, label: `${s.n}. ${s.label ?? s.text}`, dot: 'call' as const }))
+			: []
+	);
+	/** The packet's sections in page order; Asks carries a dot while any is open. */
+	const outline = $derived.by((): PaneItem[] => {
+		if (data.kind !== 'packet') return [];
+		const sections: Array<Omit<PaneItem, 'n'>> = [
+			{ href: '#background', label: 'Background' },
+			{ href: '#if-you-approve', label: 'If you approve' },
+			{ href: '#not-checked', label: 'Not checked' }
+		];
+		if (data.asks.length) sections.push({ href: '#asks', label: 'Asks', mark: openAsks.length ? 'call' : undefined });
+		if (partRows.length) sections.push({ href: '#parts', label: 'Parts' });
+		return sections.map((s, i) => ({ ...s, n: i + 1 }));
+	});
+	const packet = $derived(data.kind === 'packet' ? data : null);
+
+	/** Moves focus to the next open call after the one holding focus, wrapping to the first. */
+	function nextCall() {
+		const open = calls.filter((c) => c.open);
+		if (!open.length) return;
+		const at = open.findIndex((c) => document.getElementById(c.id)?.contains(document.activeElement));
+		const target = document.getElementById(open[(at + 1) % open.length].id);
+		target?.scrollIntoView({ block: 'center' });
+		(target?.querySelector<HTMLElement>('input, button, a, textarea') ?? target)?.focus();
+	}
 	// What the bar's status region says in place of the lock text: the hold, an undo, or a failed post.
 	let barNote = $state<string | null>(null);
 	let holding = $state(false);
@@ -142,6 +207,7 @@ first, which posts as `irreversible=yes`. A withdrawn packet answers 410 with th
 			desk.handlers = {
 				...desk.handlers,
 				approve: data.kind === 'packet' ? approvePacket : () => approveButton && !approveButton.disabled && form?.requestSubmit(approveButton),
+				'next-call': nextCall,
 				'open-note': openNote,
 				'close-note': closeNote,
 				'send-rejection': () => form?.requestSubmit(sendButton),
@@ -330,255 +396,226 @@ first, which posts as `irreversible=yes`. A withdrawn packet answers 410 with th
 	};
 </script>
 
-<main id="main" tabindex="-1" class="flex-1 px-5 pt-4 pb-8 lg:px-12">
-	<div class={data.kind === 'packet' ? 'max-w-4xl' : 'max-w-3xl'}>
-		{#if data.kind === 'packet'}
-			<p class="mb-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs tracking-wide desk-muted">
-				<a class="link link-hover" href="/">Board</a><span aria-hidden="true">/</span>
-				<span>{data.asks.length} {data.asks.length === 1 ? 'ask' : 'asks'}</span>
-				{#if data.irreversible}
-					<span class="badge badge-sm badge-outline rule-badge tone-error gap-1"><PacketIcon name="lock" class="size-3.5" />Irreversible</span>
-				{/if}
-			</p>
-			<PacketBrief {data} />
-			<div onchange={clearNote}>
-				<PacketAsks asks={data.asks} bind:answers decided={data.decided} />
-				<PacketRoutine routine={data.routine} parts={data.parts} bind:verdicts decided={data.decided} />
-			</div>
-		{:else if data.kind === 'pr'}
-			<PrView {data} bind:picks subject={subject() ?? ''} />
-		{:else if data.kind === 'design'}
-			<p class="mb-2 text-xs tracking-wide text-(--color-muted)">
-				{data.meta.repo.split('/').pop()}{#if data.meta.file} · {data.meta.file}{/if} · {data.minutes} min read
-			</p>
-			<BriefBlock
-				headlineHtml={data.headlineHtml}
-				ledeHtml={data.ledeHtml}
-				whatChanges={data.whatChanges}
-				ifYouApprove={data.ifYouApprove}
-				worthKnowing={data.worthKnowing}
-			/>
-			<DecideCards cards={data.cards} bind:picks decided={data.decided} />
-			<DetailRows details={data.details} />
-			<div class="mt-10"><DesignView docHtml={data.docHtml} /></div>
-		{:else if data.kind === 'triage'}
-			<TriageView
-				bind:rows
-				html={data.html}
-				headlineHtml={data.headlineHtml}
-				ledeHtml={data.ledeHtml}
-				meta="Triage · {data.meta.title}"
-			/>
+<Frame
+	where={data.meta.headline ?? data.meta.title}
+	paneLabel={data.kind === 'packet' ? 'Outline and parts' : 'Calls for you'}
+>
+	{#snippet header()}
+		{#if packet}
+			<FrameHeader long={packet.headline.length > 90}>
+				{#snippet crumb()}
+					<a href="/">Board</a><span aria-hidden="true">/</span><span>Packet</span>
+					{#if packet.meta.initiativeTitle}<span aria-hidden="true">/</span><span>{packet.meta.initiativeTitle}</span>{/if}
+					{#if packet.irreversible}
+						<span class="badge badge-sm badge-outline rule-badge tone-error gap-1"><PacketIcon name="lock" class="size-3.5" />Irreversible</span>
+					{/if}
+				{/snippet}
+				{#snippet headline()}<Prose text={packet.headline} />{/snippet}
+				{#snippet lede()}<Prose text={packet.lede} />{/snippet}
+			</FrameHeader>
 		{/if}
-	</div>
-</main>
+	{/snippet}
 
-<div id="decision" class="sticky bottom-0 z-10 bg-linear-to-t from-base-100 from-60% to-transparent px-5 pt-8 pb-4 lg:px-12">
-	{#if data.decided}
-		<p class="max-w-3xl rounded-box border border-base-300 bg-base-100 px-5 py-3.5 text-sm">Decided</p>
+	{#if packet}
+		<div onchange={clearNote}>
+			<PacketBrief data={packet} bind:verdicts decided={packet.decided} />
+			<PacketAsks asks={packet.asks} bind:answers decided={packet.decided} />
+			<PacketRoutine routine={packet.routine} parts={packet.parts} bind:verdicts decided={packet.decided} />
+		</div>
+	{:else if data.kind === 'pr'}
+		<PrView {data} bind:picks subject={subject() ?? ''} />
+	{:else if data.kind === 'design'}
+		<p class="mb-2 text-xs tracking-wide text-(--color-muted)">
+			{data.meta.repo.split('/').pop()}{#if data.meta.file} · {data.meta.file}{/if} · {data.minutes} min read
+		</p>
+		<BriefBlock
+			headlineHtml={data.headlineHtml}
+			ledeHtml={data.ledeHtml}
+			whatChanges={data.whatChanges}
+			ifYouApprove={data.ifYouApprove}
+			worthKnowing={data.worthKnowing}
+		/>
+		<DecideCards cards={data.cards} bind:picks decided={data.decided} />
+		<DetailRows details={data.details} />
+		<div class="mt-10"><DesignView docHtml={data.docHtml} /></div>
 	{:else if data.kind === 'triage'}
-		<form
-			id="decision-form"
-			method="post"
-			action="?/submit"
-			bind:this={form}
-			use:enhance={decide}
-			aria-label="Decision"
-			class={BAR}
-		>
-			{#each rows as row, i (i)}
-				<input type="hidden" name="disposition" value={row.disposition} />
-				<input type="hidden" name="note" value={row.note} />
-			{/each}
-			<div class="mr-auto flex min-w-0 items-start gap-3">
-				<span class="status mt-2 bg-base-content/50" aria-hidden="true"></span>
-				<div class="min-w-0" role="status">
-					<p class="leading-tight font-semibold">
-						{rows.length} calls, {changed === 0 ? 'none' : changed} changed
-					</p>
-					<p class="mt-0.5 text-sm leading-snug text-(--color-muted)">Submit sends your calls back to the session.</p>
-				</div>
-			</div>
-			<button class="btn btn-primary" bind:this={submitButton} disabled={desk.held}>
-				<svg class="size-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 5 5 9-10" /></svg>
-				Submit calls <kbd class={KEY}>Ctrl</kbd><kbd class={KEY}>Enter</kbd>
-			</button>
-		</form>
-	{:else if data.kind === 'packet'}
-		<form
-			id="decision-form"
-			method="post"
-			bind:this={form}
-			use:enhance={decide}
-			aria-label="Decision"
-			class={PACKET_BAR}
-			onpointerenter={() => {
-				if (!holding) return;
-				hold?.pause();
-				holdPaused = true;
-			}}
-			onpointerleave={() => {
-				hold?.resume();
-				holdPaused = false;
-			}}
-		>
-			<input type="hidden" name="fingerprint" value={data.fingerprint} />
-			{#if desk.noteOpen}
-				<div class="basis-full">
-					<label for="note" class="text-sm font-semibold">
-						Note for the session
-						<span class="font-normal desk-muted">(the session reads it as the reason)</span>
-					</label>
-					<textarea
-						id="note"
-						name="note"
-						class="textarea desk-field mt-1 w-full max-w-[88ch] text-sm"
-						rows="2"
-						placeholder="What has to change before you approve"
-						bind:this={noteField}
-						disabled={desk.held}
-					></textarea>
-				</div>
-			{/if}
-			<div class="bar-main flex min-w-0 flex-1 flex-wrap items-center gap-x-4 gap-y-3">
-				{#if !holding && !desk.noteOpen}
-					<button type="button" class="bar-reject btn btn-outline" bind:this={rejectButton} disabled={desk.held} onclick={openNote}>
-						<PacketIcon name="undo" />Reject with note <kbd class={[KEY, 'desk-sk']}>R</kbd>
-					</button>
-				{/if}
-				<div class="ms-auto flex min-w-0 flex-wrap items-center justify-end gap-x-4 gap-y-2">
-					<div id="bar-state" role="status" class={['bar-state min-w-0 text-right', holding && 'sr-only']}>
-						<p class="leading-tight font-semibold">{barNote ?? packetLock}</p>
-						{#if barNote === null}
-							<p class="mt-0.5 text-sm leading-snug desk-muted max-sm:hidden">{packetSub}</p>
-						{:else if withdrawn}
-							<p class="mt-0.5 text-sm leading-snug"><a class="link" href={withdrawn}>Open the board</a></p>
-						{/if}
-					</div>
-					{#if desk.noteOpen}
-						<button type="button" class="btn btn-ghost" disabled={desk.held} onclick={closeNote}>
-							Cancel <kbd class={KEY}>Esc</kbd>
-						</button>
-						<button class="btn btn-primary" formaction="?/reject" bind:this={sendButton} disabled={desk.held}>
-							<PacketIcon name="undo" />Send rejection <kbd class="{KEY} max-sm:hidden">Ctrl</kbd><kbd class="{KEY} max-sm:hidden">Enter</kbd>
-						</button>
-					{:else if !holding}
-						<button
-							type="submit"
-							class="bar-approve btn btn-primary"
-							formaction="?/approve"
-							bind:this={approveButton}
-							aria-describedby="bar-state"
-							aria-disabled={openAsks.length > 0}
-							disabled={desk.held}
-							onclick={(e) => {
-								e.preventDefault();
-								approvePacket();
-							}}
-						>
-							<PacketIcon name={openAsks.length ? 'lock' : 'check'} />Approve packet
-							<span class="max-sm:hidden"><kbd class={KEY}>Ctrl</kbd><kbd class={KEY}>Enter</kbd></span>
-						</button>
-					{/if}
-				</div>
-			</div>
-			{#if holding}
-				<div class="flex min-w-0 flex-1 flex-wrap items-center gap-x-4 gap-y-2">
-					<div class="min-w-0 flex-1" aria-hidden="true">
-						<p class="leading-tight font-semibold">{holdPaused ? 'Paused' : `Sending in ${holdLeft} s`}</p>
-						<p class="mt-0.5 text-sm desk-muted">{holdPaused ? 'Move off the bar to carry on.' : 'Point at the bar to pause.'}</p>
-						<progress class="progress progress-primary mt-1.5 h-1.5 w-full max-w-sm" value={holdLeft} max="5"></progress>
-					</div>
-					<button type="button" class="btn" id="undo" onclick={() => desk.undo?.()}>
-						<PacketIcon name="undo" />Undo <kbd class={[KEY, 'desk-sk']}>Z</kbd>
-					</button>
-				</div>
-			{/if}
-		</form>
-	{:else}
-		<form id="decision-form" method="post" bind:this={form} use:enhance={decide} aria-label="Decision" class={BAR}>
-			<input type="hidden" name="cards" value={fingerprint(cards)} />
-			{#if desk.noteOpen}
-				<div class="basis-full">
-					<label for="note" class="text-sm font-semibold">
-						Note for the session
-						<span class="font-normal text-(--color-muted)">(optional; the session reads it as the reason)</span>
-					</label>
-					<textarea
-						id="note"
-						name="note"
-						class="textarea desk-field mt-1 w-full max-w-[88ch] text-sm"
-						rows="3"
-						placeholder="What needs to change before this can be approved"
-						bind:this={noteField}
-						disabled={desk.held}
-					></textarea>
-				</div>
-			{/if}
-			<div class="mr-auto flex min-w-0 items-start gap-3">
-				<span class={['status mt-2', decided.locked ? 'status-warning' : 'status-success']} aria-hidden="true"></span>
-				<div class="min-w-0" id="bar-state" role="status">
-					{#if decided.sendBack}
-						<p class="leading-tight font-semibold">Sending back</p>
-						<p class="mt-0.5 text-sm leading-snug text-(--color-muted)">You chose to send this back to the session.</p>
-					{:else if decided.open.length}
-						<p class="leading-tight font-semibold">
-							{decided.open.length} {decided.open.length === 1 ? 'decision' : 'decisions'} left
-						</p>
-						<p class="mt-0.5 text-sm leading-snug text-(--color-muted)">
-							Decide <a class="link" href="#card-{cards.indexOf(decided.open[0])}">{decided.open[0].title}</a> to unlock Approve.
-						</p>
-					{:else}
-						<p class="leading-tight font-semibold">Ready to approve</p>
-						<p class="mt-0.5 text-sm leading-snug text-(--color-muted)">{readySub}</p>
-					{/if}
-				</div>
-			</div>
-			<div class="ms-auto flex flex-wrap gap-3">
-				{#if desk.noteOpen}
-					<button type="button" class="btn btn-ghost" disabled={desk.held} onclick={closeNote}>
-						Cancel <kbd class={KEY}>Esc</kbd>
-					</button>
-					<button class="btn btn-primary" formaction="?/reject" bind:this={sendButton} disabled={desk.held}>
-						{@render undoIcon()}Send back <kbd class={KEY}>Ctrl</kbd><kbd class={KEY}>Enter</kbd>
-					</button>
+		<TriageView
+			bind:rows
+			html={data.html}
+			headlineHtml={data.headlineHtml}
+			ledeHtml={data.ledeHtml}
+			meta="Triage · {data.meta.title}"
+		/>
+	{/if}
+
+	{#snippet pane()}
+		{#if packet}
+			<PaneSection title="Calls for you"><PaneList items={callItems} empty="No asks in this packet." /></PaneSection>
+			{#if partItems.length}<PaneSection title="Parts"><PaneList items={partItems} /></PaneSection>{/if}
+			{#if yourSteps.length}<PaneSection title="Steps you run"><PaneList items={yourSteps} /></PaneSection>{/if}
+			<PaneSection title="Contents" contents><PaneList numbered items={outline} /></PaneSection>
+		{:else if data.kind === 'triage'}
+			<PaneSection title="Calls">
+				<PaneList
+					empty="Nothing proposed."
+					items={rows.map((row, i) => ({
+						href: `#item-${i}`,
+						label: row.action,
+						what: TRIAGE_WORD[row.disposition],
+						dot: row.disposition === row.proposed ? 'done' : 'call'
+					}))}
+				/>
+			</PaneSection>
+		{:else}
+			<PaneSection title="Calls for you"><PaneList items={callItems} empty="Nothing to decide first." /></PaneSection>
+		{/if}
+	{/snippet}
+
+	{#snippet bar()}
+		{#if data.decided}
+			<DecisionBar>
+				{#snippet status()}<p class="s1">Decided</p>{/snippet}
+			</DecisionBar>
+		{:else}
+			<form
+				id="decision-form"
+				method="post"
+				action={data.kind === 'triage' ? '?/submit' : undefined}
+				bind:this={form}
+				use:enhance={decide}
+				aria-label="Decision"
+				onpointerenter={() => {
+					if (!holding) return;
+					hold?.pause();
+					holdPaused = true;
+				}}
+				onpointerleave={() => {
+					hold?.resume();
+					holdPaused = false;
+				}}
+			>
+				{#if packet}
+					<input type="hidden" name="fingerprint" value={packet.fingerprint} />
+				{:else if data.kind === 'triage'}
+					{#each rows as row, i (i)}
+						<input type="hidden" name="disposition" value={row.disposition} />
+						<input type="hidden" name="note" value={row.note} />
+					{/each}
 				{:else}
-					<button
-						type="button"
-						class={['btn', decided.sendBack ? 'btn-primary' : 'btn-outline']}
-						bind:this={rejectButton}
-						disabled={desk.held}
-						onclick={openNote}
-					>
-						{@render undoIcon()}Send back <kbd class={[KEY, 'desk-sk']}>R</kbd>
-					</button>
-					{#if !decided.sendBack}
-						<div
-							class={tip && 'tooltip tooltip-top'}
-							data-tip={tip}
-						>
+					<input type="hidden" name="cards" value={fingerprint(cards)} />
+				{/if}
+				<DecisionBar hideStatus={holding}>
+					{#snippet note()}
+						{#if desk.noteOpen}
+							<div class="sendback">
+								<label for="note" class="lead">What should the session change?</label>
+								<p class="muted">
+									{packet ? 'Your verdicts go with this note.' : 'The session reads it as the reason; leave it empty to send back without one.'}
+								</p>
+								<textarea
+									id="note"
+									name="note"
+									class="textarea desk-field w-full"
+									bind:this={noteField}
+									disabled={desk.held}
+								></textarea>
+								<div class="acts">
+									<button type="button" class="btn" disabled={desk.held} onclick={closeNote}>Cancel <kbd>Esc</kbd></button>
+									<button class="btn btn-primary" formaction="?/reject" bind:this={sendButton} disabled={desk.held}>
+										Send back <kbd>Ctrl</kbd><kbd>Enter</kbd>
+									</button>
+								</div>
+							</div>
+						{/if}
+					{/snippet}
+					{#snippet reject()}
+						{#if data.kind !== 'triage' && !holding}
 							<button
-								class="btn btn-primary"
+								type="button"
+								class={['btn', decided.sendBack && !packet ? 'btn-primary' : 'btn-outline']}
+								bind:this={rejectButton} disabled={desk.held} onclick={openNote}>
+								Send back with note
+							</button>
+						{/if}
+					{/snippet}
+					{#snippet status()}
+						{#if packet}
+							<p class="s1">{barNote ?? packetLock}</p>
+							{#if barNote === null}
+								<p class="s2">{packetSub}</p>
+							{:else if withdrawn}
+								<p class="s2"><a class="link" href={withdrawn}>Open the board</a></p>
+							{/if}
+						{:else if data.kind === 'triage'}
+							<p class="s1">{rows.length} calls, {changed === 0 ? 'none' : changed} changed</p>
+							<p class="s2">Submit sends your calls back to the session.</p>
+						{:else if decided.sendBack}
+							<p class="s1">Sending back</p>
+							<p class="s2">You chose to send this back to the session.</p>
+						{:else if decided.open.length}
+							<p class="s1">{decided.open.length} {decided.open.length === 1 ? 'decision' : 'decisions'} left</p>
+							<p class="s2">
+								Decide <a class="link" href="#card-{cards.indexOf(decided.open[0])}">{decided.open[0].title}</a> to unlock Approve.
+							</p>
+						{:else}
+							<p class="s1">Ready to approve</p>
+							<p class="s2">{readySub}</p>
+						{/if}
+					{/snippet}
+					{#snippet hold()}
+						{#if holding}
+							<div class="holding">
+								<div class="min-w-0 flex-1" aria-hidden="true">
+									<p class="s1">{holdPaused ? 'Paused' : `Sending in ${holdLeft} s`}</p>
+									<p class="s2">{holdPaused ? 'Move off the bar to carry on.' : 'Point at the bar to pause.'}</p>
+									<progress class="progress progress-primary" value={holdLeft} max="5"></progress>
+								</div>
+								<button type="button" class="btn" id="undo" onclick={() => desk.undo?.()}>Undo <kbd class="desk-sk">Z</kbd></button>
+							</div>
+						{/if}
+					{/snippet}
+					{#snippet approve()}
+						{#if holding}
+							<!-- The hold block carries Undo; the approval is gone until the hold ends. -->
+						{:else if packet}
+							<button
+								type="submit"
+								class="btn btn-primary bar-approve"
 								formaction="?/approve"
 								bind:this={approveButton}
 								aria-describedby="bar-state"
-								disabled={desk.held || !approvable}
+								aria-disabled={openAsks.length > 0}
+								disabled={desk.held}
+								onclick={(e) => {
+									e.preventDefault();
+									approvePacket();
+								}}
 							>
-								<svg class="size-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 5 5 9-10" /></svg>
-								{data.kind === 'pr' ? 'Approve and merge' : 'Approve'} <kbd class={[KEY, 'desk-sk']}>A</kbd>
+								Approve the packet <kbd>Ctrl</kbd><kbd>Enter</kbd>
 							</button>
-						</div>
-					{/if}
-				{/if}
-			</div>
-		</form>
-	{/if}
-</div>
-
-{#snippet undoIcon()}
-	<svg class="size-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 14 4 9l5-5M4 9h11a5 5 0 0 1 0 10h-3" /></svg>
-{/snippet}
-
+						{:else if data.kind === 'triage'}
+							<button class="btn btn-primary" bind:this={submitButton} disabled={desk.held}>
+								Submit calls <kbd>Ctrl</kbd><kbd>Enter</kbd>
+							</button>
+						{:else if !decided.sendBack}
+							<div class={tip && 'tooltip tooltip-top'} data-tip={tip}>
+								<button
+									class="btn btn-primary"
+									formaction="?/approve"
+									bind:this={approveButton}
+									aria-describedby="bar-state"
+									disabled={desk.held || !approvable}
+								>
+									{data.kind === 'pr' ? 'Approve and merge' : 'Approve'} <kbd class="desk-sk">A</kbd>
+								</button>
+							</div>
+						{/if}
+					{/snippet}
+				</DecisionBar>
+			</form>
+		{/if}
+	{/snippet}
+</Frame>
 
 {#if data.kind === 'packet' && data.irreversible && !data.decided}
 	<dialog id="confirm" class="modal" aria-labelledby="confirm-title" bind:this={confirmDialog}>

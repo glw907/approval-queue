@@ -1,45 +1,38 @@
 <!-- @component
-The page skeleton: the queue in a drawer, the open item or the empty state beside it, the
-shortcut sheet, the live region, and the undo toast. One `keydown` listener on the document turns
-every key into a `keyAction`; the queue and the sheet act on it here, and the open item acts on
-the rest through `desk.handlers`.
+The page skeleton: the queue rail pinned left and the open screen beside it, then the shortcut
+sheet, the live region, and the undo toast. Below 1024px the rail is a modal drawer opened from the
+app bar. One `keydown` listener on the document turns every key into a `keyAction`; the rail, the
+drawers, and the sheet act on it here, and the open screen acts on the rest through `desk.handlers`.
 -->
 <script lang="ts">
 	import '../app.css';
 	import { afterNavigate, invalidate } from '$app/navigation';
 	import { page } from '$app/state';
-	import { onMount, tick } from 'svelte';
+	import { onMount } from 'svelte';
 	import { age, SINGLES } from '#lib/board.ts';
+	import { closeDrawers, setDrawer } from '#lib/components/frame/drawers.ts';
 	import { desk } from '#lib/desk.svelte.ts';
 	import { keyAction } from '#lib/keys.ts';
 
 	let { children, data } = $props();
 
 	const KINDS = { pr: 'PR', design: 'Design', triage: 'Triage', packet: 'Packet' };
-	const OUTCOMES = { approve: 'Approved', reject: 'Rejected', submit: 'Submitted' };
+	const OUTCOMES = { approve: 'Approved', reject: 'Sent back', submit: 'Submitted' };
 
-	let drawerOpen = $state(false);
 	let sheet: HTMLDialogElement;
-	let focusedId = $state<string | null>(null);
+	let railButton = $state<HTMLButtonElement>();
 	const currentId = $derived(page.params.id);
 
-	/** The queue by initiative, then lead repo, with every item that is not a packet under "Single items" last. */
+	/** The queue by initiative, with every item that is not a packet under "Single items" last. */
 	const sidebar = $derived.by(() => {
 		const initiativeOf = (item: (typeof data.queue)[number]) =>
 			item.kind !== 'packet'
 				? SINGLES
 				: item.initiativeTitle || (item.initiative && item.initiative !== 'none' ? item.initiative : 'No initiative');
-		const groups = new Map<string, Map<string, typeof data.queue>>();
-		for (const item of data.queue) {
-			const repos = groups.get(initiativeOf(item)) ?? new Map<string, typeof data.queue>();
-			repos.set(item.repo, [...(repos.get(item.repo) ?? []), item]);
-			groups.set(initiativeOf(item), repos);
-		}
+		const groups = new Map<string, typeof data.queue>();
+		for (const item of data.queue) groups.set(initiativeOf(item), [...(groups.get(initiativeOf(item)) ?? []), item]);
 		return [...groups]
-			.map(([title, repos]) => ({
-				title,
-				repos: [...repos].sort(([a], [b]) => a.localeCompare(b))
-			}))
+			.map(([title, items]) => ({ title, items }))
 			.sort((a, b) => Number(a.title === SINGLES) - Number(b.title === SINGLES));
 	});
 
@@ -50,16 +43,20 @@ the rest through `desk.handlers`.
 		} catch {
 			// The page works without storage; the switch just stays on.
 		}
-		return () => clearInterval(poll);
+		// A drawer left open across a resize would leave the page behind it inert for no reason.
+		const wide = matchMedia('(min-width: 1260px)');
+		wide.addEventListener('change', closeDrawers);
+		return () => {
+			clearInterval(poll);
+			wide.removeEventListener('change', closeDrawers);
+		};
 	});
 
 	$effect(() => {
 		document.documentElement.classList.toggle('desk-no-sk', !desk.singleKeys);
 	});
 
-	afterNavigate(() => {
-		drawerOpen = false;
-	});
+	afterNavigate(closeDrawers);
 
 	function saveSingleKeys() {
 		try {
@@ -83,22 +80,6 @@ the rest through `desk.handlers`.
 		}
 	}
 
-	async function setDrawer(open: boolean) {
-		drawerOpen = open;
-		await tick();
-		if (!open) {
-			document.getElementById('queue-open')?.focus();
-			return;
-		}
-		// The panel is visible only part way through DaisyUI's transition, so focus retries each frame.
-		const target = () => document.querySelector<HTMLElement>('[data-q]') ?? document.getElementById('open-keys');
-		const focusIn = (tries = 0) => {
-			target()?.focus();
-			if (document.activeElement !== target() && tries < 60) requestAnimationFrame(() => focusIn(tries + 1));
-		};
-		focusIn();
-	}
-
 	function moveQueue(step: number) {
 		const links = [...document.querySelectorAll<HTMLAnchorElement>('[data-q]')];
 		if (!links.length) return;
@@ -118,8 +99,8 @@ the rest through `desk.handlers`.
 		// An open confirm dialog makes the page behind it inert, and Escape closes it natively.
 		// The shortcut sheet is the exception: `keyAction` lets `?` close it.
 		if (document.querySelector('dialog[open]:not(#keys)')) return;
-		if (e.key === 'Escape' && drawerOpen) {
-			setDrawer(false);
+		if (e.key === 'Escape' && (desk.railOpen || desk.paneOpen)) {
+			closeDrawers();
 			return;
 		}
 		const action = keyAction(
@@ -152,107 +133,82 @@ the rest through `desk.handlers`.
 
 <svelte:document onkeydown={onKeydown} />
 
-<div class="drawer lg:drawer-open">
-	<input
-		id="queue-toggle"
-		type="checkbox"
-		class="drawer-toggle"
-		aria-label="Show the queue"
-		tabindex="-1"
-		bind:checked={drawerOpen}
-		onchange={() => !drawerOpen && document.getElementById('queue-open')?.focus()}
-	/>
-	<div class="drawer-content flex min-h-dvh min-w-0 flex-col">
-		<header class="navbar min-h-12 border-b border-base-300 bg-base-200 px-3 lg:hidden">
+<div class="shell">
+	<nav
+		id="rail"
+		class={['rail', desk.railOpen && 'open']}
+		aria-label="Queue"
+		role={desk.railOpen ? 'dialog' : undefined}
+		aria-modal={desk.railOpen ? 'true' : undefined}
+	>
+		<button type="button" class="drawer-x" aria-label="Close the queue" onclick={closeDrawers}>
+			<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
+		</button>
+		<div class="title"><a href="/" data-sveltekit-replacestate>Design &amp; PR Approvals</a></div>
+		<div class="sub" aria-live="polite">{data.queue.length} waiting</div>
+		{#each sidebar as group, g (group.title)}
+			<h2 class="group" id="nav-{g}">{group.title}</h2>
+			<ul class="rail-list" aria-labelledby="nav-{g}">
+				{#each group.items as item (item.id)}
+					<li>
+						<a
+							href="/item/{item.id}"
+							data-q
+							class={['q', item.id === currentId && 'on']}
+							aria-current={item.id === currentId ? 'page' : undefined}
+						>
+							<span>{item.headline ?? item.title}</span>
+							<span class="meta">
+								<span>{item.kind === 'packet' ? KINDS[item.kind] : `${KINDS[item.kind]} · ${label(item)}`}</span>
+								<span class="tabular-nums">{age(item.created)}</span>
+							</span>
+						</a>
+					</li>
+				{/each}
+			</ul>
+		{:else}
+			<p class="dq">Nothing waiting.</p>
+		{/each}
+		{#if data.decided.length}
+			<h2 class="group">Decided this session</h2>
+			<ul class="rail-list">
+				{#each data.decided as { meta, decision } (meta.id)}
+					<li class="dq">
+						<span title={meta.headline ?? meta.title}>{meta.headline ?? `${KINDS[meta.kind]} ${label(meta)}`}</span>
+						<span>{OUTCOMES[decision]}</span>
+					</li>
+				{/each}
+			</ul>
+		{/if}
+		{#if desk.page === 'triage'}
+			<p class="dq desk-sk">j k next and previous</p>
+		{/if}
+		<button type="button" class="rail-keys" id="open-keys" onclick={toggleSheet}>
+			Keyboard shortcuts <kbd class="desk-sk">?</kbd>
+		</button>
+	</nav>
+
+	<div class="content">
+		<div class="appbar">
 			<button
 				type="button"
-				class="btn btn-sm btn-ghost"
+				class="appbtn"
 				id="queue-open"
-				aria-controls="queue-nav"
-				aria-expanded={drawerOpen}
-				onclick={() => setDrawer(true)}
+				bind:this={railButton}
+				aria-controls="rail"
+				aria-expanded={desk.railOpen}
+				onclick={() => setDrawer('rail', true, railButton)}
 			>
-				Queue ({data.queue.length})
+				<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16" /></svg>
+				<span>Queue</span><span class="count">{data.queue.length}</span>
 			</button>
-			<span class="ml-2 text-sm font-semibold">Design & PR Approvals</span>
-		</header>
+			<span class="appname">Design &amp; PR Approvals</span>
+		</div>
 		{@render children()}
 	</div>
-	<div class="drawer-side z-30">
-		<label
-			for="queue-toggle"
-			aria-label="Close the queue"
-			class="drawer-overlay"
-		></label>
-		<nav id="queue-nav" aria-label="Queue" class="flex min-h-full w-72 flex-col bg-base-200">
-			<div class="px-4 pt-5 pb-2">
-				<a href="/" data-sveltekit-replacestate class="font-semibold hover:text-primary">Design & PR Approvals</a>
-				<p class="text-sm text-(--color-muted)" aria-live="polite">{data.queue.length} waiting</p>
-			</div>
-			{#each sidebar as group, g (group.title)}
-				<section aria-labelledby="nav-{g}" class="px-2">
-					<h2 id="nav-{g}" class="px-3 pt-2.5 pb-1 text-sm font-semibold">{group.title}</h2>
-					<ul class="menu menu-sm w-full gap-1 p-0">
-						{#each group.repos as [repo, items] (repo)}
-							<li>
-								<h3 class="menu-title font-mono">{repo}</h3>
-								<ul>
-									{#each items as item (item.id)}
-										<li>
-											<a
-												href="/item/{item.id}"
-												data-q
-												class={{
-													'menu-active bg-base-300 text-base-content': item.id === currentId,
-													'menu-focus': item.id === focusedId
-												}}
-												aria-current={item.id === currentId ? 'page' : undefined}
-												onfocus={() => (focusedId = item.id)}
-												onblur={() => (focusedId = null)}
-											>
-												<div class="w-full">
-													<div class="leading-snug">{item.headline ?? item.title}</div>
-													<div class={['mt-0.5 flex justify-between gap-2 text-xs', item.id === currentId ? 'text-base-content/75' : 'text-(--color-muted)']}>
-														<span>{item.kind === 'packet' ? KINDS[item.kind] : `${KINDS[item.kind]} · ${label(item)}`}</span>
-														<span class="tabular-nums">{age(item.created)}</span>
-													</div>
-												</div>
-											</a>
-										</li>
-									{/each}
-								</ul>
-							</li>
-						{/each}
-					</ul>
-				</section>
-			{:else}
-				<p class="px-5 py-2 text-sm text-(--color-muted)">Nothing waiting.</p>
-			{/each}
-			{#if data.decided.length}
-				<div class="px-4 py-3">
-					<h2 class="text-sm font-semibold text-(--color-muted)">Decided this session</h2>
-					<ul class="mt-1 text-xs">
-						{#each data.decided as { meta, decision } (meta.id)}
-							<li class="flex items-baseline justify-between gap-3 py-1">
-								<span class="truncate">{KINDS[meta.kind]} {label(meta)}</span>
-								<span class="shrink-0">{OUTCOMES[decision]}</span>
-							</li>
-						{/each}
-					</ul>
-				</div>
-			{/if}
-			<div class="grow"></div>
-			<div class="flex flex-wrap items-center gap-x-2 gap-y-1 px-4 py-3 text-xs text-(--color-muted)">
-				{#if desk.page === 'triage'}
-					<span class="desk-sk">j k next and previous</span>
-				{/if}
-				<button type="button" class="btn btn-sm btn-ghost -ms-2" id="open-keys" onclick={toggleSheet}>
-					Keyboard shortcuts <kbd class="kbd kbd-xs desk-kbd desk-sk">?</kbd>
-				</button>
-			</div>
-		</nav>
-	</div>
 </div>
+
+<div class="scrim" hidden={!desk.railOpen && !desk.paneOpen} role="presentation" onclick={closeDrawers}></div>
 
 <dialog
 	id="keys"
@@ -294,7 +250,8 @@ the rest through `desk.handlers`.
 							<td>Undo the last decision, until the next item loads</td>
 						</tr>
 						<tr><td><kbd class="kbd kbd-xs desk-kbd desk-sk">?</kbd></td><td>Show or hide this sheet</td></tr>
-						<tr><td><kbd class="kbd kbd-xs desk-kbd">Esc</kbd></td><td>Close the sheet or the note</td></tr>
+						<tr><td><kbd class="kbd kbd-xs desk-kbd">F8</kbd></td><td>Next open call</td></tr>
+						<tr><td><kbd class="kbd kbd-xs desk-kbd">Esc</kbd></td><td>Close the sheet, a panel, or the note</td></tr>
 					</tbody>
 				</table>
 			</section>

@@ -24,6 +24,13 @@ describe('keyAction', () => {
 		expect(keyAction('r', none, ctx({ approveLocked: true }))).toBe('open-note');
 	});
 
+	it('jumps to the next call on F8, from a field and with single keys off, but not under the sheet', () => {
+		expect(keyAction('F8', none, base)).toBe('next-call');
+		expect(keyAction('F8', none, ctx({ typing: true, singleKeys: false, page: 'packet' }))).toBe('next-call');
+		expect(keyAction('F8', { ...none, ctrl: true }, base)).toBeNull();
+		expect(keyAction('F8', none, ctx({ sheetOpen: true }))).toBeNull();
+	});
+
 	it('opens the note on r, and focuses the filter on / for a PR only', () => {
 		expect(keyAction('r', none, ctx({ page: 'design' }))).toBe('open-note');
 		expect(keyAction('/', none, base)).toBe('focus-filter');
