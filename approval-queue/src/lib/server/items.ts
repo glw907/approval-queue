@@ -17,7 +17,7 @@ export interface SubmittedRow {
 
 export interface ItemMeta {
 	id: string;
-	kind: 'pr' | 'design' | 'triage' | 'packet' | 'blueprint';
+	kind: 'pr' | 'design' | 'triage' | 'packet' | 'blueprint' | 'page' | 'change';
 	repo: string;
 	title: string;
 	/** The brief's headline, written by the command; absent on an item it wrote before briefs. */
@@ -34,6 +34,10 @@ export interface ItemMeta {
 	worktree?: string;
 	/** A blueprint's blob at HEAD when it was queued. */
 	blob?: string;
+	/** A page's pull request, as `owner/repo#n`. */
+	pr?: string;
+	/** The page's pull request head when the item was queued. */
+	prHead?: string;
 	/** A packet's initiative id, or `none`; the sidebar and the board group by it. */
 	initiative?: string;
 	/** The initiative record's title; empty for `none`. */
@@ -68,24 +72,41 @@ export interface PacketPart {
 	pr?: PrMeta;
 }
 
+/** One document a code PR changed, as the change review shows it. */
+export interface ChangeDoc {
+	path: string;
+	kind: 'blueprint' | 'page';
+	/** The document at the PR's head. */
+	doc: string;
+	/** The document at the PR's base, empty for a new file. */
+	original: string;
+}
+
+/** A blueprint or a page under review: the file as its worktree commits it, and the notes on it. */
+export interface DocContent {
+	/** The file as committed at the worktree's HEAD now, with its blob and that commit. */
+	doc: string;
+	blob: string;
+	commit: string;
+	/** The file as it was queued, which the review marks changed lines against. */
+	original: string;
+	notes: Note[];
+	worktree: string;
+	file: string;
+	/** The worktree or the file is gone, so the review shows the queued copy and takes no edits. */
+	missing: boolean;
+	/** A page's pull request as `owner/repo#n`, and its head when queued; a blueprint has neither. */
+	pr?: string;
+	prHead?: string;
+}
+
 export type ItemContent =
 	| { kind: 'pr'; body: string; diff: string; pr?: PrMeta }
 	| { kind: 'design'; doc: string }
 	| { kind: 'packet'; packet: Packet; parts: PacketPart[] }
-	| {
-			kind: 'blueprint';
-			/** The file as committed at the worktree's HEAD now, with its blob and that commit. */
-			doc: string;
-			blob: string;
-			commit: string;
-			/** The file as it was queued, which the review marks changed lines against. */
-			original: string;
-			notes: Note[];
-			worktree: string;
-			file: string;
-			/** The worktree or the file is gone, so the review shows the queued copy and takes no edits. */
-			missing: boolean;
-	  }
+	| ({ kind: 'blueprint' } & DocContent)
+	| ({ kind: 'page' } & DocContent)
+	| { kind: 'change'; body: string; diff: string; pr?: PrMeta; docs: ChangeDoc[]; notes: Note[] }
 	| ({ kind: 'triage' } & Triage);
 
 export type Decision =
@@ -95,7 +116,7 @@ export type Decision =
 			/** A packet's per-part verdicts and per-ask answers; the command joins the heads and hashes. */
 			parts?: Array<{ ref: string; verdict: string }>;
 			asks?: Array<{ index: number; choice: string }>;
-			/** A blueprint's answered calls by note id, with the choice label. */
+			/** A blueprint's or change's answered calls by note id, with the choice label. */
 			calls?: Array<{ id: string; choice: string }>;
 			/** A blueprint's disputed notes answered by keeping the author's text, with the reason. */
 			waived?: Array<{ id: string; choice: string; reason: string }>;
@@ -188,8 +209,10 @@ export async function readItem(root: string, id: string): Promise<Item | undefin
 		content = { kind: 'design', doc: await readFile(join(dir, 'doc.md'), 'utf8') };
 	} else if (meta.kind === 'packet') {
 		content = await readPacket(dir);
-	} else if (meta.kind === 'blueprint') {
+	} else if (meta.kind === 'blueprint' || meta.kind === 'page') {
 		content = await readBlueprint(dir, meta);
+	} else if (meta.kind === 'change') {
+		content = await readChange(dir);
 	} else if (meta.kind === 'triage') {
 		const triage = await readJson<Triage>(join(dir, 'triage.json'));
 		// The command validates the file before writing it; a missing or old-shape file renders as empty.
@@ -229,8 +252,31 @@ async function readPacket(dir: string): Promise<ItemContent> {
 	return { kind: 'packet', packet, parts };
 }
 
-/** Reads a blueprint item: the stored notes and queued copy, and the file as its worktree now commits it. */
+/** Reads a change item: the PR's body, diff, and metadata, and each changed document at the head and the base. */
+async function readChange(dir: string): Promise<ItemContent> {
+	const lf = (text: string) => text.replace(/\r\n/g, '\n');
+	const pr = await readJson<PrMeta>(join(dir, 'pr.json'));
+	const listed = (await readJson<Array<Pick<ChangeDoc, 'path' | 'kind'>>>(join(dir, 'docs.json'))) ?? [];
+	const docs: ChangeDoc[] = [];
+	for (const [k, { path, kind }] of listed.entries()) {
+		const at = join(dir, 'docs', String(k));
+		const original = await readFile(join(at, 'old.md'), 'utf8').catch(() => '');
+		docs.push({ path, kind, doc: lf(await readFile(join(at, 'new.md'), 'utf8')), original: lf(original) });
+	}
+	return {
+		kind: 'change',
+		body: await readFile(join(dir, 'body.md'), 'utf8'),
+		diff: await readFile(join(dir, 'diff.patch'), 'utf8'),
+		docs,
+		notes: (await readJson<Note[]>(join(dir, 'notes.json'))) ?? [],
+		...(pr && { pr })
+	};
+}
+
+/** Reads a blueprint or page item: the stored notes and queued copy, and the file as its worktree now commits it. */
 async function readBlueprint(dir: string, meta: ItemMeta): Promise<ItemContent> {
+	const kind = meta.kind === 'page' ? 'page' : 'blueprint';
+	const prs = kind === 'page' ? { pr: meta.pr ?? '', prHead: meta.prHead ?? '' } : {};
 	// The editor works in LF, so the anchors are resolved and the lines compared in LF too.
 	const lf = (text: string) => text.replace(/\r\n/g, '\n');
 	const original = lf(await readFile(join(dir, 'doc.md'), 'utf8'));
@@ -239,9 +285,9 @@ async function readBlueprint(dir: string, meta: ItemMeta): Promise<ItemContent> 
 	const file = meta.file ?? '';
 	try {
 		const now = await committed(worktree, file);
-		return { kind: 'blueprint', doc: lf(now.text), blob: now.blob, commit: now.commit, original, notes, worktree, file, missing: false };
+		return { kind, doc: lf(now.text), blob: now.blob, commit: now.commit, original, notes, worktree, file, missing: false, ...prs };
 	} catch {
-		return { kind: 'blueprint', doc: original, blob: meta.blob ?? '', commit: '', original, notes, worktree, file, missing: true };
+		return { kind, doc: original, blob: meta.blob ?? '', commit: '', original, notes, worktree, file, missing: true, ...prs };
 	}
 }
 

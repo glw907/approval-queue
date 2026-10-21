@@ -11,7 +11,21 @@ vi.mock('$app/env/private', () => ({
 	}
 }));
 
-import { git, SAMPLE_DOC, SAMPLE_FILE, seedBlueprintItem, seedRepo } from '#lib/fixtures/seed-blueprint.ts';
+import {
+	CHANGE_DOCS,
+	git,
+	PAGE_DOC,
+	PAGE_FILE,
+	PAGE_HEAD,
+	PAGE_PR,
+	SAMPLE_DOC,
+	SAMPLE_FILE,
+	seedBlueprintItem,
+	seedChangeItem,
+	seedPageItem,
+	seedPageRepo,
+	seedRepo
+} from '#lib/fixtures/seed-blueprint.ts';
 import { seedPacket } from '#lib/fixtures/seed-packet.ts';
 import { actions, load } from './+page.server.ts';
 
@@ -629,5 +643,145 @@ describe('a blueprint', () => {
 	it('reject writes the note', async () => {
 		await call('reject', [['note', 'Fold the event section in.']]);
 		expect(await decision()).toEqual({ decision: 'reject', note: 'Fold the event section in.' });
+	});
+
+	it('a save on a decided item answers 404 and commits nothing', async () => {
+		await call('approve', answered(base));
+		const head = git(repo, 'rev-parse', 'HEAD');
+		await expect(call('save', [['text', `${SAMPLE_DOC}late\n`], ['base', base]])).rejects.toMatchObject({ status: 404 });
+		expect(git(repo, 'rev-parse', 'HEAD')).toBe(head);
+	});
+
+	it('an approve on a missing item answers 404', async () => {
+		await expect(call('approve', answered(base), '20261011T100000-9')).rejects.toMatchObject({ status: 404 });
+		await expect(call('approve', answered(base), '20261011T100000-9')).rejects.toMatchObject({ status: 404 });
+	});
+
+	it('an approve that races a save never names a commit older than HEAD, and no commit lands after it', async () => {
+		const edit = `${SAMPLE_DOC}raced\n`;
+		await Promise.all([call('approve', answered(base)), Promise.resolve(call('save', [['text', edit], ['base', base]])).catch(() => null)]);
+		const written = await decision().catch(() => null);
+		if (written) {
+			expect(written.commit).toBe(git(repo, 'rev-parse', 'HEAD'));
+			expect(written.blob).toBe(git(repo, 'rev-parse', `HEAD:${SAMPLE_FILE}`));
+		}
+		const count = git(repo, 'rev-list', '--count', 'HEAD');
+		await new Promise((r) => setTimeout(r, 50));
+		expect(git(repo, 'rev-list', '--count', 'HEAD')).toBe(count);
+	});
+});
+
+describe('a page', () => {
+	let repo: string;
+	let base: string;
+	beforeEach(async () => {
+		repo = await mkdtemp(join(tmpdir(), 'approval-queue-route-page-'));
+		base = await seedPageRepo(repo);
+		await seedPageItem(state.root, ID, repo, base);
+	});
+	afterEach(() => rm(repo, { recursive: true, force: true }));
+
+	const answered = (blob: string): [string, string][] => [
+		['call:D1', 'Keep the author\'s wording'],
+		['call:Q1', 'Keep it'],
+		['blob', blob]
+	];
+
+	it('load returns the page at HEAD, its pull request and head, and each note on its page anchor', async () => {
+		const data = (await load({ params: { id: ID } } as never)) as Record<string, any>;
+		expect(data).toMatchObject({
+			kind: 'page',
+			doc: PAGE_DOC,
+			blob: base,
+			page: 'Fix a slow build',
+			pageType: 'troubleshooting',
+			pr: { ref: PAGE_PR, url: 'https://github.com/glw907/sample/pull/7', head: PAGE_HEAD }
+		});
+		const text = (id: string) => {
+			const r = data.notes.find((n: { id: string }) => n.id === id).range;
+			return PAGE_DOC.slice(r[0], r[1]);
+		};
+		expect(text('D1')).toBe('Every image is resized on every build because the cache key includes the build time.');
+		expect(text('Q1')).toMatch(/^\| Step \| Typical time \|/);
+	});
+
+	it('a blueprint loads with no pull request', async () => {
+		await seedBlueprintItem(state.root, '20261011T100000-2', repo, base);
+		const data = (await load({ params: { id: '20261011T100000-2' } } as never)) as Record<string, any>;
+		expect(data).toMatchObject({ kind: 'blueprint', pr: null });
+	});
+
+	it('save commits the text with the review message; a stale base answers 409', async () => {
+		const text = PAGE_DOC.replace('a minute', 'two minutes');
+		const saved = (await call('save', [['text', text], ['base', base]])) as { blob: string };
+		expect(saved.blob).toBe(git(repo, 'rev-parse', `HEAD:${PAGE_FILE}`));
+		expect(git(repo, 'log', '-1', '--format=%s')).toBe(`Edit ${PAGE_FILE} in review`);
+		expect(await call('save', [['text', `${text}x`], ['base', base]])).toMatchObject({ status: 409 });
+	});
+
+	it('approve records the calls, the waived dispute, and the commit and blob at HEAD, and a second post answers 409', async () => {
+		await call('approve', answered(base));
+		expect(await decision()).toEqual({
+			decision: 'approve',
+			calls: [
+				{ id: 'D1', choice: "Keep the author's wording" },
+				{ id: 'Q1', choice: 'Keep it' }
+			],
+			waived: [{ id: 'D1', choice: "Keep the author's wording", reason: "Kept the author's wording" }],
+			commit: git(repo, 'rev-parse', 'HEAD'),
+			blob: base
+		});
+		expect(await call('approve', answered(base))).toMatchObject({ status: 409 });
+		await expect(call('save', [['text', PAGE_DOC], ['base', base]])).rejects.toMatchObject({ status: 404 });
+	});
+
+	it('approve with an open call, or against a stale blob, answers 400 and writes nothing', async () => {
+		expect(await call('approve', [['call:Q1', 'Keep it'], ['blob', base]])).toMatchObject({ status: 400 });
+		await call('save', [['text', `${PAGE_DOC}more\n`], ['base', base]]);
+		expect(await call('approve', answered(base))).toMatchObject({ status: 400 });
+		await expect(decision()).rejects.toThrow();
+	});
+
+	it('reject writes the note', async () => {
+		await call('reject', [['note', 'Say what the table measures.']]);
+		expect(await decision()).toEqual({ decision: 'reject', note: 'Say what the table measures.' });
+	});
+});
+
+describe('a change', () => {
+	beforeEach(() => seedChangeItem(state.root, ID));
+
+	it('load returns each changed document with its diff and notes, and the code diff without them', async () => {
+		const data = (await load({ params: { id: ID } } as never)) as Record<string, any>;
+		expect(data).toMatchObject({ kind: 'change', ref: 'glw907/cairn-cms#77', head: PAGE_HEAD });
+		expect(data.docs.map((d: { path: string }) => d.path)).toEqual(CHANGE_DOCS.map((d) => d.path));
+		expect(data.docs.map((d: { file: { adds: number } }) => d.file.adds)).toEqual([24, 1, 1]);
+		expect(data.groups.flatMap((g: { files: Array<{ path: string }> }) => g.files.map((f) => f.path))).toEqual(['drafter.toml']);
+		expect(data.totals).toEqual({ files: 1, adds: 3, dels: 1 });
+		const share = data.docs[2];
+		expect(share.notes.map((n: { id: string }) => n.id)).toEqual(['L1']);
+		const r = share.notes[0].range;
+		expect(share.doc.slice(r[0], r[1])).toMatch(/^The file reads `PUBLIC_ORIGIN`[\s\S]*\[Debug your site\]\(debug-your-site\.md#eventplatform-is-undefined\)[\s\S]*checks\.$/);
+		const audit = data.docs[1];
+		expect(audit.doc.slice(audit.notes[0].range[0]).startsWith('The engine, installed by the setup command')).toBe(true);
+		expect(audit.original).not.toBe(audit.doc);
+	});
+
+	it('approve records only the calls, and a second post answers 409', async () => {
+		await call('approve', [['call:Q1', 'Keep it']]);
+		expect(await decision()).toEqual({ decision: 'approve', calls: [{ id: 'Q1', choice: 'Keep it' }] });
+		expect(await call('approve', [['call:Q1', 'Keep it']])).toMatchObject({ status: 409 });
+	});
+
+	it('approve with the call open, or an unknown call, answers 400 and writes nothing', async () => {
+		expect(await call('approve', [])).toMatchObject({ status: 400 });
+		expect(await call('approve', [['call:Q1', 'Keep it'], ['call:L1', 'x']])).toMatchObject({ status: 400 });
+		await expect(decision()).rejects.toThrow();
+	});
+
+	it('reject writes the note, and save is refused', async () => {
+		expect(await call('save', [['text', 'x'], ['base', 'y']])).toMatchObject({ status: 400 });
+		await call('reject', [['note', 'Keep the old text.']]);
+		expect(await decision()).toEqual({ decision: 'reject', note: 'Keep the old text.' });
 	});
 });

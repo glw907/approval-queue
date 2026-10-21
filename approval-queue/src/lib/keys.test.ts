@@ -98,15 +98,18 @@ describe('keyAction', () => {
 		expect(keyAction('r', none, packet)).toBe('open-note');
 	});
 
-	it('approves a blueprint on Mod+Enter from the editor, locked or not, and never on a single key', () => {
-		const mod = { ...none, ctrl: true };
-		const editing = ctx({ page: 'blueprint', typing: true });
-		expect(keyAction('Enter', mod, editing)).toBe('approve');
-		expect(keyAction('Enter', mod, ctx({ page: 'blueprint', approveLocked: true }))).toBe('approve');
-		expect(keyAction('Enter', mod, ctx({ page: 'blueprint', held: true }))).toBeNull();
-		expect(keyAction('a', none, ctx({ page: 'blueprint' }))).toBeNull();
-		expect(keyAction('F8', none, editing)).toBe('next-call');
-	});
+	it.each(['blueprint', 'page', 'change'] as const)(
+		'approves a %s review on Mod+Enter from the editor, locked or not, and never on a single key',
+		(page) => {
+			const mod = { ...none, ctrl: true };
+			const editing = ctx({ page, typing: true });
+			expect(keyAction('Enter', mod, editing)).toBe('approve');
+			expect(keyAction('Enter', mod, ctx({ page, approveLocked: true }))).toBe('approve');
+			expect(keyAction('Enter', mod, ctx({ page, held: true }))).toBeNull();
+			expect(keyAction('a', none, ctx({ page }))).toBeNull();
+			expect(keyAction('F8', none, editing)).toBe('next-call');
+		}
+	);
 
 	it('sends a packet rejection on Mod+Enter with the note open, locked or not', () => {
 		const open = ctx({ page: 'packet', noteOpen: true, approveLocked: true });

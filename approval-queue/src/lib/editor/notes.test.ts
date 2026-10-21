@@ -49,7 +49,70 @@ describe('anchors', () => {
 	});
 });
 
+const PAGE = readFileSync(new URL('../fixtures/sample.page.md', import.meta.url), 'utf8');
+const PAGE_NOTES = JSON.parse(readFileSync(new URL('../fixtures/sample-page-notes.json', import.meta.url), 'utf8')) as Note[];
+const onPage = (name: string) => {
+	const r = anchors(PAGE, 'page').get(name);
+	return r && PAGE.slice(r[0], r[1]);
+};
+
+describe('anchors of a page', () => {
+	it('names a heading by its text, and counts paragraphs from 0 under the H1', () => {
+		expect(onPage('read-the-build-log.heading')).toBe('Read the build log');
+		expect(onPage('fix-a-slow-build.p0')).toBe('A slow build almost always has one slow step.\nThis page shows how to find it.');
+	});
+
+	it('counts paragraphs, list items, and tables in one sequence per heading, without trailing fact tags', () => {
+		expect(onPage('read-the-build-log.p0')).toBe('The build log names each step and its time. A step over a minute is worth a look.');
+		expect(onPage('read-the-build-log.p1')).toBe('Sort the steps by time.');
+		expect(onPage('read-the-build-log.p2')).toBe(
+			'Open the slowest one, then read its output\n  for the file it was working on. :fact[cc33]\n\n  Keep the log open while you work.'
+		);
+		expect(onPage('read-the-build-log.p3')).toBe('| Step | Typical time |\n| ---- | ------------ |\n| Images | 40 s |\n| Pages | 5 s |');
+		expect(onPage('read-the-build-log.p4')).toBeUndefined();
+	});
+
+	it('defines nothing in front matter, a directive container, or a code block, and counts blocks after them', () => {
+		expect([...anchors(PAGE, 'page').keys()].sort()).toEqual([
+			'cache-the-resized-images.heading',
+			'cache-the-resized-images.p0',
+			'cache-the-resized-images.p1',
+			'fix-a-slow-build.heading',
+			'fix-a-slow-build.p0',
+			'read-the-build-log.heading',
+			'read-the-build-log.p0',
+			'read-the-build-log.p1',
+			'read-the-build-log.p2',
+			'read-the-build-log.p3'
+		]);
+		expect(onPage('cache-the-resized-images.p1')).toBe('See [the cache guide](cache.md).');
+	});
+
+	it('keeps the first heading with a slug', () => {
+		const doc = '## Same\n\nFirst.\n\n## Same\n\nSecond.\n';
+		const found = anchors(doc, 'page');
+		expect(doc.slice(...found.get('same.p0')!)).toBe('First.');
+		expect(found.size).toBe(2);
+	});
+
+	it('does not read the blueprint scheme on a page, nor the page scheme on a blueprint', () => {
+		expect(anchors(DOC, 'page').has('find-the-slow-step.p2.cause')).toBe(false);
+		expect(anchors(PAGE).has('read-the-build-log.p3')).toBe(false);
+	});
+});
+
 describe('placeNotes', () => {
+	it('places a page’s notes with the page scheme', () => {
+		const placed = placeNotes(PAGE, PAGE_NOTES, 'page');
+		const text = (id: string) => {
+			const r = placed.find((n) => n.id === id)!.range!;
+			return PAGE.slice(r[0], r[1]);
+		};
+		expect(text('R1')).toMatch(/^The build log names each step/);
+		expect(text('D1')).toBe('Every image is resized on every build because the cache key includes the build time.');
+		expect(text('Q1')).toMatch(/^\| Step \| Typical time \|/);
+	});
+
 	it('places each note on its anchor and leaves an unknown anchor unplaced', () => {
 		const placed = placeNotes(DOC, NOTES);
 		expect(placed.map((n) => n.id)).toEqual(['C1', 'D1', 'Q1', 'X1']);

@@ -17,7 +17,7 @@ export type KeyAction =
 	| 'submit';
 
 export interface KeyContext {
-	page: 'pr' | 'design' | 'triage' | 'packet' | 'blueprint';
+	page: 'pr' | 'design' | 'triage' | 'packet' | 'blueprint' | 'page' | 'change';
 	/** The event target is a field that takes text. */
 	typing: boolean;
 	singleKeys: boolean;
@@ -58,7 +58,7 @@ export function keyAction(key: string, mods: KeyMods, context: KeyContext): KeyA
 		if (page === 'triage') return 'submit';
 		if (noteOpen) return 'send-rejection';
 		// Locked, the handler moves to the first open ask or call, matching the button it advertises.
-		return page === 'packet' || page === 'blueprint' ? 'approve' : null;
+		return page === 'packet' || page === 'blueprint' || page === 'page' || page === 'change' ? 'approve' : null;
 	}
 
 	// F8 is a function key, so like Ctrl+Enter it works from a field and ignores the single-key switch.

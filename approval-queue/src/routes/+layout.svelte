@@ -16,7 +16,7 @@ drawers, and the sheet act on it here, and the open screen acts on the rest thro
 
 	let { children, data } = $props();
 
-	const KINDS = { pr: 'PR', design: 'Design', triage: 'Triage', packet: 'Packet', blueprint: 'Blueprint' };
+	const KINDS = { pr: 'PR', design: 'Design', triage: 'Triage', packet: 'Packet', blueprint: 'Blueprint', page: 'Page', change: 'Change' };
 	const OUTCOMES = { approve: 'Approved', reject: 'Sent back', submit: 'Submitted' };
 
 	let sheet: HTMLDialogElement;

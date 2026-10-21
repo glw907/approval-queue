@@ -1,0 +1,254 @@
+#!/usr/bin/env bash
+# page-change.test.sh: prove the page and change forms of the approval-queue command, and `approved --kind`,
+# against this worktree's own copy, with curl, xdg-open, setsid, and gh stubbed on PATH (gh serves the cairn
+# change fixture) and a temp git repo as the page's worktree. Pins the refusals, the queued item, the printed
+# decisions, the log lines, and what `approved` answers per kind. Never starts the app, opens a browser, or
+# touches the live queue state.
+set -uo pipefail
+cd "$(dirname "$0")/.."
+SCRIPT="$(pwd)/bin/.local/bin/approval-queue"
+FX="$(pwd)/approval-queue/src/lib/fixtures"
+PAGE="$FX/sample.page.md"
+PAGE_NOTES="$FX/sample-page-notes.json"
+CHANGE="$FX/change"
+FILE=docs/extend/slow-build.md
+PR=glw907/sample#7
+fail=0
+root="$(mktemp -d)"
+bgpid=""
+trap '[ -n "$bgpid" ] && kill "$bgpid" 2>/dev/null; rm -rf "$root"' EXIT
+
+assert_eq() {
+  [ "$1" = "$2" ] || { echo "FAIL: $3: got '$1', want '$2'"; fail=1; }
+}
+
+live_log="$HOME/.local/state/approval-queue/decisions.jsonl"
+live_before=$(stat -c %s "$live_log" 2>/dev/null || echo none)
+
+stubs="$root/stubs"
+mkdir -p "$stubs"
+printf '#!/usr/bin/env bash\nexit 0\n' >"$stubs/curl"
+printf '#!/usr/bin/env bash\necho "$*" >>"$STUB_DIR/open.record"\n' >"$stubs/xdg-open"
+printf '#!/usr/bin/env bash\n[ "$1" = "-f" ] && shift\nexec "$@"\n' >"$stubs/setsid"
+# gh serves one PR from the fixture: the head and base commits are read from files, so a test can move the
+# head after queueing; a file at any other commit is a 404.
+cat >"$stubs/gh" <<'STUB'
+#!/usr/bin/env bash
+echo "$*" >>"$STUB_DIR/gh.record"
+head=$(cat "$STUB_DIR/head")
+base=$(cat "$STUB_DIR/base")
+case "$1 $2" in
+  "pr view")
+    case "$7" in
+      headRefOid) [ -e "$STUB_DIR/gh.down" ] && exit 1; jq -nc --arg h "$head" '{headRefOid: $h}' ;;
+      baseRefOid) jq -nc --arg b "$base" '{baseRefOid: $b}' ;;
+      *) jq -nc --arg h "$head" --argjson n "$3" \
+           '{body: "A change.\n", headRefOid: $h, number: $n, url: "https://github.com/glw907/cairn-cms/pull/\($n)",
+             headRefName: "retarget", baseRefName: "main", state: "OPEN",
+             statusCheckRollup: [{name: "gate", workflowName: "ci", status: "COMPLETED", conclusion: "SUCCESS"}]}' ;;
+    esac ;;
+  "pr diff") cat "$CHANGE/diff.patch" ;;
+  "api -H")
+    path=${4#repos/*/*/contents/}
+    sha=${path##*?ref=}
+    path=${path%%\?*}
+    if [ "$sha" = "$head" ]; then dir=head; elif [ "$sha" = "$base" ]; then dir=base; else echo "gh: Not Found (HTTP 404)" >&2; exit 1; fi
+    [ -f "$CHANGE/$dir/$path" ] || { echo "gh: Not Found (HTTP 404)" >&2; exit 1; }
+    cat "$CHANGE/$dir/$path" ;;
+  *) echo "gh stub: unexpected $*" >&2; exit 1 ;;
+esac
+STUB
+chmod +x "$stubs"/*
+export STUB_DIR="$root" CHANGE XDG_STATE_HOME="$root/state" PATH="$stubs:$PATH"
+export GIT_CONFIG_GLOBAL=/dev/null GIT_AUTHOR_NAME=Test GIT_AUTHOR_EMAIL=test@example.com \
+  GIT_COMMITTER_NAME=Test GIT_COMMITTER_EMAIL=test@example.com
+state="$XDG_STATE_HOME/approval-queue"
+log="$state/decisions.jsonl"
+printf 'head0000\n' >"$root/head"
+printf 'base0000\n' >"$root/base"
+
+repo="$root/sample"
+mkdir -p "$repo/docs/extend"
+git -C "$repo" init -q -b main
+cp "$PAGE" "$repo/$FILE"
+git -C "$repo" add "$FILE"
+git -C "$repo" commit -q -m "Add the page"
+
+wait_for() {
+  local i
+  for i in $(seq 50); do compgen -G "$1" >/dev/null && return 0; sleep 0.1; done
+  echo "FAIL: timed out waiting for $1"; fail=1
+  [ -s "$root/err" ] && sed 's/^/  stderr: /' "$root/err"
+  kill "$bgpid" 2>/dev/null; wait "$bgpid" 2>/dev/null; bgpid=""
+  return 1
+}
+
+dir=""
+queue() {
+  rm -rf "$state/items"
+  bash "$SCRIPT" "$@" >"$root/out" 2>"$root/err" &
+  bgpid=$!
+  dir=""
+  wait_for "$state/items/*/item.json" || return 1
+  dir=$(dirname "$(ls "$state"/items/*/item.json | head -1)")
+}
+
+rc=""
+decide() {
+  local i
+  printf '%s\n' "$1" >"$dir/decision.json.tmp"
+  mv "$dir/decision.json.tmp" "$dir/decision.json"
+  for i in $(seq 150); do kill -0 "$bgpid" 2>/dev/null || break; sleep 0.1; done
+  if kill -0 "$bgpid" 2>/dev/null; then
+    echo "FAIL: did not exit after the decision"; fail=1
+    [ -s "$root/err" ] && sed 's/^/  stderr: /' "$root/err"
+    ps -o pid,ppid,stat,args --ppid "$bgpid" >&2
+    kill "$bgpid"; wait "$bgpid" 2>/dev/null; bgpid=""; rc=hung; return
+  fi
+  wait "$bgpid"; rc=$?; bgpid=""
+}
+
+# refuse <label> <want stderr substring> <args>: the command exits 2 before queuing anything.
+refuse() {
+  local label=$1 want=$2 out
+  shift 2
+  rm -rf "$state/items"
+  out=$(bash "$SCRIPT" "$@" 2>&1 >/dev/null); local code=$?
+  assert_eq "$code" "2" "$label: exit code"
+  case "$out" in *"$want"*) ;; *) echo "FAIL: $label: stderr '$out' lacks '$want'"; fail=1 ;; esac
+  assert_eq "$(compgen -G "$state/items/*/item.json" | wc -l)" "0" "$label: nothing queued"
+  assert_eq "$(compgen -G "$state/items/*" | wc -l)" "0" "$label: no item directory"
+}
+
+# ---- page ----
+refuse "page without --pr" "usage:" page "$repo" T "$FILE"
+refuse "page with a bad ref" "owner/repo#n" page "$repo" T "$FILE" --pr glw907/sample
+refuse "page not a worktree" "is not a git worktree" page "$root/nowhere" T "$FILE" --pr "$PR"
+refuse "page uncommitted" "is not committed" page "$repo" T docs/extend/new.md --pr "$PR"
+refuse "page absolute path" "give the file as a path inside" page "$repo" T "/etc/hostname" --pr "$PR"
+refuse "page dotted path" "give the file as a path inside" page "$repo" T "docs/../$FILE" --pr "$PR"
+printf 'edit\n' >>"$repo/$FILE"
+refuse "page uncommitted change" "has uncommitted changes" page "$repo" T "$FILE" --pr "$PR"
+git -C "$repo" checkout -q -- "$FILE"
+printf '{"id":"A"}' >"$root/obj.json"
+refuse "page notes not an array" "a JSON array of notes" page "$repo" T "$FILE" --pr "$PR" --notes "$root/obj.json"
+jq '.[0].file = "x.md"' "$PAGE_NOTES" >"$root/file-field.json"
+refuse "page notes with a file field" "has an unknown field file" page "$repo" T "$FILE" --pr "$PR" \
+  --notes "$root/file-field.json"
+refuse "blueprint refuses --pr" "usage:" blueprint "$repo" T "$FILE" --pr "$PR"
+
+queued_blob=$(git -C "$repo" rev-parse "HEAD:$FILE")
+printf 'head1111\n' >"$root/head"
+queue page "$repo" "Approve the page Fix a slow build" "./$FILE" --pr "$PR" --notes "$PAGE_NOTES"
+assert_eq "$(jq -c '[.kind,.repo,.file,.blob,.pr,.prHead,.headline]' "$dir/item.json")" \
+  "[\"page\",\"sample\",\"$FILE\",\"$queued_blob\",\"$PR\",\"head1111\",\"Approve the page Fix a slow build\"]" "page queue: item.json"
+cmp -s "$dir/doc.md" "$PAGE" || { echo "FAIL: page queue: doc.md is not the committed file"; fail=1; }
+assert_eq "$(jq -c '[.[].id]' "$dir/notes.json")" '["R1","D1","Q1"]' "page queue: notes.json"
+assert_eq "$(grep -c 'headRefOid' "$root/gh.record")" "1" "page queue: one head read"
+
+# The page approve names the PR head at approval, not at queueing.
+printf 'Edited in review.\n' >>"$repo/$FILE"
+git -C "$repo" commit -q -am "Edit $FILE in review"
+approved_commit=$(git -C "$repo" rev-parse HEAD)
+approved_blob=$(git -C "$repo" rev-parse "HEAD:$FILE")
+printf 'head2222\n' >"$root/head"
+decide "{\"decision\":\"approve\",\"calls\":[{\"id\":\"D1\",\"choice\":\"Keep the author's wording\"},{\"id\":\"Q1\",\"choice\":\"Keep it\"}],\"waived\":[{\"id\":\"D1\",\"choice\":\"Keep the author's wording\",\"reason\":\"Kept the author's wording\"}],\"commit\":\"$approved_commit\",\"blob\":\"$approved_blob\"}"
+assert_eq "$rc" "0" "page approve: exit code"
+assert_eq "$(cat "$root/out")" \
+  "$(jq -cn --arg c "$approved_commit" --arg b "$approved_blob" --arg f "$FILE" --arg pr "$PR" \
+    '{decision: "approve", file: $f, commit: $c, blob: $b, pr: $pr, head: "head2222", calls: [{id: "D1", choice: "Keep the author'"'"'s wording"}, {id: "Q1", choice: "Keep it"}]}')" "page approve: stdout"
+assert_eq "$(wc -l <"$log")" "1" "page approve: one log line"
+assert_eq "$(jq -c '[.kind,.ref,.lane,.verdict,.blob,.commit,.pr,.head,.waived[0].id,.initiative]' "$log")" \
+  "[\"page\",\"sample:$FILE\",\"single\",\"approve\",\"$approved_blob\",\"$approved_commit\",\"$PR\",\"head2222\",\"D1\",null]" "page approve: log line"
+
+# approved matches the kind: a page line answers --kind page only, and a blueprint line the default only.
+bash "$SCRIPT" approved --kind page "$FILE" "$approved_blob"; assert_eq "$?" "0" "approved --kind page: the approved blob"
+bash "$SCRIPT" approved --kind page "./$FILE" "$approved_blob"; assert_eq "$?" "0" "approved --kind page: a ./ path"
+bash "$SCRIPT" approved "$FILE" "$approved_blob"; assert_eq "$?" "1" "approved: a page line never answers the blueprint form"
+bash "$SCRIPT" approved --kind blueprint "$FILE" "$approved_blob"; assert_eq "$?" "1" "approved --kind blueprint: a page line"
+bash "$SCRIPT" approved --kind page "$FILE" "$queued_blob"; assert_eq "$?" "1" "approved --kind page: the previous blob"
+bash "$SCRIPT" approved --kind change "$FILE" "$approved_blob" 2>/dev/null; assert_eq "$?" "2" "approved --kind: an unknown kind"
+bash "$SCRIPT" approved --kind page "$FILE" 2>/dev/null; assert_eq "$?" "2" "approved --kind page: usage"
+jq -nc --arg r "sample:blueprints/b.md" '{kind: "blueprint", ref: $r, verdict: "approve", blob: "bb"}' >>"$log"
+bash "$SCRIPT" approved blueprints/b.md bb; assert_eq "$?" "0" "approved: a blueprint line"
+bash "$SCRIPT" approved --kind page blueprints/b.md bb; assert_eq "$?" "1" "approved --kind page: a blueprint line"
+
+git -C "$repo" commit -q --allow-empty -m "A later commit"
+printf 'Later.\n' >>"$repo/$FILE"
+git -C "$repo" commit -q -am "A later edit"
+# A page send-back prints the note and logs a reject with the PR, which never counts as approved.
+queue page "$repo" T "$FILE" --pr "$PR"
+assert_eq "$(cat "$dir/notes.json")" "[]" "page no notes: empty notes.json"
+decide '{"decision":"reject","note":"Say what the table measures."}'
+assert_eq "$rc" "0" "page reject: exit code"
+assert_eq "$(cat "$root/out")" '{"decision":"reject","note":"Say what the table measures."}' "page reject: stdout"
+head_blob=$(git -C "$repo" rev-parse "HEAD:$FILE")
+assert_eq "$(tail -n 1 "$log" | jq -c '[.kind,.verdict,.blob,.pr,.head]')" "[\"page\",\"reject\",\"$head_blob\",\"$PR\",null]" "page reject: log line"
+bash "$SCRIPT" approved --kind page "$FILE" "$head_blob"; assert_eq "$?" "1" "approved --kind page: a rejected blob"
+
+# A head that gh cannot read at approval is a failure that logs nothing.
+lines=$(wc -l <"$log")
+queue page "$repo" T "$FILE" --pr "$PR"
+touch "$root/gh.down"
+decide "{\"decision\":\"approve\",\"calls\":[],\"commit\":\"$(git -C "$repo" rev-parse HEAD)\"}"
+assert_eq "$rc" "1" "page approve with gh down: exit code"
+assert_eq "$(wc -l <"$log")" "$lines" "page approve with gh down: nothing logged"
+rm -f "$root/gh.down"
+
+# ---- change ----
+printf 'head3333\n' >"$root/head"
+printf 'base3333\n' >"$root/base"
+CPR=glw907/cairn-cms#77
+refuse "change usage" "usage:" change "$CPR"
+refuse "change bad ref" "owner/repo#n" change cairn-cms T
+jq '.[0].file = "docs/other.md"' "$CHANGE/notes.json" >"$root/other-file.json"
+jq 'del(.[0].file)' "$CHANGE/notes.json" >"$root/no-file.json"
+jq '.[1].choices[0].edit = true' "$CHANGE/notes.json" >"$root/edit-choice.json"
+refuse "change notes naming a file the PR does not change" "names files that" change "$CPR" T --notes "$root/other-file.json"
+refuse "change notes without a file" "needs a file string" change "$CPR" T --notes "$root/no-file.json"
+refuse "change notes with an editing choice" "takes no edits" change "$CPR" T --notes "$root/edit-choice.json"
+
+queue change "$CPR" "Retarget two links" --notes "$CHANGE/notes.json"
+assert_eq "$(jq -c '[.kind,.repo,.number,.title,.headline,.head]' "$dir/item.json")" \
+  '["change","glw907/cairn-cms",77,"Retarget two links","Retarget two links","head3333"]' "change queue: item.json"
+assert_eq "$(jq -c '[.[] | [.kind, .path]]' "$dir/docs.json")" \
+  '[["blueprint","blueprints/docs/extend/restrict-admin-access.blueprint.yaml"],["page","docs/extend/run-cairn-audit-on-your-site.md"],["page","docs/extend/share-a-draft-preview.md"]]' "change queue: docs.json"
+cmp -s "$dir/docs/2/new.md" "$CHANGE/head/docs/extend/share-a-draft-preview.md" || { echo "FAIL: change queue: new.md is not the head copy"; fail=1; }
+cmp -s "$dir/docs/2/old.md" "$CHANGE/base/docs/extend/share-a-draft-preview.md" || { echo "FAIL: change queue: old.md is not the base copy"; fail=1; }
+cmp -s "$dir/diff.patch" "$CHANGE/diff.patch" || { echo "FAIL: change queue: diff.patch is not the PR diff"; fail=1; }
+assert_eq "$(jq -c '[.[].id]' "$dir/notes.json")" '["L1","Q1"]' "change queue: notes.json"
+assert_eq "$(jq -c '[.ref,.head]' "$dir/pr.json")" '["glw907/cairn-cms#77","head3333"]' "change queue: pr.json"
+
+# A second command for the same PR waits on neither; it is refused while this one is waiting.
+out=$(bash "$SCRIPT" change "$CPR" Again 2>&1 >/dev/null); assert_eq "$?" "2" "change queued twice: exit code"
+case "$out" in *"already in the waiting item"*) ;; *) echo "FAIL: change queued twice: stderr '$out'"; fail=1 ;; esac
+
+printf 'head4444\n' >"$root/head"
+decide '{"decision":"approve","calls":[{"id":"Q1","choice":"Keep it"}]}'
+assert_eq "$rc" "0" "change approve: exit code"
+assert_eq "$(cat "$root/out")" '{"decision":"approve","pr":"glw907/cairn-cms#77","head":"head4444","calls":[{"id":"Q1","choice":"Keep it"}]}' "change approve: stdout"
+assert_eq "$(tail -n 1 "$log" | jq -c '[.kind,.ref,.lane,.verdict,.head,.calls,.initiative]')" \
+  '["change","glw907/cairn-cms#77","single","approve","head4444",[{"id":"Q1","choice":"Keep it"}],null]' "change approve: log line"
+bash "$SCRIPT" approved --kind page docs/extend/share-a-draft-preview.md head4444; assert_eq "$?" "1" "approved: a change line answers nothing"
+
+printf 'head5555\n' >"$root/head"
+queue change "$CPR" "Retarget two links"
+assert_eq "$(cat "$dir/notes.json")" "[]" "change no notes: empty notes.json"
+decide '{"decision":"reject","note":"Keep the old link."}'
+assert_eq "$rc" "0" "change reject: exit code"
+assert_eq "$(cat "$root/out")" '{"decision":"reject","note":"Keep the old link."}' "change reject: stdout"
+assert_eq "$(tail -n 1 "$log" | jq -c '[.kind,.ref,.verdict,.head,.calls]')" '["change","glw907/cairn-cms#77","reject","head5555",null]' "change reject: log line"
+
+# A PR with no blueprint or page is a pr-form item, not a change.
+cp "$CHANGE/diff.patch" "$root/full.patch"
+awk '/^diff --git a\/drafter.toml/{p=1} p' "$root/full.patch" >"$root/code-only.patch"
+mkdir -p "$root/codeonly"
+cp "$root/code-only.patch" "$root/codeonly/diff.patch"
+rm -rf "$state/items"
+out=$(CHANGE="$root/codeonly" bash "$SCRIPT" change "$CPR" T 2>&1 >/dev/null); assert_eq "$?" "2" "change with no document: exit code"
+case "$out" in *"changes no blueprint or page"*) ;; *) echo "FAIL: change with no document: stderr '$out'"; fail=1 ;; esac
+assert_eq "$(compgen -G "$state/items/*/item.json" | wc -l)" "0" "change with no document: nothing queued"
+
+assert_eq "$(stat -c %s "$live_log" 2>/dev/null || echo none)" "$live_before" "the live log is untouched"
+[ "$fail" -eq 0 ] && echo "page-change.test.sh: ok"
+exit "$fail"

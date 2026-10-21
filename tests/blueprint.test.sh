@@ -90,6 +90,15 @@ rm "$repo/blueprints/new.blueprint.md"
 printf 'edit\n' >>"$repo/$FILE"
 refuse "uncommitted change" "has uncommitted changes" "$repo" T "$FILE"
 git -C "$repo" checkout -q -- "$FILE"
+mkdir -p "$repo/blueprints/dir"
+printf 'x\n' >"$repo/blueprints/dir/a.md"
+ln -s slow-build.blueprint.md "$repo/blueprints/link.md"
+git -C "$repo" add blueprints
+git -C "$repo" commit -q -m "Add a directory and a symlink"
+refuse "a tree" "is not a regular file" "$repo" T blueprints/dir
+refuse "a tree with a slash" "is not a regular file" "$repo" T blueprints/dir/
+refuse "a symlink" "is not a regular file" "$repo" T blueprints/link.md
+assert_eq "$(compgen -G "$state/items/*" | wc -l)" "0" "a tree or a symlink: no item directory"
 refuse "notes not JSON" "is not JSON" "$repo" T "$FILE" --notes "$DOC"
 printf '{"id":"A"}' >"$root/obj.json"
 refuse "notes not an array" "a JSON array of notes" "$repo" T "$FILE" --notes "$root/obj.json"

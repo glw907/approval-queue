@@ -7,7 +7,7 @@ import { render, renderInline } from '#lib/markdown.ts';
 import { checksSummary, reviewSection, reviewVerdict, technicalNotes, withoutBrief } from '#lib/pr-summary.ts';
 import { nextItem } from '#lib/queue.ts';
 import { frontMatter, placeNotes } from '#lib/editor/notes.ts';
-import { buildBlueprintApprove, isClean, saveFile } from '#lib/server/blueprint.ts';
+import { buildBlueprintApprove, buildChangeApprove, commitText, isClean, queued } from '#lib/server/blueprint.ts';
 import { buildApprove, isIrreversible, packetFingerprint } from '#lib/server/packet-decision.ts';
 import {
 	listWaiting,
@@ -128,22 +128,62 @@ export const load: PageServerLoad = async ({ params }) => {
 			minutes: Math.ceil(words / 230)
 		};
 	}
-	if (content.kind === 'blueprint') {
-		const front = frontMatter(content.original);
+	if (content.kind === 'change') {
+		const groups = fileGroups(content.diff);
+		const files = groups.flatMap((g) => g.files);
+		const docPaths = new Set(content.docs.map((d) => d.path));
+		const code = groups
+			.map((g) => ({ ...g, files: g.files.filter((f) => !docPaths.has(f.path)) }))
+			.filter((g) => g.files.length);
+		const codeFiles = code.flatMap((g) => g.files);
 		return {
 			meta,
 			decided,
-			kind: 'blueprint' as const,
+			kind: 'change' as const,
+			ref: `${meta.repo}#${meta.number ?? ''}`,
+			head: meta.head ?? '',
+			checks: checksSummary(content.pr?.statusCheckRollup),
+			link: content.pr ? { url: content.pr.url, head: content.pr.headRefName, base: content.pr.baseRefName } : null,
+			docs: content.docs.map((d) => ({
+				path: d.path,
+				kind: d.kind,
+				doc: d.doc,
+				original: d.original,
+				notes: placeNotes(
+					d.doc,
+					content.notes.filter((n) => n.file === d.path),
+					d.kind
+				),
+				file: files.find((f) => f.path === d.path) ?? null
+			})),
+			groups: code,
+			totals: {
+				files: codeFiles.length,
+				adds: codeFiles.reduce((n, f) => n + f.adds, 0),
+				dels: codeFiles.reduce((n, f) => n + f.dels, 0)
+			},
+			decision
+		};
+	}
+	if (content.kind === 'blueprint' || content.kind === 'page') {
+		const front = frontMatter(content.original);
+		const pr = /^([^/#\s]+\/[^/#\s]+)#(\d+)$/.exec(content.pr ?? '');
+		return {
+			meta,
+			decided,
+			kind: content.kind,
+			// A page names its pull request and the head it was queued at; a blueprint has none.
+			pr: pr ? { ref: content.pr ?? '', url: `https://github.com/${pr[1]}/pull/${pr[2]}`, head: content.prHead ?? '' } : null,
 			doc: content.doc,
 			original: content.original,
 			blob: content.blob,
 			file: content.file,
 			missing: content.missing,
-			page: front.page || content.file.split('/').pop() || meta.title,
+			page: front.page || front.title || content.file.split('/').pop() || meta.title,
 			pageType: front.type ?? '',
 			track: front.track ?? '',
 			// Anchors resolve against the file as it is now, so a note follows a line an earlier save moved.
-			notes: placeNotes(content.doc, content.notes),
+			notes: placeNotes(content.doc, content.notes, content.kind),
 			decision
 		};
 	}
@@ -216,19 +256,35 @@ export const actions: Actions = {
 			const built = buildApprove(found.content, form);
 			return built.ok ? decideOnce(params.id, built.decision) : fail(400, { message: built.message });
 		}
-		if (found.content.kind === 'blueprint') {
-			const { content } = found;
+		if (found.content.kind === 'blueprint' || found.content.kind === 'page') {
 			if (found.decided) return fail(409, ALREADY_DECIDED);
-			if (content.missing) return fail(409, { message: `${content.file} is no longer committed in its worktree` });
 			const form = await request.formData().catch(() => null);
 			if (!form) return fail(400, { message: 'Not a form post' });
-			const clean = await isClean(content.worktree, content.file);
-			const built = buildBlueprintApprove(content.notes, form, { ...content, text: content.doc, clean });
+			const { worktree, file } = found.content;
+			// Behind every save already queued, so the HEAD it reads is the one the decision names and no
+			// later save can commit after it: a save on a decided item answers 404.
+			return queued(worktree, file, async () => {
+				const now = await readItem(APPROVAL_QUEUE_STATE, params.id);
+				if (!now) error(404, 'Not found');
+				const { content } = now;
+				if (now.decided) return fail(409, ALREADY_DECIDED);
+				if (content.kind !== 'blueprint' && content.kind !== 'page') return fail(400, { message: 'Not a document item' });
+				if (content.missing) return fail(409, { message: `${content.file} is no longer committed in its worktree` });
+				const clean = await isClean(content.worktree, content.file);
+				const built = buildBlueprintApprove(content.notes, form, { ...content, text: content.doc, clean });
+				return built.ok ? decideOnce(params.id, built.decision) : fail(400, { message: built.message });
+			});
+		}
+		if (found.content.kind === 'change') {
+			if (found.decided) return fail(409, ALREADY_DECIDED);
+			const form = await request.formData().catch(() => null);
+			if (!form) return fail(400, { message: 'Not a form post' });
+			const built = buildChangeApprove(found.content.notes, form);
 			return built.ok ? decideOnce(params.id, built.decision) : fail(400, { message: built.message });
 		}
 		const item = await readWaiting(params.id);
 		const { content } = item;
-		if (content.kind === 'triage' || content.kind === 'packet' || content.kind === 'blueprint') return fail(400, { message: 'Nothing to approve' });
+		if (content.kind !== 'pr' && content.kind !== 'design') return fail(400, { message: 'Nothing to approve' });
 		// The page disables Approve, but a post can still arrive without it; the server rebuilds the
 		// cards from the body and checks every pick itself.
 		const form = await request.formData().catch(() => null);
@@ -251,7 +307,7 @@ export const actions: Actions = {
 			const note = form.get('note');
 			return decideOnce(params.id, { decision: 'reject', note: typeof note === 'string' ? note : '' });
 		}
-		if (found.content.kind === 'blueprint') {
+		if (found.content.kind === 'blueprint' || found.content.kind === 'page' || found.content.kind === 'change') {
 			if (found.decided) return fail(409, ALREADY_DECIDED);
 			const note = (await request.formData().catch(() => null))?.get('note');
 			return decideOnce(params.id, { decision: 'reject', note: typeof note === 'string' ? note : '' });
@@ -261,16 +317,21 @@ export const actions: Actions = {
 		const note = (await request.formData()).get('note');
 		return decide(params.id, { decision: 'reject', note: typeof note === 'string' ? note : '' });
 	},
-	/** Writes a blueprint's text and commits it in its worktree, checked against the blob the page last saved. */
+	/** Writes a blueprint's or page's text and commits it in its worktree, checked against the blob the page last saved. */
 	save: async ({ params, request }) => {
 		const item = await readWaiting(params.id);
-		if (item.content.kind !== 'blueprint') return fail(400, { message: 'Not a blueprint item' });
+		if (item.content.kind !== 'blueprint' && item.content.kind !== 'page') return fail(400, { message: 'Not a document item' });
 		if (item.content.missing) return fail(409, { message: `${item.content.file} is no longer committed in its worktree` });
 		const form = await request.formData().catch(() => null);
 		const text = form?.get('text');
 		const base = form?.get('base');
 		if (typeof text !== 'string' || typeof base !== 'string') return fail(400, { message: 'Not a save' });
-		const saved = await saveFile(item.content.worktree, item.content.file, text, base);
+		const { worktree, file } = item.content;
+		const saved = await queued(worktree, file, async () => {
+			// An approve queued ahead of this save has decided the item, and the file stays as it approved it.
+			await readWaiting(params.id);
+			return commitText(worktree, file, text, base);
+		});
 		return saved.ok ? { blob: saved.blob, commit: saved.commit } : fail(saved.status, { message: saved.message });
 	},
 	submit: async ({ params, request }) => {
