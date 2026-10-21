@@ -35,8 +35,8 @@ author edits, and a send-back goes to that author with a note.
 
 <p class="bg bg-first bg-flat prline">
 	<span class="lead">Pull request.</span>
-	{#if data.link}<a href={data.link.url} target="_blank" rel="noopener noreferrer">{data.ref}</a>{:else}{data.ref}{/if}, head
-	<code>{data.head.slice(0, 9)}</code> when queued. Checks: {checks}
+	{#if data.link}<a href={data.link.url} target="_blank" rel="noopener noreferrer">{data.ref}</a>{:else}{data.ref}{/if}{#if data.head}, head
+		<code>{data.head.slice(0, 9)}</code> when queued{/if}. Checks: {checks}
 </p>
 <details class="bg">
 	<summary>
@@ -44,7 +44,7 @@ author edits, and a send-back goes to that author with a note.
 		<span><span class="lead">What you’re deciding.</span> Whether this pull request can merge with the blueprints and pages it edits.</span>
 	</summary>
 	<div class="body">
-		<p>Approving names the pull request’s head when you approve, so a commit added afterward needs a new approval.</p>
+		<p>Approving names the head shown above, the one these documents were read at, so a commit added before you approve needs a new approval.</p>
 		<p>You aren’t checking facts against the code. The notes show where a fact check changed a document.</p>
 	</div>
 </details>

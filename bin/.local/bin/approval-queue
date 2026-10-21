@@ -324,6 +324,19 @@ check_blueprint() {
   repo=$(basename "$(dirname "$common")")
 }
 
+# check_origin: refuses (exit 2) a page whose --pr names a repository other than the worktree's origin, so
+# the approval can never name a pull request the reviewed file does not belong to.
+check_origin() {
+  local url slug
+  if ! url=$(git -C "$worktree" remote get-url origin 2>/dev/null); then
+    echo "approval-queue: $worktree has no origin remote to match $pr against" >&2; exit 2
+  fi
+  slug=$(sed -E 's#^(https://github\.com/|ssh://git@github\.com/|git@github\.com:)##; s#/$##; s#\.git$##' <<<"$url")
+  if [ "${slug,,}" != "${pr_repo,,}" ]; then
+    echo "approval-queue: $pr is not in $worktree's repository, whose origin is $url" >&2; exit 2
+  fi
+}
+
 # pr_head <owner/repo> <n>: prints the PR's head commit, asking three times; returns 1 when gh cannot say.
 pr_head() {
   local out try
@@ -335,6 +348,18 @@ pr_head() {
     sleep 1
   done
   return 1
+}
+
+# head_unmoved <queued head>: refuses an approve (exit 1, nothing logged) when the PR's head is no longer the
+# head the item was queued at and the screen showed, since the approval would name commits Geoff never saw.
+head_unmoved() {
+  local now
+  now=$(pr_head "$pr_repo" "$number") \
+    || { echo "approval-queue: could not read the head of $pr to check it against $1; nothing was logged" >&2; exit 1; }
+  if [ "$now" != "$1" ]; then
+    echo "approval-queue: $pr moved from $1 to $now while it waited, so the approval does not cover it; nothing was logged; queue it again" >&2
+    exit 1
+  fi
 }
 
 # doc_kind <path>: prints blueprint or page for a path a change review shows as a document, else nothing. A
@@ -349,10 +374,12 @@ doc_kind() {
 }
 
 # gh_file <owner/repo> <path> <sha>: prints the file at that commit. Returns 3 when GitHub says it does not
-# exist there, and 1 for any other failure.
+# exist there, and 1 for any other failure. Each path segment is URI-encoded, so a path that holds `?` or `&`
+# cannot name another file or commit.
 gh_file() {
-  local err
-  if err=$(gh api -H 'Accept: application/vnd.github.raw+json' "repos/$1/contents/$2?ref=$3" 2>&1 >"$fetch.file" </dev/null); then
+  local err enc
+  enc=$(jq -rn --arg p "$2" --arg r "$3" '"\($p | split("/") | map(@uri) | join("/"))?ref=\($r | @uri)"')
+  if err=$(gh api -H 'Accept: application/vnd.github.raw+json' "repos/$1/contents/$enc" 2>&1 >"$fetch.file" </dev/null); then
     cat "$fetch.file"; rm -f "$fetch.file"; return 0
   fi
   rm -f "$fetch.file"
@@ -361,18 +388,37 @@ gh_file() {
   return 1
 }
 
-# queue_change: fetches the PR, then every changed blueprint and page at the PR's base and head, checks the
-# notes against them, and writes the item directory under the queue lock, item.json last. Sets repo to the
-# PR's owner/repo, head to its head commit, and leaves the lock released.
+# changed_paths <diff>: prints the path each file of a git diff has after the change, one per line. A path git
+# quotes (one with a control or non-ASCII byte) is skipped, and so is a header whose two paths differ: a
+# rename is read from its `rename to` line instead.
+changed_paths() {
+  awk '
+    /^diff --git / {
+      r = substr($0, 12)
+      if (substr(r, 1, 1) == "\"" || (length(r) - 5) % 2) next
+      n = (length(r) - 5) / 2
+      p = substr(r, 3, n)
+      if (substr(r, 1, 2) == "a/" && substr(r, 3 + n, 3) == " b/" && substr(r, 6 + n) == p) print p
+      next
+    }
+    /^rename to / { if (substr($0, 11, 1) != "\"") print substr($0, 11) }' "$1"
+}
+
+# queue_change: fetches the PR, then every changed blueprint and page at the merge base and the head, checks
+# the notes against them, and writes the item directory under the queue lock, item.json last. Sets repo to
+# the PR's owner/repo, head to its head commit, and leaves the lock released.
 queue_change() {
-  local base_sha path dk k=0 rc docs='[]' other unnamed
+  local tip base_sha path dk k=0 rc docs='[]' other unnamed
   repo=${pr_repo}
   change_notes=true
   check_notes
   fetch_pr "$fetch/pr" "$repo" "$number"
   head=$(jq -r '.head' "$fetch/pr/pr.json")
-  base_sha=$(gh pr view "$number" -R "$repo" --json baseRefOid </dev/null | jq -er '.baseRefOid') \
+  tip=$(gh pr view "$number" -R "$repo" --json baseRefOid </dev/null | jq -er '.baseRefOid') \
     || { echo "approval-queue: could not read the base of $pr" >&2; exit 1; }
+  # The merge base, not the base branch's tip, so edits main gained after the branch was cut never read as the change's.
+  base_sha=$(gh api "repos/$repo/compare/$tip...$head" --jq '.merge_base_commit.sha' </dev/null) && [ -n "$base_sha" ] \
+    || { echo "approval-queue: could not read the merge base of $pr" >&2; exit 1; }
   while IFS= read -r path; do
     dk=$(doc_kind "$path")
     [ -n "$dk" ] || continue
@@ -388,7 +434,7 @@ queue_change() {
     fi
     docs=$(jq -c --arg p "$path" --arg k "$dk" '. + [{path: $p, kind: $k}]' <<<"$docs")
     k=$((k + 1))
-  done < <(sed -n 's#^diff --git a/.* b/\(.*\)$#\1#p' "$fetch/pr/diff.patch")
+  done < <(changed_paths "$fetch/pr/diff.patch")
   if [ "$k" -eq 0 ]; then
     echo "approval-queue: $pr changes no blueprint or page (a blueprint is blueprints/*.blueprint.md or .yaml, a page is docs/**/*.md outside docs/internal); queue it with the pr form" >&2
     exit 2
@@ -448,6 +494,7 @@ case "$kind" in
   blueprint | page)
     check_blueprint
     if [ "$kind" = page ]; then
+      check_origin
       prhead=$(pr_head "$pr_repo" "$number") || { echo "approval-queue: could not read the head of $pr" >&2; exit 1; }
     fi
     mkdir -p "$item"
@@ -494,7 +541,7 @@ if ! curl -sf "$base/" >/dev/null 2>&1; then
 fi
 
 if ! curl -sf "$base/item/$id" >/dev/null 2>&1; then
-  echo "approval-queue: an app on $port does not serve this state root; stop it with pkill -f 'approval-queue/[b]uild'" >&2
+  echo "approval-queue: an app on $port does not serve this state root; stop it with pkill -f '^node $app/build'" >&2
   exit 1
 fi
 
@@ -627,7 +674,8 @@ single_log() {
 # doc_decision: a blueprint's or a page's decision. An approve names the commit the app recorded at HEAD when
 # Geoff approved, and the blob is read from the worktree at that commit; a send-back names the HEAD it left.
 # Both log one line keyed to the blob, with each disputed note Geoff waived and its reason. A page's approve
-# also names its pull request and that PR's head commit now, and its log line carries both.
+# also names its pull request and the head it was queued at, the one the screen showed, and is refused when
+# the PR has moved since; its log line carries both.
 doc_decision() {
   local d verdict commit bl h="" extra='{}'
   d="$item/decision.json"
@@ -644,8 +692,8 @@ doc_decision() {
   if [ "$kind" = page ]; then
     extra=$(jq -nc --arg pr "$pr" '{pr: $pr}')
     if [ "$verdict" = approve ]; then
-      h=$(pr_head "$pr_repo" "$number") || { echo "approval-queue: could not read the head of $pr; nothing was logged" >&2; exit 1; }
-      extra=$(jq -nc --arg pr "$pr" --arg head "$h" '{pr: $pr, head: $head}')
+      head_unmoved "$prhead"
+      extra=$(jq -nc --arg pr "$pr" --arg head "$prhead" '{pr: $pr, head: $head}')
     fi
   fi
   jq -c --arg t "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg id "$id" --arg ref "$repo:$source" --arg v "$verdict" --arg kind "$kind" \
@@ -660,14 +708,15 @@ doc_decision() {
   fi
 }
 
-# change_decision: an approve names the PR's head commit now, read when Geoff approved; a send-back names the
-# head the change was queued at. Both log one line with the calls Geoff answered.
+# change_decision: an approve and a send-back both name the head the change was queued at, the one its
+# documents were read at, and an approve is refused when the PR has moved since. Both log one line with the
+# calls Geoff answered.
 change_decision() {
   local d verdict h="$head"
   d="$item/decision.json"
   verdict=$(jq -r '.decision // empty' "$d")
   case "$verdict" in
-    approve) h=$(pr_head "$repo" "$number") || { echo "approval-queue: could not read the head of $pr; nothing was logged" >&2; exit 1; } ;;
+    approve) head_unmoved "$head" ;;
     reject) ;;
     *) echo "approval-queue: decision.json holds no approve or reject; nothing was logged" >&2; exit 1 ;;
   esac

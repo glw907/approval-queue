@@ -25,8 +25,8 @@ pause in typing commits it there. A page queued with no readable pull request re
 {#if pr}
 	<p class="bg bg-first bg-flat prline">
 		<span class="lead">Pull request.</span>
-		<a href={pr.url} target="_blank" rel="noopener noreferrer">{pr.ref}</a>, head <code>{pr.head.slice(0, 9)}</code> when queued. Approving
-		names the head the pull request has at that moment.
+		<a href={pr.url} target="_blank" rel="noopener noreferrer">{pr.ref}</a>{#if pr.head}, head <code>{pr.head.slice(0, 9)}</code> when queued{/if}.
+		Approving names that head. If the pull request gains a commit before you approve, the approval is refused and the page comes back to you.
 	</p>
 {/if}
 <details class={['bg', !pr && 'bg-first']}>
@@ -35,7 +35,7 @@ pause in typing commits it there. A page queued with no readable pull request re
 		<span><span class="lead">What you’re deciding.</span> Whether this draft is ready to merge: it reads right, in order, and in the page’s voice.</span>
 	</summary>
 	<div class="body">
-		<p>Approving tells the session the page is ready to merge with the pull request. If the pull request gains a commit afterward, approve again.</p>
+		<p>Approving tells the session the page is ready to merge with the pull request at the head shown above.</p>
 		<p>You aren’t checking facts against the code. A fresh agent did that, and the author fixed what it found or disputed it. The notes show where that changed the page.</p>
 	</div>
 </details>

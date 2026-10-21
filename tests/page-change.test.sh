@@ -30,18 +30,19 @@ mkdir -p "$stubs"
 printf '#!/usr/bin/env bash\nexit 0\n' >"$stubs/curl"
 printf '#!/usr/bin/env bash\necho "$*" >>"$STUB_DIR/open.record"\n' >"$stubs/xdg-open"
 printf '#!/usr/bin/env bash\n[ "$1" = "-f" ] && shift\nexec "$@"\n' >"$stubs/setsid"
-# gh serves one PR from the fixture: the head and base commits are read from files, so a test can move the
-# head after queueing; a file at any other commit is a 404.
+# gh serves one PR from the fixture: the head, the merge base, and the base branch's tip are read from files,
+# so a test can move the head after queueing; a file at any commit but the head and the merge base is a 404.
 cat >"$stubs/gh" <<'STUB'
 #!/usr/bin/env bash
 echo "$*" >>"$STUB_DIR/gh.record"
 head=$(cat "$STUB_DIR/head")
 base=$(cat "$STUB_DIR/base")
 case "$1 $2" in
+  "api repos/"*/compare/*) printf '%s\n' "$base" ;;
   "pr view")
     case "$7" in
       headRefOid) [ -e "$STUB_DIR/gh.down" ] && exit 1; jq -nc --arg h "$head" '{headRefOid: $h}' ;;
-      baseRefOid) jq -nc --arg b "$base" '{baseRefOid: $b}' ;;
+      baseRefOid) jq -nc --arg b "$(cat "$STUB_DIR/tip")" '{baseRefOid: $b}' ;;
       *) jq -nc --arg h "$head" --argjson n "$3" \
            '{body: "A change.\n", headRefOid: $h, number: $n, url: "https://github.com/glw907/cairn-cms/pull/\($n)",
              headRefName: "retarget", baseRefName: "main", state: "OPEN",
@@ -66,10 +67,12 @@ state="$XDG_STATE_HOME/approval-queue"
 log="$state/decisions.jsonl"
 printf 'head0000\n' >"$root/head"
 printf 'base0000\n' >"$root/base"
+printf 'tip0000\n' >"$root/tip"
 
 repo="$root/sample"
 mkdir -p "$repo/docs/extend"
 git -C "$repo" init -q -b main
+git -C "$repo" remote add origin https://github.com/glw907/sample.git
 cp "$PAGE" "$repo/$FILE"
 git -C "$repo" add "$FILE"
 git -C "$repo" commit -q -m "Add the page"
@@ -136,6 +139,10 @@ jq '.[0].file = "x.md"' "$PAGE_NOTES" >"$root/file-field.json"
 refuse "page notes with a file field" "has an unknown field file" page "$repo" T "$FILE" --pr "$PR" \
   --notes "$root/file-field.json"
 refuse "blueprint refuses --pr" "usage:" blueprint "$repo" T "$FILE" --pr "$PR"
+refuse "page --pr in another repository" "is not in" page "$repo" T "$FILE" --pr glw907/other#7
+git -C "$repo" remote rename origin keep
+refuse "page in a worktree with no origin" "has no origin remote" page "$repo" T "$FILE" --pr "$PR"
+git -C "$repo" remote rename keep origin
 
 queued_blob=$(git -C "$repo" rev-parse "HEAD:$FILE")
 printf 'head1111\n' >"$root/head"
@@ -146,20 +153,31 @@ cmp -s "$dir/doc.md" "$PAGE" || { echo "FAIL: page queue: doc.md is not the comm
 assert_eq "$(jq -c '[.[].id]' "$dir/notes.json")" '["R1","D1","Q1"]' "page queue: notes.json"
 assert_eq "$(grep -c 'headRefOid' "$root/gh.record")" "1" "page queue: one head read"
 
-# The page approve names the PR head at approval, not at queueing.
+# The page approve names the head the item was queued at and the screen showed. A PR that moved while the
+# item waited is refused: the approval would cover commits nobody saw.
 printf 'Edited in review.\n' >>"$repo/$FILE"
 git -C "$repo" commit -q -am "Edit $FILE in review"
 approved_commit=$(git -C "$repo" rev-parse HEAD)
 approved_blob=$(git -C "$repo" rev-parse "HEAD:$FILE")
+page_approve="{\"decision\":\"approve\",\"calls\":[{\"id\":\"D1\",\"choice\":\"Keep the author's wording\"},{\"id\":\"Q1\",\"choice\":\"Keep it\"}],\"waived\":[{\"id\":\"D1\",\"choice\":\"Keep the author's wording\",\"reason\":\"Kept the author's wording\"}],\"commit\":\"$approved_commit\",\"blob\":\"$approved_blob\"}"
 printf 'head2222\n' >"$root/head"
-decide "{\"decision\":\"approve\",\"calls\":[{\"id\":\"D1\",\"choice\":\"Keep the author's wording\"},{\"id\":\"Q1\",\"choice\":\"Keep it\"}],\"waived\":[{\"id\":\"D1\",\"choice\":\"Keep the author's wording\",\"reason\":\"Kept the author's wording\"}],\"commit\":\"$approved_commit\",\"blob\":\"$approved_blob\"}"
+decide "$page_approve"
+assert_eq "$rc" "1" "page approve after the PR moved: exit code"
+case "$(cat "$root/err")" in *"moved from head1111 to head2222"*) ;; *) echo "FAIL: page approve after the PR moved: stderr '$(cat "$root/err")'"; fail=1 ;; esac
+assert_eq "$(cat "$root/out")" "" "page approve after the PR moved: no decision printed"
+[ ! -e "$log" ] || { echo "FAIL: page approve after the PR moved: something was logged"; fail=1; }
+
+printf 'head1111\n' >"$root/head"
+queue page "$repo" "Approve the page Fix a slow build" "$FILE" --pr "$PR" --notes "$PAGE_NOTES"
+assert_eq "$(jq -r '.prHead' "$dir/item.json")" "head1111" "page requeue: item.json"
+decide "$page_approve"
 assert_eq "$rc" "0" "page approve: exit code"
 assert_eq "$(cat "$root/out")" \
   "$(jq -cn --arg c "$approved_commit" --arg b "$approved_blob" --arg f "$FILE" --arg pr "$PR" \
-    '{decision: "approve", file: $f, commit: $c, blob: $b, pr: $pr, head: "head2222", calls: [{id: "D1", choice: "Keep the author'"'"'s wording"}, {id: "Q1", choice: "Keep it"}]}')" "page approve: stdout"
+    '{decision: "approve", file: $f, commit: $c, blob: $b, pr: $pr, head: "head1111", calls: [{id: "D1", choice: "Keep the author'"'"'s wording"}, {id: "Q1", choice: "Keep it"}]}')" "page approve: stdout"
 assert_eq "$(wc -l <"$log")" "1" "page approve: one log line"
 assert_eq "$(jq -c '[.kind,.ref,.lane,.verdict,.blob,.commit,.pr,.head,.waived[0].id,.initiative]' "$log")" \
-  "[\"page\",\"sample:$FILE\",\"single\",\"approve\",\"$approved_blob\",\"$approved_commit\",\"$PR\",\"head2222\",\"D1\",null]" "page approve: log line"
+  "[\"page\",\"sample:$FILE\",\"single\",\"approve\",\"$approved_blob\",\"$approved_commit\",\"$PR\",\"head1111\",\"D1\",null]" "page approve: log line"
 
 # approved matches the kind: a page line answers --kind page only, and a blueprint line the default only.
 bash "$SCRIPT" approved --kind page "$FILE" "$approved_blob"; assert_eq "$?" "0" "approved --kind page: the approved blob"
@@ -198,6 +216,8 @@ rm -f "$root/gh.down"
 # ---- change ----
 printf 'head3333\n' >"$root/head"
 printf 'base3333\n' >"$root/base"
+# The base branch moved on after the branch was cut; the documents' originals are read at the merge base.
+printf 'tip3333\n' >"$root/tip"
 CPR=glw907/cairn-cms#77
 refuse "change usage" "usage:" change "$CPR"
 refuse "change bad ref" "owner/repo#n" change cairn-cms T
@@ -223,13 +243,23 @@ assert_eq "$(jq -c '[.ref,.head]' "$dir/pr.json")" '["glw907/cairn-cms#77","head
 out=$(bash "$SCRIPT" change "$CPR" Again 2>&1 >/dev/null); assert_eq "$?" "2" "change queued twice: exit code"
 case "$out" in *"already in the waiting item"*) ;; *) echo "FAIL: change queued twice: stderr '$out'"; fail=1 ;; esac
 
+# The change approve names the head its documents were read at; a PR that moved while it waited is refused.
+lines=$(wc -l <"$log")
 printf 'head4444\n' >"$root/head"
 decide '{"decision":"approve","calls":[{"id":"Q1","choice":"Keep it"}]}'
+assert_eq "$rc" "1" "change approve after the PR moved: exit code"
+case "$(cat "$root/err")" in *"moved from head3333 to head4444"*) ;; *) echo "FAIL: change approve after the PR moved: stderr '$(cat "$root/err")'"; fail=1 ;; esac
+assert_eq "$(cat "$root/out")" "" "change approve after the PR moved: no decision printed"
+assert_eq "$(wc -l <"$log")" "$lines" "change approve after the PR moved: nothing logged"
+
+printf 'head3333\n' >"$root/head"
+queue change "$CPR" "Retarget two links" --notes "$CHANGE/notes.json"
+decide '{"decision":"approve","calls":[{"id":"Q1","choice":"Keep it"}]}'
 assert_eq "$rc" "0" "change approve: exit code"
-assert_eq "$(cat "$root/out")" '{"decision":"approve","pr":"glw907/cairn-cms#77","head":"head4444","calls":[{"id":"Q1","choice":"Keep it"}]}' "change approve: stdout"
+assert_eq "$(cat "$root/out")" '{"decision":"approve","pr":"glw907/cairn-cms#77","head":"head3333","calls":[{"id":"Q1","choice":"Keep it"}]}' "change approve: stdout"
 assert_eq "$(tail -n 1 "$log" | jq -c '[.kind,.ref,.lane,.verdict,.head,.calls,.initiative]')" \
-  '["change","glw907/cairn-cms#77","single","approve","head4444",[{"id":"Q1","choice":"Keep it"}],null]' "change approve: log line"
-bash "$SCRIPT" approved --kind page docs/extend/share-a-draft-preview.md head4444; assert_eq "$?" "1" "approved: a change line answers nothing"
+  '["change","glw907/cairn-cms#77","single","approve","head3333",[{"id":"Q1","choice":"Keep it"}],null]' "change approve: log line"
+bash "$SCRIPT" approved --kind page docs/extend/share-a-draft-preview.md head3333; assert_eq "$?" "1" "approved: a change line answers nothing"
 
 printf 'head5555\n' >"$root/head"
 queue change "$CPR" "Retarget two links"
