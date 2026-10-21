@@ -27,6 +27,7 @@ import {
 	seedRepo
 } from '#lib/fixtures/seed-blueprint.ts';
 import { seedPacket } from '#lib/fixtures/seed-packet.ts';
+import { queued } from '#lib/server/blueprint.ts';
 import { actions, load } from './+page.server.ts';
 
 const ID = '20261011T100000-1';
@@ -657,17 +658,36 @@ describe('a blueprint', () => {
 		await expect(call('approve', answered(base), '20261011T100000-9')).rejects.toMatchObject({ status: 404 });
 	});
 
-	it('an approve that races a save never names a commit older than HEAD, and no commit lands after it', async () => {
-		const edit = `${SAMPLE_DOC}raced\n`;
-		await Promise.all([call('approve', answered(base)), Promise.resolve(call('save', [['text', edit], ['base', base]])).catch(() => null)]);
-		const written = await decision().catch(() => null);
-		if (written) {
-			expect(written.commit).toBe(git(repo, 'rev-parse', 'HEAD'));
-			expect(written.blob).toBe(git(repo, 'rev-parse', `HEAD:${SAMPLE_FILE}`));
-		}
-		const count = git(repo, 'rev-list', '--count', 'HEAD');
-		await new Promise((r) => setTimeout(r, 50));
-		expect(git(repo, 'rev-list', '--count', 'HEAD')).toBe(count);
+	it('an approve waits behind a save already on the file’s queue, and a save queued after it commits nothing', async () => {
+		// A step held open on the file's queue stands in for a save mid-commit, so the order is fixed.
+		let release = () => {};
+		const held = queued(repo, SAMPLE_FILE, () => new Promise<void>((r) => (release = r)));
+		const settle = (p: Promise<unknown>) => {
+			const out = { done: false };
+			p.then(
+				() => (out.done = true),
+				() => (out.done = true)
+			);
+			return out;
+		};
+		const approve = call('approve', answered(base));
+		const approving = settle(approve);
+		await new Promise((r) => setTimeout(r, 100));
+		const save = Promise.resolve(call('save', [['text', `${SAMPLE_DOC}raced\n`], ['base', base]]));
+		const saving = settle(save);
+		await new Promise((r) => setTimeout(r, 100));
+		expect(approving.done).toBe(false);
+		expect(saving.done).toBe(false);
+		await expect(decision()).rejects.toThrow();
+
+		release();
+		await held;
+		await approve;
+		await expect(save).rejects.toMatchObject({ status: 404 });
+		const written = await decision();
+		expect(written.commit).toBe(git(repo, 'rev-parse', 'HEAD'));
+		expect(written.blob).toBe(base);
+		expect(git(repo, 'rev-list', '--count', 'HEAD')).toBe('1');
 	});
 });
 

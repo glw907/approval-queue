@@ -110,6 +110,19 @@ describe('buildBlueprintApprove', () => {
 		});
 	});
 
+	it('names the HEAD commit and blob although the post forges a commit and a second blob', async () => {
+		const h = await head();
+		const forged = new URLSearchParams([
+			...Object.entries(answers),
+			['blob', h.blob],
+			['blob', 'f'.repeat(40)],
+			['commit', 'e'.repeat(40)]
+		]);
+		expect(buildBlueprintApprove(NOTES, forged, h)).toMatchObject({ ok: true, decision: { commit: h.commit, blob: h.blob } });
+		const first = new URLSearchParams([...Object.entries(answers), ['blob', 'f'.repeat(40)], ['blob', h.blob]]);
+		expect(buildBlueprintApprove(NOTES, first, h).ok).toBe(false);
+	});
+
 	it('refuses a post whose blob is not the file at HEAD, or a file with uncommitted changes', async () => {
 		const h = await head();
 		expect(buildBlueprintApprove(NOTES, form({ ...answers, blob: 'f'.repeat(40) }), h).ok).toBe(false);
