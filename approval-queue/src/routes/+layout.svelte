@@ -74,7 +74,7 @@ drawers, and the sheet act on it here, and the open screen acts on the rest thro
 					sendBack
 				]
 			},
-			blueprint: { title: 'On a blueprint', rows: editorRows('Approve the plan') },
+			blueprint: { title: 'On a blueprint', rows: editorRows('Approve the blueprint') },
 			page: { title: 'On a page', rows: editorRows('Approve the page') },
 			change: {
 				title: 'On a change',

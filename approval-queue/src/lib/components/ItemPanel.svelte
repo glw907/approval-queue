@@ -133,7 +133,7 @@ for that save first, and closing the tab then asks before leaving.
 			: 'Ready to approve'
 	);
 	const packetSub = $derived.by(() => {
-		if (openAsks.length) return 'to unlock Approve the packet';
+		if (openAsks.length) return 'to unlock Approve';
 		return packetChanged === 0 ? 'No verdicts changed' : `${packetChanged} ${packetChanged === 1 ? 'verdict' : 'verdicts'} changed`;
 	});
 
@@ -281,29 +281,41 @@ for that save first, and closing the tab then asks before leaving.
 	const word = (n: number) => WORDS[n] ?? String(n);
 	const capital = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 	const plural = (n: number, one: string, many = `${one}s`) => `${word(n)} ${n === 1 ? one : many}`;
-	/** The lede of a blueprint or page: what kind of page it is, then what the fact check and the author did. */
+	/** The lede's first sentence: how many calls still need a choice. */
+	const callsLine = $derived(
+		openCalls.length === 0
+			? 'No calls are open.'
+			: `${capital(plural(openCalls.length, 'call'))} ${openCalls.length === 1 ? 'is' : 'are'} open.`
+	);
+	/**
+	 * The lede of a blueprint or page: the open calls, what the file describes, then what the author did
+	 * with the fact check. A blueprint's type name is hyphenated as a modifier ("symptom-row page").
+	 */
 	const docLede = $derived.by(() => {
 		if (!blueprint || !review) return '';
-		const kind = blueprint.pageType ? `A ${blueprint.pageType} page` : 'A page';
-		const first = `${kind}${blueprint.track ? ` on the ${blueprint.track} track` : ''}.`;
+		const type = blueprint.pageType ? `${/^[aeiou]/i.test(blueprint.pageType) ? 'an' : 'a'} ${blueprint.pageType.replaceAll(' ', '-')} page` : 'a docs page';
+		const what = `${blueprint.kind === 'page' ? 'This draft is' : 'This blueprint describes'} ${type}${blueprint.track ? ` on the ${blueprint.track} track` : ''}.`;
 		const fixed = review.notes.filter((n) => n.kind === 'info').length;
 		const disputed = review.notes.filter((n) => n.kind === 'decide').length;
 		const asked = review.notes.filter((n) => n.kind === 'question').length;
-		const did = [
-			fixed ? `fixed ${plural(fixed, 'finding')} from the fact check` : '',
-			disputed ? `disputed ${word(disputed)}` : '',
-			asked ? `has ${asked === 1 ? 'a question' : `${word(asked)} questions`} for you` : ''
-		].filter(Boolean);
-		if (!did.length) return first;
-		const list = did.length === 1 ? did[0] : `${did.slice(0, -1).join(', ')}, and ${did.at(-1)}`;
-		return `${first} The author ${list}.`;
+		const found = fixed + disputed;
+		const check =
+			found === 0
+				? ''
+				: disputed === 0
+					? `The author fixed ${found === 1 ? 'the one finding' : `all ${word(found)} findings`} from the fact check.`
+					: fixed === 0
+						? `The author disputed ${found === 1 ? 'the one finding' : `all ${word(found)} findings`} from the fact check.`
+						: `Of the fact check’s ${word(found)} findings, the author fixed ${word(fixed)} and disputed ${word(disputed)}.`;
+		const question = asked ? `The author ${check ? 'also ' : ''}has ${asked === 1 ? 'a question' : `${word(asked)} questions`} for you.` : '';
+		return [what, check, question, callsLine].filter(Boolean).join(' ');
 	});
-	/** The change's lede: what it edits and what the code carries. */
+	/** The change's lede: the open calls, then what the change edits. */
 	const changeLede = $derived.by(() => {
 		if (!change) return '';
-		const docs = `${plural(change.docs.length, 'document')}`;
-		const code = change.totals.files ? `${plural(change.totals.files, 'code file')} (+${change.totals.adds} −${change.totals.dels})` : 'no code';
-		return `${capital(docs)} edited, and ${code}. Read the documents with their notes, then the code.`;
+		const docs = plural(change.docs.length, 'document');
+		const code = change.totals.files ? ` and ${plural(change.totals.files, 'code file')}` : '';
+		return `“${change.meta.title}” edits ${docs}${code}. ${callsLine}`;
 	});
 
 	/** Moves focus to the next open call after the one holding focus, wrapping to the first. */
@@ -497,7 +509,7 @@ for that save first, and closing the tab then asks before leaving.
 		const name = data.meta.repo.split('/').pop();
 		if (data.kind === 'design') return `the design ${data.meta.title}`;
 		if (data.kind === 'packet') return 'the packet';
-		if (data.kind === 'blueprint') return `the plan for ${data.page}`;
+		if (data.kind === 'blueprint') return `the blueprint for ${data.page}`;
 		if (data.kind === 'page') return `the page ${data.page}`;
 		return data.meta.number === undefined ? name : `${name} #${data.meta.number}`;
 	}
@@ -669,9 +681,9 @@ for that save first, and closing the tab then asks before leaving.
 					<a href="/">Board</a><span aria-hidden="true">/</span><span>{blueprint.kind === 'page' ? 'Page' : 'Blueprint'}</span><span aria-hidden="true">/</span><span>{blueprint.meta.repo}</span>
 				{/snippet}
 				{#snippet headline()}
-					{blueprint.kind === 'page' ? 'The draft of' : 'The plan for'}
-					{blueprint.page} is ready to read, with {openCalls.length ? `${plural(openCalls.length, 'call')} for you` : 'nothing left for you'} along
-					the way.
+					{blueprint.kind === 'page'
+						? `Approving this draft clears “${blueprint.page}” to merge.`
+						: `Approving this blueprint lets drafter write “${blueprint.page}” from it.`}
 				{/snippet}
 				{#snippet lede()}{docLede}{/snippet}
 			</FrameHeader>
@@ -681,7 +693,7 @@ for that save first, and closing the tab then asks before leaving.
 					<a href="/">Board</a><span aria-hidden="true">/</span><span>Change</span><span aria-hidden="true">/</span><span>{change.ref}</span>
 				{/snippet}
 				{#snippet headline()}
-					{change.meta.title}, with {openCalls.length ? `${plural(openCalls.length, 'call')} for you` : 'nothing left for you'} along the way.
+					Approving this change clears its pull request to merge.
 				{/snippet}
 				{#snippet lede()}{changeLede}{/snippet}
 			</FrameHeader>
@@ -728,7 +740,7 @@ for that save first, and closing the tab then asks before leaving.
 		</div>
 	{:else if blueprint && review}
 		{#if blueprint.missing}
-			<p class="bg bg-first bg-flat">The worktree no longer holds {blueprint.file} at a commit, so this is the copy that was queued and takes no edits.</p>
+			<p class="bg bg-first bg-flat">The queue can no longer read <code>{blueprint.file}</code> from the worktree’s latest commit. The editor shows the copy that was queued, and you can’t edit it.</p>
 		{/if}
 		{#if blueprint.kind === 'page'}
 			<PageView {review} file={blueprint.file} pr={blueprint.pr} />
@@ -755,7 +767,7 @@ for that save first, and closing the tab then asks before leaving.
 			{#if yourSteps.length}<PaneSection title="Steps you run"><PaneList items={yourSteps} /></PaneSection>{/if}
 			<PaneSection title="Contents" contents><PaneList numbered items={outline} /></PaneSection>
 		{:else if review}
-			<ReviewPane {review} correctionsTitle="Corrected by the fact check" />
+			<ReviewPane {review} correctionsTitle="Fixed after the fact check" />
 		{:else if change}
 			<ChangePane reviews={changeReviews} paths={change.docs.map((d) => d.path)} hasCode={change.groups.length > 0} />
 		{:else if data.kind === 'triage'}
@@ -873,7 +885,7 @@ for that save first, and closing the tab then asks before leaving.
 										decidedCount ? `${word(decidedCount)} decided` : '',
 										review
 											? review.changedLines
-												? `${review.changedLines} ${review.changedLines === 1 ? 'line' : 'lines'} changed`
+												? `${plural(review.changedLines, 'line')} changed`
 												: 'no edits yet'
 											: ''
 									]
@@ -952,7 +964,7 @@ for that save first, and closing the tab then asks before leaving.
 									approveDoc();
 								}}
 							>
-								Approve the {data.kind === 'page' ? 'page' : data.kind === 'change' ? 'change' : 'plan'} <kbd>Ctrl</kbd><kbd>Enter</kbd>
+								Approve the {data.kind === 'page' ? 'page' : data.kind === 'change' ? 'change' : 'blueprint'} <kbd>Ctrl</kbd><kbd>Enter</kbd>
 							</button>
 						{:else if data.kind === 'triage'}
 							<button class="btn btn-primary" bind:this={submitButton} disabled={desk.held}>
