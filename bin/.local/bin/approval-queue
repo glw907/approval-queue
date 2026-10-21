@@ -22,7 +22,9 @@ log="$root/server.log"
 id="$(date +%Y%m%dT%H%M%S)-$$"
 item="$root/items/$id"
 fetch="$root/fetch-$id"
-base="http://127.0.0.1:7907"
+# The port is fixed when the app is built, so a running app serves only the port it was built with.
+port="${APPROVAL_QUEUE_PORT:-7907}"
+base="http://127.0.0.1:$port"
 projects="${APPROVAL_QUEUE_PROJECTS:-$HOME/Projects}"
 mkdir -p "$root"
 : >>"$log"
@@ -224,12 +226,12 @@ exec 9>"$root/start.lock"
 flock 9
 if ! curl -sf "$base/" >/dev/null 2>&1; then
   if [ ! -e "$app/build/index.js" ]; then
-    if ! (cd "$app" && npm ci && npm run build) >>"$log" 2>&1; then
+    if ! (cd "$app" && npm ci && APPROVAL_QUEUE_PORT="$port" npm run build) >>"$log" 2>&1; then
       echo "approval-queue: the first build failed; see $log" >&2
       exit 1
     fi
   fi
-  HOST=127.0.0.1 PORT=7907 APPROVAL_QUEUE_STATE="$root" setsid -f node "$app/build" 9>&- >>"$log" 2>&1
+  HOST=127.0.0.1 PORT="$port" APPROVAL_QUEUE_STATE="$root" setsid -f node "$app/build" 9>&- >>"$log" 2>&1
   up=""
   for _ in $(seq 100); do
     if curl -sf "$base/" >/dev/null 2>&1; then up=1; break; fi
@@ -239,7 +241,7 @@ if ! curl -sf "$base/" >/dev/null 2>&1; then
 fi
 
 if ! curl -sf "$base/item/$id" >/dev/null 2>&1; then
-  echo "approval-queue: an app on 7907 does not serve this state root; stop it with pkill -f 'approval-queue/[b]uild'" >&2
+  echo "approval-queue: an app on $port does not serve this state root; stop it with pkill -f 'approval-queue/[b]uild'" >&2
   exit 1
 fi
 

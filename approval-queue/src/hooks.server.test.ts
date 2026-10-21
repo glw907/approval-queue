@@ -17,6 +17,11 @@ describe('handle', () => {
 		expect(resolve).toHaveBeenCalledOnce();
 	});
 
+	// A build made without APPROVAL_QUEUE_PORT bakes in 7907, as it did before the setting existed.
+	it.skipIf(process.env.APPROVAL_QUEUE_PORT)('serves 7907 when the variable is unset', () => {
+		expect(__QUEUE_PORT__).toBe(7907);
+	});
+
 	it.each(['evil.example:7907', 'localhost:7907', undefined])('refuses host %s', async (host) => {
 		const { res, resolve } = await run(host);
 		expect(res.status).toBe(403);
