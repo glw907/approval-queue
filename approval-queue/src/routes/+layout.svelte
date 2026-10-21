@@ -16,7 +16,7 @@ this session" until the queue reload lists it there itself.
 	import { onMount } from 'svelte';
 	import { fade } from 'svelte/transition';
 	import { age, SINGLES } from '#lib/board.ts';
-	import { closeDrawers, setDrawer } from '#lib/components/frame/drawers.ts';
+	import { closeDrawers, closeDrawersForLink, setDrawer } from '#lib/components/frame/drawers.ts';
 	import { desk } from '#lib/desk.svelte.ts';
 	import { held } from '#lib/held.svelte.ts';
 	import { keyAction } from '#lib/keys.ts';
@@ -100,7 +100,7 @@ this session" until the queue reload lists it there itself.
 				title: 'On a change',
 				rows: [
 					{ keys: ['F8'], text: 'Next call for you' },
-					approveOr('Approve the change'),
+					...commentRows('Approve the change'),
 					sendBack,
 					{ keys: ['/'], text: 'Filter the code files by path', single: true }
 				]
@@ -122,9 +122,18 @@ this session" until the queue reload lists it there itself.
 				{ keys: ['Ctrl', 'Z'], text: 'Undo' },
 				{ keys: ['Ctrl', 'Shift', 'Z'], text: 'Redo' },
 				{ keys: ['Ctrl', 'S'], text: 'Save now (it also saves as you pause)' },
-				approveOr(approve),
+				...commentRows(approve),
 				{ keys: ['?'], text: 'This list, outside the editor', single: true },
 				sendBack
+			];
+		}
+
+		/** The comment keys; Ctrl+Enter saves an open comment box before it approves. */
+		function commentRows(approve: string): SheetRow[] {
+			return [
+				{ keys: ['Ctrl', 'Alt', 'M'], text: 'Comment on the selected text' },
+				{ keys: ['Ctrl', 'Alt', 'N', '/', 'P'], text: 'Next or previous comment' },
+				{ keys: CTRL_ENTER, text: `Save the comment you're writing, or ${approve.charAt(0).toLowerCase()}${approve.slice(1)}` }
 			];
 		}
 	});
@@ -200,7 +209,8 @@ this session" until the queue reload lists it there itself.
 		if (document.querySelector('dialog[open]:not(#keys)')) return;
 		// Escape closes the open sheet natively; the drawer under it stays for the next Escape.
 		if (e.key === 'Escape' && desk.sheetOpen) return;
-		if (e.key === 'Escape' && (desk.railOpen || desk.paneOpen)) {
+		// Escape in a comment box cancels the comment first; the drawer holding it closes on the next one.
+		if (e.key === 'Escape' && (desk.railOpen || desk.paneOpen) && !desk.commentOpen) {
 			closeDrawers();
 			return;
 		}
@@ -214,7 +224,8 @@ this session" until the queue reload lists it there itself.
 				sheetOpen: desk.sheetOpen,
 				held: held.current !== null,
 				noteOpen: desk.noteOpen,
-				approveLocked: desk.approveLocked
+				approveLocked: desk.approveLocked,
+				commentOpen: desk.commentOpen
 			}
 		);
 		if (!action) return;
@@ -266,6 +277,28 @@ this session" until the queue reload lists it there itself.
 								<span class="tabular-nums">{age(item.created)}</span>
 							</span>
 						</a>
+						{#if item.id === currentId && desk.outline?.length}
+							<ol class="rail-toc" aria-label="Contents">
+								{#each desk.outline as e (e.key)}
+									<li>
+										<a
+											href={e.href}
+											class={[e.level === 3 && 'l3', e.cur && 'cur']}
+											aria-current={e.cur ? 'location' : undefined}
+											onclick={(ev) => {
+												ev.preventDefault();
+												closeDrawersForLink();
+												e.go();
+											}}
+											><span class="n">{e.n}</span><span class="t">{e.text}</span>{#if e.mark}<span
+													class="mk {e.mark}"
+													title={e.mark === 'call' ? 'A call for you' : 'Corrected'}
+												></span>{/if}</a
+										>
+									</li>
+								{/each}
+							</ol>
+						{/if}
 					</li>
 				{/each}
 			</ul>
@@ -350,7 +383,8 @@ this session" until the queue reload lists it there itself.
 							{#each section.rows as row (row.text)}
 								<tr>
 									<td class="whitespace-nowrap">
-										{#each row.keys as key, i (i)}<kbd class={['kbd kbd-xs desk-kbd', row.single && 'desk-sk', i > 0 && 'ms-1']}>{key}</kbd>{/each}
+										<!-- A "/" after the first key separates two chords that share their modifiers. -->
+										{#each row.keys as key, i (i)}{#if key === '/' && i > 0}<span class="ms-1">/</span>{:else}<kbd class={['kbd kbd-xs desk-kbd', row.single && 'desk-sk', i > 0 && 'ms-1']}>{key}</kbd>{/if}{/each}
 									</td>
 									<td>{row.text}</td>
 								</tr>
@@ -401,6 +435,18 @@ this session" until the queue reload lists it there itself.
 	<div class="toast toast-center desk-toast z-40" out:fade={toastOut(true)}>
 		<div class="alert alert-info border border-base-300 text-sm">
 			<span>{desk.toast}</span>
+			{#if desk.toastUndo}
+				{@const undo = desk.toastUndo}
+				<button
+					type="button"
+					class="btn btn-sm"
+					onclick={() => {
+						desk.toast = null;
+						desk.toastUndo = null;
+						undo();
+					}}>Undo</button
+				>
+			{/if}
 		</div>
 	</div>
 {/if}

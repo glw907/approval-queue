@@ -24,17 +24,16 @@ for that save first, and closing the tab then asks before leaving.
 	import { beforeNavigate, goto } from '$app/navigation';
 	import { tick } from 'svelte';
 	import { fingerprint, gate } from '#lib/cards.ts';
-	import { desk } from '#lib/desk.svelte.ts';
+	import { closeDrawersForLink, setDrawer } from '#lib/components/frame/drawers.ts';
+	import { desk, type OutlineEntry } from '#lib/desk.svelte.ts';
 	import { held, seedFrom, UNDONE } from '#lib/held.svelte.ts';
 	import { nextItem } from '#lib/queue.ts';
 	import { changedCount, seedRows, type Row } from '#lib/triage.ts';
 	import { VERDICT_LOOK } from '#lib/packet-view.ts';
 	import type { PlacedNote } from '#lib/editor/notes.ts';
-	import { DocReview, type SaveResult } from '#lib/editor/review.svelte.ts';
-	import type { PageData } from '../../routes/item/[id=id]/$types';
+	import { boxes, DocReview, refuseOpenBox, type CommentAnswer, type SaveResult } from '#lib/editor/review.svelte.ts';	import type { PageData } from '../../routes/item/[id=id]/$types';
 	import BlueprintView from './BlueprintView.svelte';
 	import BriefBlock from './BriefBlock.svelte';
-	import ChangePane from './ChangePane.svelte';
 	import ChangeView from './ChangeView.svelte';
 	import DecideCards from './DecideCards.svelte';
 	import DesignView from './DesignView.svelte';
@@ -51,7 +50,6 @@ for that save first, and closing the tab then asks before leaving.
 	import PacketRoutine from './PacketRoutine.svelte';
 	import PrView from './PrView.svelte';
 	import Prose from './Prose.svelte';
-	import ReviewPane from './ReviewPane.svelte';
 	import TriageView from './TriageView.svelte';
 
 	let { data }: { data: PageData } = $props();
@@ -223,6 +221,20 @@ for that save first, and closing the tab then asks before leaving.
 		return { ok: false, message: result.type === 'error' ? result.error.message : 'unexpected answer' };
 	}
 
+	// svelte-ignore state_referenced_locally
+	const commentUrl = `/item/${encodeURIComponent(data.meta.id)}?/comment`;
+
+	/** Posts one comment op to the comment action, which answers the whole stored state after it. */
+	async function postComment(fields: Record<string, string>): Promise<CommentAnswer> {
+		const body = new FormData();
+		for (const [k, v] of Object.entries(fields)) body.set(k, v);
+		const res = await fetch(commentUrl, { method: 'POST', body, headers: { 'x-sveltekit-action': 'true' } });
+		const result = deserialize(await res.text());
+		if (result.type === 'success') return { ok: true, ...(result.data as Omit<Extract<CommentAnswer, { ok: true }>, 'ok'>) };
+		if (result.type === 'failure') return { ok: false, message: String(result.data?.message ?? 'refused') };
+		return { ok: false, message: result.type === 'error' ? result.error.message : 'unexpected answer' };
+	}
+
 	/** A decided item's calls as choice indexes, approved or sent back, so its notes show what was chosen. */
 	function answeredCalls(notes: PlacedNote[]): Record<string, number> {
 		const decision = 'decision' in data ? data.decision : undefined;
@@ -247,7 +259,10 @@ for that save first, and closing the tab then asks before leaving.
 					notes: data.notes,
 					save: saveBlueprint,
 					decided: data.decided ? answeredCalls(data.notes) : undefined,
-					remember
+					remember,
+					comments: data.comments,
+					threads: data.threads,
+					comment: data.decided ? undefined : postComment
 				})
 			: null;
 	// A change review shows each changed document read-only, with the lines the change edited marked.
@@ -263,7 +278,12 @@ for that save first, and closing the tab then asks before leaving.
 						save: async () => ({ ok: false, message: 'a change review takes no edits' }),
 						decided: data.decided ? answeredCalls(d.notes) : undefined,
 						remember: remember && `${remember}.${i}`,
-						readonly: true
+						readonly: true,
+						comments: d.comments,
+						threads: d.threads,
+						comment: data.decided ? undefined : postComment,
+						file: d.path,
+						margin: `margin-${i}`
 					});
 					r.markChanges = true;
 					r.saveStatus = 'Read only';
@@ -280,9 +300,26 @@ for that save first, and closing the tab then asks before leaving.
 
 	// A held or decided review takes no choices, and no text edits either while the file is gone.
 	$effect(() => {
-		for (const r of docReviews) r.locked = frozen;
+		for (const r of docReviews) {
+			r.locked = frozen;
+			r.commentable = !frozen && !missing;
+		}
 		review?.setReadonly(frozen || missing);
 	});
+	// A box left open on the item being left must not refuse decisions on the next one.
+	$effect(() => () => {
+		if (boxes.open && docReviews.includes(boxes.open)) boxes.open = null;
+		desk.commentOpen = false;
+	});
+
+	/** Geoff's comments and replies across the screen's documents, which go to the author with the decision. */
+	const commentCount = $derived(docReviews.reduce((n, r) => n + r.comments.length, 0));
+	const replyCount = $derived(docReviews.reduce((n, r) => n + r.replied, 0));
+	const unreadCount = $derived(docReviews.reduce((n, r) => n + r.unread, 0));
+	const threadCount = $derived(docReviews.reduce((n, r) => n + r.threads.length, 0));
+	const cardCount = $derived(docReviews.reduce((n, r) => n + r.cardCount, 0));
+	/** Geoff's own words to the author: new comments plus replies to the author's threads. */
+	const yourWords = $derived(commentCount + replyCount);
 
 	const WORDS = ['no', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten'];
 	const word = (n: number) => WORDS[n] ?? String(n);
@@ -351,6 +388,27 @@ for that save first, and closing the tab then asks before leaving.
 		target?.scrollIntoView({ block: 'center', behavior: jump() });
 		(target?.querySelector<HTMLElement>('input, button, a, textarea') ?? target)?.focus({ preventScroll: true });
 	}
+	/** The document a comment key acts on: the one whose editor has focus, else one holding a selection, else the first. */
+	function activeReview(): DocReview | undefined {
+		return docReviews.find((r) => r.focused) ?? docReviews.find((r) => !r.selectionEmpty) ?? docReviews[0];
+	}
+
+	/** Moves to the next or previous comment; a change walks on through its documents, wrapping at the ends. */
+	function moveComment(dir: 1 | -1) {
+		const start = activeReview();
+		if (!start) return;
+		if (docReviews.length === 1) {
+			start.nextComment(dir);
+			return;
+		}
+		if (start.nextComment(dir, false)) return;
+		const at = docReviews.indexOf(start);
+		const n = docReviews.length;
+		for (let step = 1; step <= n; step++) {
+			if (docReviews[(((at + dir * step) % n) + n) % n].edgeComment(dir)) return;
+		}
+	}
+
 	/** Motion rule 5: a jump scrolls smoothly, unless the reader asked for reduced motion. */
 	const jump = (): ScrollBehavior => (matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth');
 	// An item Undo opened again says so, and a send-back reopens its note as it was.
@@ -382,9 +440,127 @@ for that save first, and closing the tab then asks before leaving.
 			'open-note': openNote,
 			'close-note': closeNote,
 			'send-rejection': () => form?.requestSubmit(sendButton),
-			submit: () => form?.requestSubmit(submitButton)
+			submit: () => form?.requestSubmit(submitButton),
+			...(docReviews.length && {
+				comment: () => void activeReview()?.openBox(),
+				'next-comment': () => moveComment(1),
+				'prev-comment': () => moveComment(-1),
+				'save-comment': () => void boxes.open?.saveBox(),
+				'cancel-comment': () => void boxes.open?.cancelBox()
+			})
 		});
 	});
+
+	/** The section the reader has scrolled to on a change: a document's index, or null above the first. */
+	let currentDoc = $state<number | null>(null);
+	$effect(() => {
+		if (!change) return;
+		const track = () => {
+			let cur: number | null = null;
+			for (let i = 0; i < docReviews.length; i++) {
+				const top = document.getElementById(`doc-${i}`)?.getBoundingClientRect().top;
+				if (top !== undefined && top < 130) cur = i;
+			}
+			currentDoc = cur;
+		};
+		window.addEventListener('scroll', track, { passive: true });
+		track();
+		return () => window.removeEventListener('scroll', track);
+	});
+
+	/** Scrolls a section of the change into view, as the outline's links do. */
+	function goSection(id: string) {
+		const el = document.getElementById(id);
+		el?.scrollIntoView({ block: 'start', behavior: jump() });
+		const h = el?.querySelector<HTMLElement>('h2');
+		if (h) {
+			h.tabIndex = -1;
+			h.focus({ preventScroll: true });
+		}
+	}
+
+	/**
+	 * The open item's outline, which the rail shows under the item: a blueprint's or page's headings,
+	 * numbered, each marked when it holds an open call or correction; a change's documents and its code.
+	 */
+	const outlineEntries = $derived.by((): OutlineEntry[] => {
+		if (review) {
+			let x = 0;
+			let y = 0;
+			const hs = review.headings;
+			return hs.map((h, i) => {
+				if (h.level === 2) {
+					x++;
+					y = 0;
+				} else y++;
+				const end = hs[i + 1]?.pos ?? Infinity;
+				const open = review.notes.filter((n) => {
+					const at = review.starts[n.id];
+					return at !== null && at !== undefined && at >= h.pos && at < end && review.decided[n.id] === undefined && !review.resolved.includes(n.id);
+				});
+				const n = h.level === 2 || x === 0 ? String(x) : `${x}.${y}`;
+				return {
+					key: `h${h.pos}`,
+					n,
+					text: h.text.replaceAll('`', ''),
+					level: h.level,
+					href: `#section-${n}`,
+					cur: review.current === h.pos,
+					mark: open.some((o) => o.kind !== 'info') ? 'call' : open.length ? 'fix' : null,
+					go: () => review.jumpToPos(h.pos)
+				};
+			});
+		}
+		if (change) {
+			const docs = change.docs.map((d, i): OutlineEntry => ({
+				key: d.path,
+				n: String(i + 1),
+				text: d.path.split('/').pop() ?? d.path,
+				level: 2,
+				href: `#doc-${i}`,
+				cur: currentDoc === i,
+				mark: docReviews[i].openCalls.length ? 'call' : null,
+				go: () => goSection(`doc-${i}`)
+			}));
+			return [...docs, { key: 'code', n: String(docs.length + 1), text: 'Code changes', level: 2, href: '#code', cur: false, mark: null, go: () => goSection('code') }];
+		}
+		return [];
+	});
+	$effect(() => {
+		desk.outline = docReviews.length ? outlineEntries : null;
+	});
+	$effect(() => () => (desk.outline = null));
+
+	/** What the place bar names: the heading or document the reader is in, else the item. */
+	const placeWhere = $derived.by(() => {
+		if (review && review.current !== null) return review.headings.find((h) => h.pos === review.current)?.text.replaceAll('`', '') ?? '';
+		if (change && currentDoc !== null) return change.docs[currentDoc].path.split('/').pop() ?? '';
+		return data.meta.headline ?? data.meta.title;
+	});
+	const hasCalls = $derived(docReviews.some((r) => r.calls.length > 0));
+
+	let tocOpen = $state(false);
+	let tocButton = $state<HTMLButtonElement>();
+	async function toggleToc() {
+		tocOpen = !tocOpen;
+		if (!tocOpen) return;
+		await tick();
+		document.querySelector<HTMLElement>('#toc a')?.focus();
+	}
+	function closeToc(e: MouseEvent) {
+		if (tocOpen && e.target instanceof Element && !e.target.closest('.toc-wrap')) tocOpen = false;
+	}
+	function tocKey(e: KeyboardEvent) {
+		if (e.key !== 'Escape') return;
+		e.preventDefault();
+		tocOpen = false;
+		tocButton?.focus();
+	}
+	/** Opens the comment drawer of the document the reader is in. */
+	function openComments(from: HTMLElement) {
+		const r = docReviews[currentDoc ?? 0] ?? docReviews[0];
+		void setDrawer('pane', true, from, r.margin);
+	}
 
 	// Only the panel going, on opening another item, closes the note.
 	$effect(() => () => (desk.noteOpen = false));
@@ -464,6 +640,7 @@ for that save first, and closing the tab then asks before leaving.
 
 	/** Approve on a document review: a locked press moves to the next open call; otherwise the last edit saves first. */
 	async function approveDoc() {
+		if (refuseOpenBox()) return;
 		if (openCalls.length) {
 			nextCall();
 			return;
@@ -489,6 +666,7 @@ for that save first, and closing the tab then asks before leaving.
 	}
 
 	async function openNote() {
+		if (refuseOpenBox()) return;
 		if (docReviews.length && !noteText) noteText = prefill();
 		desk.noteOpen = true;
 		await tick();
@@ -512,9 +690,19 @@ for that save first, and closing the tab then asks before leaving.
 		return data.meta.number === undefined ? name : `${name} #${data.meta.number}`;
 	}
 
+	/** "your comment" or "your three comments": Geoff's comments and replies, which go to the author. */
+	const yours = (n: number) => (n === 1 ? 'your comment' : `your ${word(n)} comments`);
+	const docWord = $derived(data.kind === 'page' ? 'page' : data.kind === 'change' ? 'change' : 'blueprint');
+
 	function decisionText(action: URL) {
-		if (action.search === '?/approve') return `Approved ${subject()}.`;
+		const n = yourWords;
+		if (action.search === '?/approve') {
+			if (!n) return `Approved ${subject()}.`;
+			if (data.kind === 'blueprint') return `Approved. The author applies ${yours(n)}, and then the page is drafted. The replies appear on the page review.`;
+			return `Approved. ${capital(yours(n))} ${n === 1 ? 'goes' : 'go'} to the ${data.kind === 'change' ? 'change’s author' : 'author'} with your approval.`;
+		}
 		if (action.search === '?/reject') {
+			if (n) return `Sent back with ${plural(n, 'comment')}. The author will answer ${n === 1 ? 'it' : 'them'} and queue the ${docWord} again.`;
 			return noteText.trim() ? `Sent ${subject()} back with a note.` : `Sent ${subject()} back.`;
 		}
 		return `Submitted ${rows.length} calls.`;
@@ -526,7 +714,7 @@ for that save first, and closing the tab then asks before leaving.
 
 	const decide: SubmitFunction = async ({ cancel, action, formData }) => {
 		cancel();
-		if (deciding) return;
+		if (deciding || refuseOpenBox()) return;
 		deciding = true;
 		// A send-back carries the edits too, so the last one is committed first, and the post names
 		// the blob that save returned rather than the one the form rendered with.
@@ -558,7 +746,56 @@ for that save first, and closing the tab then asks before leaving.
 	};
 </script>
 
+{#snippet docPlace()}
+	<div class="place">
+		<span class="where"><b>{placeWhere}</b></span>
+		{#if openCalls.length}
+			<span class="open"><button type="button" class="linkbtn next-call" onclick={nextCall}>Next call for you <kbd>F8</kbd></button></span>
+		{:else if hasCalls}
+			<span class="open"><span class="nothing-open">Every call made</span></span>
+		{/if}
+		<span class="tools">
+			<span class="toc-wrap">
+				<button type="button" class="linkbtn" bind:this={tocButton} aria-expanded={tocOpen} aria-controls="toc" onclick={toggleToc}>Contents</button>
+				{#if tocOpen}
+					<!-- svelte-ignore a11y_no_noninteractive_element_interactions: Escape on the list closes it, as on a menu -->
+					<ol class="toc" id="toc" aria-label="Contents" onkeydown={tocKey}>
+						{#each outlineEntries as e (e.key)}
+							<li>
+								<a
+									href={e.href}
+									class={[e.level === 3 && 'l3', e.cur && 'cur']}
+									aria-current={e.cur ? 'location' : undefined}
+									onclick={(ev) => {
+										ev.preventDefault();
+										tocOpen = false;
+										e.go();
+									}}
+									><span class="n">{e.n}</span><span class="t">{e.text}</span>{#if e.mark}<span
+											class="mk {e.mark}"
+											title={e.mark === 'call' ? 'A call for you' : 'Corrected'}
+										></span>{/if}</a
+								>
+							</li>
+						{/each}
+					</ol>
+				{/if}
+			</span>
+			<button
+				type="button"
+				class="linkbtn comments-btn"
+				aria-expanded={desk.paneOpen && desk.pane.startsWith('margin')}
+				aria-controls={(docReviews[currentDoc ?? 0] ?? docReviews[0]).margin}
+				onclick={(e) => openComments(e.currentTarget)}>Comments <span class="ncount">{cardCount}</span></button
+			>
+		</span>
+	</div>
+{/snippet}
+
+<svelte:document onclick={closeToc} />
+
 <Frame
+	margin={docReviews.length > 0}
 	where={data.meta.headline ?? data.meta.title}
 	paneLabel={data.kind === 'packet'
 		? 'Outline and parts'
@@ -628,15 +865,6 @@ for that save first, and closing the tab then asks before leaving.
 		{/if}
 	{/snippet}
 
-	{#snippet place()}
-		{#if docReviews.length}
-			{#if openCalls.length}
-				<button type="button" class="linkbtn next-call" onclick={nextCall}>Next call for you <kbd>F8</kbd></button>
-			{:else}
-				<span class="nothing-open">Nothing open</span>
-			{/if}
-		{/if}
-	{/snippet}
 
 	{#if packet}
 		<PacketBrief data={packet} bind:verdicts decided={packet.decided} />
@@ -647,12 +875,12 @@ for that save first, and closing the tab then asks before leaving.
 			<p class="bg bg-first bg-flat">The queue can no longer read <code>{blueprint.file}</code> from the worktree’s latest commit. The editor shows the copy that was queued, and you can’t edit it.</p>
 		{/if}
 		{#if blueprint.kind === 'page'}
-			<PageView {review} file={blueprint.file} pr={blueprint.pr} />
+			<PageView {review} file={blueprint.file} pr={blueprint.pr} place={docPlace} />
 		{:else}
-			<BlueprintView {review} file={blueprint.file} />
+			<BlueprintView {review} file={blueprint.file} place={docPlace} />
 		{/if}
 	{:else if change}
-		<ChangeView data={change} reviews={changeReviews} />
+		<ChangeView data={change} reviews={changeReviews} place={docPlace} />
 	{:else if data.kind === 'pr'}
 		<PrView {data} bind:picks />
 	{:else if data.kind === 'design'}
@@ -670,10 +898,6 @@ for that save first, and closing the tab then asks before leaving.
 			{#if partItems.length}<PaneSection title="Parts"><PaneList items={partItems} /></PaneSection>{/if}
 			{#if yourSteps.length}<PaneSection title="Steps you run"><PaneList items={yourSteps} /></PaneSection>{/if}
 			<PaneSection title="Contents" contents><PaneList numbered items={outline} /></PaneSection>
-		{:else if review}
-			<ReviewPane {review} correctionsTitle="Fixed after the fact check" />
-		{:else if change}
-			<ChangePane reviews={changeReviews} paths={change.docs.map((d) => d.path)} hasCode={change.groups.length > 0} />
 		{:else if data.kind === 'triage'}
 			{@const html = data.html}
 			<PaneSection title="Calls for you">
@@ -736,10 +960,14 @@ for that save first, and closing the tab then asks before leaving.
 								<p class="muted">
 									{packet
 										? 'Your verdicts go with this note.'
-										: review
-											? 'Your edits and decisions go with this note.'
-											: change
-												? 'The change’s author reads this note and makes the edits.'
+										: review && yourWords
+											? `This note goes back with ${yours(yourWords)} and your edits and decisions. A note is optional when you’ve commented.`
+											: review
+												? 'Your edits and decisions go with this note.'
+												: change && yourWords
+													? `This note goes back with ${yours(yourWords)}. A note is optional when you’ve commented.`
+													: change
+														? 'The change’s author reads this note and makes the edits.'
 												: 'The session reads it as the reason; leave it empty to send back without one.'}
 								</p>
 								<textarea
@@ -780,6 +1008,9 @@ for that save first, and closing the tab then asks before leaving.
 								{capital(
 									[
 										decidedCount ? `${word(decidedCount)} decided` : '',
+										threadCount ? (unreadCount ? `${plural(unreadCount, 'reply', 'replies')} to read` : 'every reply read') : '',
+										replyCount ? `${plural(replyCount, 'reply', 'replies')} from you` : '',
+										commentCount ? plural(commentCount, 'comment') : '',
 										review
 											? review.changedLines
 												? `${plural(review.changedLines, 'line')} changed`

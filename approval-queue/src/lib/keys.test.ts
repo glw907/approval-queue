@@ -8,7 +8,8 @@ const base: KeyContext = {
 	sheetOpen: false,
 	held: false,
 	noteOpen: false,
-	approveLocked: false
+	approveLocked: false,
+	commentOpen: false
 };
 const none = { ctrl: false, meta: false, alt: false, shift: false };
 const ctx = (over: Partial<KeyContext>): KeyContext => ({ ...base, ...over });
@@ -146,5 +147,25 @@ describe('keyAction', () => {
 
 	it('does not treat a modified letter as a single key', () => {
 		expect(keyAction('a', { ...none, ctrl: true }, base)).toBeNull();
+	});
+
+	it('saves and cancels an open comment box on Ctrl+Enter and Escape, ahead of the note and Approve', () => {
+		const open = ctx({ page: 'blueprint', typing: true, commentOpen: true });
+		expect(keyAction('Enter', { ...none, ctrl: true }, open)).toBe('save-comment');
+		expect(keyAction('Enter', { ...none, meta: true }, open)).toBe('save-comment');
+		expect(keyAction('Escape', none, open)).toBe('cancel-comment');
+		expect(keyAction('Escape', none, ctx({ page: 'blueprint', noteOpen: true }))).toBe('close-note');
+	});
+
+	it('takes the comment chords on a document page only, from the editor and with single keys off', () => {
+		const chord = { ...none, ctrl: true, alt: true };
+		const t = ctx({ page: 'page', typing: true, singleKeys: false });
+		expect(keyAction('m', chord, t)).toBe('comment');
+		expect(keyAction('M', chord, ctx({ page: 'blueprint' }))).toBe('comment');
+		expect(keyAction('n', chord, ctx({ page: 'change' }))).toBe('next-comment');
+		expect(keyAction('p', chord, t)).toBe('prev-comment');
+		expect(keyAction('m', chord, ctx({ page: 'pr' }))).toBeNull();
+		expect(keyAction('m', { ...chord, shift: true }, t)).toBeNull();
+		expect(keyAction('m', { ...none, ctrl: true }, t)).toBeNull();
 	});
 });

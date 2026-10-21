@@ -1,10 +1,12 @@
 <!-- @component
 The work of a page review: the pull request the page rides with and the head the approval will name,
 what the reader is deciding and how to change the draft as two closed rows, then the page file in the
-document editor with its notes inline. The file is the real one in the session's worktree, so every
-pause in typing commits it there. A page queued with no readable pull request ref shows no PR line.
+document editor with its comment margin beside it, under the screen's place bar. The file is the
+real one in the session's worktree, so every pause in typing commits it there. A page queued with no
+readable pull request ref shows no PR line.
 -->
 <script lang="ts">
+	import type { Snippet } from 'svelte';
 	import type { DocReview } from '#lib/editor/review.svelte.ts';
 	import DocEditor from './DocEditor.svelte';
 	import PacketIcon from './PacketIcon.svelte';
@@ -15,9 +17,11 @@ pause in typing commits it there. A page queued with no readable pull request re
 		file: string;
 		/** The pull request the page merges with, and its head when the item was queued. */
 		pr: { ref: string; url: string; head: string } | null;
+		/** The sticky place bar, which sits between the rows and the editor. */
+		place: Snippet;
 	}
 
-	let { review, file, pr }: Props = $props();
+	let { review, file, pr, place }: Props = $props();
 	const name = $derived(file.split('/').pop() ?? file);
 </script>
 
@@ -52,10 +56,16 @@ pause in typing commits it there. A page queued with no readable pull request re
 			the fact behind it, so leave it on the line it came with. Ctrl+Z undoes, F8 moves to the next call for you, and Ctrl+Enter
 			approves.
 		</p>
+		<p>
+			To ask the author for a change instead of making it, select the text, and a comment box opens beside it. To edit the selected
+			text instead, press Escape. Your comments go to the author with your decision.
+		</p>
 	</div>
 </details>
 
-<DocEditor {review} file={name} label="Page {name}, markdown" />
+{@render place()}
+
+<DocEditor {review} file={name} label="Page {name}, markdown" kindWord="page" />
 
 <style>
 	code {

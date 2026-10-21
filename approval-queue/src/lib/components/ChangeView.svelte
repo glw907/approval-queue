@@ -1,11 +1,12 @@
 <!-- @component
 The work of a change review: a code PR that also edits blueprints and pages, read-only. The PR line
 (its head, its checks), what the reader is deciding and how to read the documents as two closed
-rows, then each changed document in the document editor with its notes inline and its own diff
-behind a row, and last the code diff as the PR screen shows it. Nothing here is saved: the PR's
-author edits, and a send-back goes to that author with a note.
+rows, the screen's place bar, then each changed document in the document editor with its own
+comment margin and its own diff behind a row, and last the code diff as the PR screen shows it.
+No text is saved: the PR's author edits, and the comments and a send-back note go to that author.
 -->
 <script lang="ts">
+	import type { Snippet } from 'svelte';
 	import type { DocReview } from '#lib/editor/review.svelte.ts';
 	import type { PageData } from '../../routes/item/[id=id]/$types';
 	import DiffTable from './DiffTable.svelte';
@@ -18,9 +19,11 @@ author edits, and a send-back goes to that author with a note.
 		data: Extract<PageData, { kind: 'change' }>;
 		/** One review per document in `data.docs`, in the same order. */
 		reviews: DocReview[];
+		/** The sticky place bar, which sits between the rows and the first document. */
+		place: Snippet;
 	}
 
-	let { data, reviews }: Props = $props();
+	let { data, reviews, place }: Props = $props();
 
 	const KIND = { blueprint: 'Blueprint', page: 'Page' };
 	const WORDS = ['no', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten'];
@@ -75,9 +78,11 @@ author edits, and a send-back goes to that author with a note.
 		<span><span class="lead">How to read it.</span> Each document appears as it reads after the change, with the edited lines marked.</span>
 	</summary>
 	<div class="body">
-		<p>Each document’s changes are in its Diff disclosure. You can’t edit the documents here. To ask for an edit, send the change back with a note, and the change’s author makes it.</p>
+		<p>Each document’s changes are in its Diff disclosure. You can’t edit the documents here. To ask for an edit, select the text, and a comment box opens beside it. Your comments go to the change’s author with your decision.</p>
 	</div>
 </details>
+
+{@render place()}
 
 {#each data.docs as doc, i (doc.path)}
 	<section class="sec" id="doc-{i}" aria-labelledby="doc-{i}-h">
@@ -92,6 +97,7 @@ author edits, and a send-back goes to that author with a note.
 			review={reviews[i]}
 			file={name(doc.path)}
 			label="{KIND[doc.kind]} {name(doc.path)}, read only"
+			kindWord={doc.kind}
 			yaml={/\.ya?ml$/.test(doc.path)}
 		/>
 	</section>

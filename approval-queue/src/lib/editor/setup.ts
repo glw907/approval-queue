@@ -1,17 +1,26 @@
 // The review editor: CodeMirror 6 with cairn's markdown setup (`markdown({ base: markdownLanguage })`,
 // line wrapping, a highlight style), the directive marking ported from cairn-cms
-// `src/lib/admin/editor-highlight.ts` (`cairnDirectivePlugin`), and review notes as block widgets
-// under the line their anchor names. Each note's range is mapped through every change, so a note
-// follows its line through edits.
+// `src/lib/admin/editor-highlight.ts` (`cairnDirectivePlugin`), and the review's highlights: each
+// note's text, Geoff's comments, and the author's threads, whose cards sit in the margin beside the
+// editor. Every range is mapped through every change, so a highlight follows its text through edits.
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
 import { HighlightStyle, syntaxHighlighting } from '@codemirror/language';
-import { Compartment, EditorState, RangeSetBuilder, StateEffect, StateField, type Extension } from '@codemirror/state';
-import { Decoration, EditorView, keymap, ViewPlugin, WidgetType, type DecorationSet, type ViewUpdate } from '@codemirror/view';
+import { Compartment, EditorState, RangeSetBuilder, StateEffect, StateField, type Extension, type StateEffectType } from '@codemirror/state';
+import {
+	Decoration,
+	EditorView,
+	keymap,
+	showTooltip,
+	ViewPlugin,
+	WidgetType,
+	type DecorationSet,
+	type Tooltip,
+	type ViewUpdate
+} from '@codemirror/view';
 import { tags } from '@lezer/highlight';
-import { mount, unmount } from 'svelte';
-import NoteCard from '#lib/components/NoteCard.svelte';
 import { fenceScan, fenceTokens, findInlineDirectives, frontmatterSpan, type FenceScan } from './directives.ts';
+import { WIDE_MARGIN } from './margin.ts';
 import type { PlacedNote, Range } from './notes.ts';
 
 /** What the editor reports to the screen around it. */
@@ -20,9 +29,12 @@ export interface EditorHooks {
 	change(view: EditorView): void;
 	/** Ctrl+S or Cmd+S in the editor. */
 	save(): void;
-	/** A choice button on a note. */
-	choose(id: string, index: number): void;
-	reopen(id: string): void;
+	/** The selection moved, or the editor gained or lost focus. */
+	select(view: EditorView): void;
+	/** A line's height or the viewport changed, so the margin's cards may need to move. */
+	geometry(): void;
+	/** The Comment button beside a selection, shown where the margin is a drawer. */
+	comment(): void;
 }
 
 export interface EditorOptions {
@@ -33,9 +45,13 @@ export interface EditorOptions {
 	/** The editable region's accessible name. */
 	label: string;
 	decided: Record<string, number>;
+	/** The corrections resolved in the margin, which lose their highlight. */
+	resolved: string[];
+	/** The comment and thread ranges, keyed `comment:<id>` and `thread:<id>`; a collapsed range is text that is gone. */
+	comments: Record<string, Range>;
 	readonly: boolean;
-	/** The calls are frozen: every choice and Reopen button is disabled. */
-	locked: boolean;
+	/** A selection offers a Comment button where the margin is a drawer. */
+	commentable: boolean;
 	/**
 	 * A YAML file rather than markdown: set in the monospace face with no markdown marking, and each
 	 * wrapped line hangs at its own indentation so the nesting stays readable.
@@ -46,23 +62,25 @@ export interface EditorOptions {
 
 const markChangesEffect = StateEffect.define<boolean>();
 const decidedEffect = StateEffect.define<Record<string, number>>();
-const lockedEffect = StateEffect.define<boolean>();
+const resolvedEffect = StateEffect.define<string[]>();
+const currentEffect = StateEffect.define<string | null>();
+const commentableEffect = StateEffect.define<boolean>();
 const rangeEffect = StateEffect.define<{ id: string; range: Range }>();
+const commentRangeEffect = StateEffect.define<{ key: string; range: Range | null }>();
 
-const markChangesField = StateField.define<boolean>({
-	create: () => false,
-	update: (v, tr) => tr.effects.reduce((acc, e) => (e.is(markChangesEffect) ? e.value : acc), v)
-});
+/** A field holding the value its effect last set. */
+const valueField = <T>(effect: StateEffectType<T>, initial: T) =>
+	StateField.define<T>({
+		create: () => initial,
+		update: (v, tr) => tr.effects.reduce((acc, e) => (e.is(effect) ? e.value : acc), v)
+	});
 
-const decidedField = StateField.define<Record<string, number>>({
-	create: () => ({}),
-	update: (v, tr) => tr.effects.reduce((acc, e) => (e.is(decidedEffect) ? e.value : acc), v)
-});
-
-const lockedField = StateField.define<boolean>({
-	create: () => false,
-	update: (v, tr) => tr.effects.reduce((acc, e) => (e.is(lockedEffect) ? e.value : acc), v)
-});
+const markChangesField = valueField(markChangesEffect, false);
+const decidedField = valueField<Record<string, number>>(decidedEffect, {});
+const resolvedField = valueField<string[]>(resolvedEffect, []);
+/** The current card's key (`note:<id>`, `comment:<id>`, `thread:<id>`, or `draft`), whose highlight deepens. */
+const currentField = valueField<string | null>(currentEffect, null);
+const commentableField = valueField(commentableEffect, false);
 
 /** Each note's range, mapped through every change; null for a note whose anchor named nothing. */
 const rangesField = StateField.define<Record<string, Range | null>>({
@@ -78,88 +96,135 @@ const rangesField = StateField.define<Record<string, Range | null>>({
 	}
 });
 
-// The mounted card by its widget's DOM: CodeMirror keeps the old DOM when `eq` holds but hands the
-// new widget instance to `destroy`, so the handle must live with the DOM, not the instance.
-const cards = new WeakMap<HTMLElement, ReturnType<typeof mount>>();
-
-/** A note under its line, rendered by `NoteCard`; rebuilt only when its decided or locked state changes. */
-class NoteWidget extends WidgetType {
-	constructor(
-		readonly note: PlacedNote,
-		readonly choice: number | undefined,
-		readonly locked: boolean,
-		readonly hooks: EditorHooks
-	) {
-		super();
-	}
-
-	eq(other: NoteWidget) {
-		return other.note.id === this.note.id && other.choice === this.choice && other.locked === this.locked;
-	}
-
-	toDOM(view: EditorView) {
-		const wrap = document.createElement('div');
-		wrap.className = 'notewidget';
-		// Opening "What changed" grows the block, and the editor only measures on its own changes.
-		wrap.addEventListener('toggle', () => view.requestMeasure(), true);
-		const card = mount(NoteCard, {
-			target: wrap,
-			props: {
-				note: this.note,
-				choice: this.choice,
-				disabled: this.locked,
-				onchoose: (i: number) => this.hooks.choose(this.note.id, i),
-				onreopen: () => this.hooks.reopen(this.note.id)
+/**
+ * Each comment's and thread's range, and the open comment box's as `draft`, mapped as the notes'
+ * are. A range whose text is deleted collapses to a point rather than going, so its card stays
+ * where the text was.
+ */
+const commentRangesField = StateField.define<Record<string, Range>>({
+	create: () => ({}),
+	update(v, tr) {
+		let out = v;
+		if (tr.docChanged) {
+			out = {};
+			for (const [key, [a, b]] of Object.entries(v)) {
+				const from = tr.changes.mapPos(a, 1);
+				out[key] = [from, Math.max(from, tr.changes.mapPos(b, -1))];
 			}
-		});
-		cards.set(wrap, card);
-		return wrap;
+		}
+		for (const e of tr.effects) {
+			if (!e.is(commentRangeEffect)) continue;
+			out = { ...out };
+			if (e.value.range) out[e.value.key] = e.value.range;
+			else delete out[e.value.key];
+		}
+		return out;
 	}
+});
 
-	destroy(dom: HTMLElement) {
-		const card = cards.get(dom);
-		if (card) void unmount(card);
-		cards.delete(dom);
-	}
+/** The DOM id of a card, which its highlight's `aria-details` names. */
+export const cardId = (key: string) => (key === 'draft' ? 'comment-draft' : key.replace(':', '-'));
 
-	ignoreEvent() {
+/** A dotted rule under the line where a comment's text was, so its card has something to sit beside. */
+class GoneWidget extends WidgetType {
+	eq() {
 		return true;
 	}
+	toDOM() {
+		const rule = document.createElement('div');
+		rule.className = 'cm-gone';
+		rule.setAttribute('aria-hidden', 'true');
+		return rule;
+	}
 }
+const goneMark = Decoration.widget({ widget: new GoneWidget(), block: true, side: 2 });
 
-function noteDecorations(state: EditorState, notes: PlacedNote[], hooks: EditorHooks): DecorationSet {
+function highlights(state: EditorState, notes: PlacedNote[]): DecorationSet {
 	const ranges = state.field(rangesField);
 	const decided = state.field(decidedField);
-	const locked = state.field(lockedField);
+	const resolved = state.field(resolvedField);
+	const current = state.field(currentField);
+	const len = state.doc.length;
 	const out = [];
+	// A decided call or a resolved correction has nothing left to point at, so it loses its highlight.
 	for (const note of notes) {
 		const r = ranges[note.id];
-		const choice = decided[note.id];
-		const widget = new NoteWidget(note, choice, locked, hooks);
-		// A note whose anchor resolved to nothing sits at the top of the document, never dropped.
-		if (!r || r[0] > state.doc.length) {
-			out.push(Decoration.widget({ widget, block: true, side: -1 }).range(0));
-			continue;
-		}
-		const to = Math.min(r[1], state.doc.length);
-		out.push(Decoration.widget({ widget, block: true, side: 1 }).range(state.doc.lineAt(to).to));
-		if (choice === undefined && to > r[0]) {
-			out.push(Decoration.mark({ class: note.kind === 'info' ? 'cm-anchor info' : 'cm-anchor' }).range(r[0], to));
-		}
+		if (!r || r[0] > len || decided[note.id] !== undefined || resolved.includes(note.id)) continue;
+		const to = Math.min(r[1], len);
+		if (to <= r[0]) continue;
+		const key = `note:${note.id}`;
+		const cls = ['cm-anchor', note.kind === 'info' && 'info', current === key && 'cur'].filter(Boolean).join(' ');
+		out.push(Decoration.mark({ class: cls, attributes: { 'aria-details': cardId(key) } }).range(r[0], to));
+	}
+	for (const [key, [a, b]] of Object.entries(state.field(commentRangesField))) {
+		if (a > len) continue;
+		if (b > a) {
+			const cls = key === current || key === 'draft' ? 'cm-cmt cur' : 'cm-cmt';
+			out.push(Decoration.mark({ class: cls, attributes: { 'aria-details': cardId(key) } }).range(a, Math.min(b, len)));
+		} else out.push(goneMark.range(state.doc.lineAt(a).to));
 	}
 	return Decoration.set(out, true);
 }
 
-function notesExtension(notes: PlacedNote[], hooks: EditorHooks): Extension {
+function highlightsExtension(opts: EditorOptions): Extension {
 	const field = StateField.define<DecorationSet>({
-		create: (state) => noteDecorations(state, notes, hooks),
+		create: (state) => highlights(state, opts.notes),
 		update: (v, tr) =>
-			tr.docChanged || tr.effects.some((e) => e.is(decidedEffect) || e.is(lockedEffect) || e.is(rangeEffect))
-				? noteDecorations(tr.state, notes, hooks)
+			tr.docChanged ||
+			tr.effects.some(
+				(e) => e.is(decidedEffect) || e.is(resolvedEffect) || e.is(currentEffect) || e.is(rangeEffect) || e.is(commentRangeEffect)
+			)
+				? highlights(tr.state, opts.notes)
 				: v,
 		provide: (f) => EditorView.decorations.from(f)
 	});
-	return [rangesField.init(() => Object.fromEntries(notes.map((n) => [n.id, n.range]))), decidedField, field];
+	return [
+		rangesField.init(() => Object.fromEntries(opts.notes.map((n) => [n.id, n.range]))),
+		commentRangesField.init(() => ({ ...opts.comments })),
+		decidedField,
+		resolvedField.init(() => opts.resolved),
+		currentField,
+		field
+	];
+}
+
+/**
+ * The Comment button at a selection, where the margin is a drawer and a selection cannot open the
+ * box beside it. The button takes no focus, so pressing it keeps the selection.
+ */
+function commentTip(opts: EditorOptions): Extension {
+	const field = StateField.define<Tooltip | null>({
+		create: () => null,
+		update(v, tr) {
+			if (!tr.docChanged && !tr.selection && !tr.effects.some((e) => e.is(commentableEffect))) return v;
+			const s = tr.state.selection.main;
+			if (s.empty || !tr.state.field(commentableField) || matchMedia(WIDE_MARGIN).matches) return null;
+			return {
+				pos: s.head,
+				above: s.head < s.anchor,
+				strictSide: true,
+				arrow: false,
+				create: () => {
+					const dom = document.createElement('div');
+					dom.className = 'cm-cbtn';
+					const button = document.createElement('button');
+					button.type = 'button';
+					button.className = 'btn btn-sm';
+					button.textContent = 'Comment';
+					button.addEventListener('pointerdown', (e) => {
+						e.preventDefault();
+						opts.hooks.comment();
+					});
+					// A keyboard press; a pointer press already acted on pointerdown.
+					button.addEventListener('click', (e) => e.detail === 0 && opts.hooks.comment());
+					dom.append(button);
+					return { dom };
+				}
+			};
+		},
+		provide: (f) => showTooltip.from(f)
+	});
+	return [commentableField.init(() => opts.commentable), field];
 }
 
 const line = (cls: string) => Decoration.line({ class: cls });
@@ -267,7 +332,6 @@ export function createEditor(parent: HTMLElement, opts: EditorOptions): EditorVi
 		doc: opts.doc,
 		extensions: [
 			history(),
-			lockedField.init(() => opts.locked),
 			keymap.of([
 				{
 					key: 'Mod-s',
@@ -283,12 +347,15 @@ export function createEditor(parent: HTMLElement, opts: EditorOptions): EditorVi
 			EditorView.lineWrapping,
 			markChangesField,
 			sourcePlugin(opts.original, opts.yaml ?? false),
-			notesExtension(opts.notes, opts.hooks),
+			highlightsExtension(opts),
+			commentTip(opts),
 			editable.of(editableExt(opts.readonly)),
 			EditorView.scrollMargins.of(() => ({ top: 56, bottom: 140 })),
 			EditorView.contentAttributes.of({ 'aria-label': opts.label }),
 			EditorView.updateListener.of((u) => {
 				if (u.docChanged) opts.hooks.change(u.view);
+				if (u.selectionSet || u.focusChanged) opts.hooks.select(u.view);
+				if (u.geometryChanged || u.heightChanged || u.viewportChanged) opts.hooks.geometry();
 			})
 		]
 	});
@@ -299,7 +366,11 @@ export function createEditor(parent: HTMLElement, opts: EditorOptions): EditorVi
 export const setDecided = (view: EditorView, decided: Record<string, number>) =>
 	view.dispatch({ effects: decidedEffect.of({ ...decided }) });
 
-export const setLocked = (view: EditorView, locked: boolean) => view.dispatch({ effects: lockedEffect.of(locked) });
+export const setResolved = (view: EditorView, resolved: string[]) => view.dispatch({ effects: resolvedEffect.of([...resolved]) });
+
+export const setCurrent = (view: EditorView, key: string | null) => view.dispatch({ effects: currentEffect.of(key) });
+
+export const setCommentable = (view: EditorView, on: boolean) => view.dispatch({ effects: commentableEffect.of(on) });
 
 export const setMarkChanges = (view: EditorView, on: boolean) => view.dispatch({ effects: markChangesEffect.of(on) });
 
@@ -308,6 +379,19 @@ export const setReadonly = (view: EditorView, readonly: boolean) =>
 
 /** Every note's current range, after the edits so far. */
 export const noteRanges = (view: EditorView) => view.state.field(rangesField);
+
+/** Sets a comment's or thread's range by its key, or drops it with null. */
+export const setCommentRange = (view: EditorView, key: string, range: Range | null) =>
+	view.dispatch({ effects: commentRangeEffect.of({ key, range }) });
+
+/** Every comment's and thread's current range, after the edits so far. */
+export const commentRanges = (view: EditorView) => view.state.field(commentRangesField);
+
+/** The viewport y of the top of the visual line holding `pos`: its drawn text when drawn, else the line's estimated block. */
+export function lineTop(view: EditorView, pos: number): number {
+	const at = Math.min(Math.max(pos, 0), view.state.doc.length);
+	return view.coordsAtPos(at)?.top ?? view.documentTop + view.lineBlockAt(at).top;
+}
 
 /** Replaces a note's anchored text and moves its anchor onto the new text. */
 export function replaceNoteText(view: EditorView, id: string, text: string) {

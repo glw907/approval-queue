@@ -1,19 +1,26 @@
 <!-- @component
-A markdown document under review, in a CodeMirror 6 editor with its notes inline: the file name and
-save state in a bar above, the source styled the way cairn's admin editor styles it, and each note
-under the line its anchor names. The editor is built on mount, so the server render shows the
-loading line; until then, and if scripts fail, nothing is editable.
+A markdown document under review and its comment margin, as one unit: the editor on the left in a
+CodeMirror 6 editor, with the file name, the Comment button, the switch that marks changed lines,
+and the save state in a bar above, and the margin of cards beside it (a drawer below 1260px). The
+source is styled the way cairn's admin editor styles it, and each note, comment, and thread
+highlights its text. The editor is built on mount, so the server render shows the loading line;
+until then, and if scripts fail, nothing is editable.
 
-All state lives in the `DocReview` it is handed, which the review pane and the decision bar read
-too: whether the text takes edits and whether the calls are frozen come from it. Edits save through
-that review; this component only shows the result. Leaving with an edit not yet saved sends it on
-the way out, so a quick navigation never drops the last words typed.
+All state lives in the `DocReview` it is handed, which the margin and the decision bar read too:
+whether the text takes edits and comments come from it. Edits save through that review; this
+component only shows the result. Leaving with an edit not yet saved sends it on the way out, so a
+quick navigation never drops the last words typed.
+
+A mouse selection in the text opens a comment box beside it from 1260px, and a press back in the
+text drops a box left empty. Below 1260px a tap on a highlight opens the drawer at its card.
 -->
 <script lang="ts">
 	import type { EditorView } from '@codemirror/view';
 	import { onMount } from 'svelte';
+	import { WIDE_MARGIN } from '#lib/editor/margin.ts';
 	import type { DocReview } from '#lib/editor/review.svelte.ts';
-	import { createEditor, setLocked, setMarkChanges, setReadonly } from '#lib/editor/setup.ts';
+	import { createEditor, setCommentable, setMarkChanges, setReadonly } from '#lib/editor/setup.ts';
+	import Margin from './Margin.svelte';
 
 	interface Props {
 		review: DocReview;
@@ -21,11 +28,13 @@ the way out, so a quick navigation never drops the last words typed.
 		file: string;
 		/** The editable region's accessible name; it names the file, since a screen can hold several. */
 		label: string;
+		/** What the margin calls the document: "blueprint", "page", or a change document's kind. */
+		kindWord: string;
 		/** A YAML file, set in the monospace face with each wrapped line hanging at its indentation. */
 		yaml?: boolean;
 	}
 
-	let { review, file, label, yaml = false }: Props = $props();
+	let { review, file, label, kindWord, yaml = false }: Props = $props();
 
 	let host = $state<HTMLDivElement>();
 	let view = $state<EditorView | null>(null);
@@ -38,18 +47,23 @@ the way out, so a quick navigation never drops the last words typed.
 			original: review.original,
 			label,
 			decided: $state.snapshot(review.decided),
+			resolved: $state.snapshot(review.resolved),
+			comments: $state.snapshot(review.ranges),
 			readonly: review.readonly,
-			locked: review.locked,
+			commentable: review.canComment,
 			yaml,
 			hooks: review.hooks
 		});
 		review.attach(v);
 		view = v;
 		const track = () => review.track();
+		const release = () => review.pointerUp();
 		window.addEventListener('scroll', track, { passive: true });
+		document.addEventListener('pointerup', release);
 		track();
 		return () => {
 			window.removeEventListener('scroll', track);
+			document.removeEventListener('pointerup', release);
 			if (review.pending) void review.flush();
 			review.attach(null);
 			v.destroy();
@@ -61,7 +75,7 @@ the way out, so a quick navigation never drops the last words typed.
 	});
 
 	$effect(() => {
-		if (view) setLocked(view, review.locked);
+		if (view) setCommentable(view, review.canComment);
 	});
 
 	$effect(() => {
@@ -75,17 +89,59 @@ the way out, so a quick navigation never drops the last words typed.
 			view.focus();
 		}
 	}
+
+	function pointerDown(e: PointerEvent) {
+		review.pointerDown(e.button === 0 && e.target instanceof Element && e.target.closest('.cm-content') !== null);
+	}
+
+	/** Below 1260px a tap on a highlight opens the drawer at its card. */
+	function tapHighlight(e: MouseEvent) {
+		if (matchMedia(WIDE_MARGIN).matches || !review.selectionEmpty || !(e.target instanceof Element)) return;
+		const id = e.target.closest('.cm-cmt, .cm-anchor')?.getAttribute('aria-details');
+		if (!id || id === 'comment-draft') return;
+		void review.showCard(id.replace('-', ':'));
+	}
+
+	/** The bar's Comment button acts on pointerdown, before the editor would lose its selection to the press. */
+	function commentDown(e: PointerEvent) {
+		e.preventDefault();
+		void review.openBox();
+	}
 </script>
 
-<div class="edwrap">
-	<div class="edbar">
-		<span class="fname">{file}</span>
-		<!-- Not a live region: the review announces the first save and any failure, not every pause in typing. -->
-		<span class={['esaved', review.saveFailed && 'failed']}>{review.saveStatus}</span>
+<div class="unit">
+	<div class="edwrap">
+		<div class="edbar">
+			<span class="fname">{file}</span>
+			{#if review.canComment}
+				<button
+					type="button"
+					class="linkbtn addc"
+					aria-disabled={review.selectionEmpty}
+					title="Select text to comment on it"
+					onpointerdown={commentDown}
+					onclick={(e) => e.detail === 0 && void review.openBox()}
+				>
+					Comment <kbd>Ctrl</kbd><kbd>Alt</kbd><kbd>M</kbd>
+				</button>
+			{/if}
+			{#if review.editable}
+				<label class="marks"><input type="checkbox" bind:checked={review.markChanges} /> Mark the lines you changed</label>
+			{/if}
+			<!-- Not a live region: the review announces the first save and any failure, not every pause in typing. -->
+			<span class={['esaved', review.saveFailed && 'failed']}>{review.saveStatus}</span>
+		</div>
+		<!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events: the padding forwards a pointer press to the editor, which has its own keyboard focus, and a tap on a highlight opens its card, which Ctrl+Alt+N reaches from the keyboard -->
+		<div
+			class={['cm-host', yaml && 'yaml']}
+			bind:this={host}
+			onmousedown={focusFromPadding}
+			onpointerdown={pointerDown}
+			onclick={tapHighlight}
+		></div>
+		{#if !view}<p class="loading">Loading the editor…</p>{/if}
 	</div>
-	<!-- svelte-ignore a11y_no_static_element_interactions: the padding forwards a pointer press to the editor, which has its own keyboard focus -->
-	<div class={['cm-host', yaml && 'yaml']} bind:this={host} onmousedown={focusFromPadding}></div>
-	{#if !view}<p class="loading">Loading the editor…</p>{/if}
+	<Margin {review} {kindWord} />
 </div>
 
 <style>
@@ -118,9 +174,48 @@ the way out, so a quick navigation never drops the last words typed.
 		min-width: 0;
 		overflow-wrap: anywhere;
 	}
+	.addc {
+		margin-left: 12px;
+		font-size: 0.8rem;
+	}
+	.addc[aria-disabled='true'] {
+		color: var(--color-muted);
+		text-decoration: none;
+		cursor: default;
+	}
+	.marks {
+		display: inline-flex;
+		gap: 6px;
+		align-items: center;
+		margin-left: auto;
+		cursor: pointer;
+		white-space: nowrap;
+	}
+	.marks input {
+		accent-color: var(--color-primary);
+		margin: 0;
+	}
 	.esaved {
 		margin-left: auto;
 		text-align: right;
+		white-space: nowrap;
+	}
+	.marks + .esaved {
+		margin-left: 14px;
+	}
+	@media (max-width: 1023.98px) {
+		.addc kbd {
+			display: none;
+		}
+	}
+	@media (max-width: 479.98px) {
+		.edbar {
+			flex-wrap: wrap;
+		}
+		.marks + .esaved {
+			flex-basis: 100%;
+			margin-left: 0;
+		}
 	}
 	.esaved.failed {
 		color: var(--cairn-error-ink);
@@ -234,12 +329,45 @@ the way out, so a quick navigation never drops the last words typed.
 		color: var(--color-muted);
 		line-height: 1.6;
 	}
+	/* Highlights are fills only, deepening while their card is current (round 6). */
+	.cm-host :global(:is(.cm-anchor, .cm-cmt)) {
+		border-radius: 2px;
+		transition: background-color var(--motion-quick) var(--motion-ease);
+	}
 	.cm-host :global(.cm-anchor) {
 		background: color-mix(in oklab, var(--color-warning) 18%, transparent);
-		border-radius: 2px;
 	}
 	.cm-host :global(.cm-anchor.info) {
 		background: color-mix(in oklab, var(--color-info) 12%, transparent);
+	}
+	.cm-host :global(.cm-anchor.cur) {
+		background: color-mix(in oklab, var(--color-warning) 34%, transparent);
+	}
+	.cm-host :global(.cm-anchor.info.cur) {
+		background: color-mix(in oklab, var(--color-info) 26%, transparent);
+	}
+	.cm-host :global(.cm-cmt) {
+		background: color-mix(in oklab, var(--color-primary) 14%, transparent);
+	}
+	.cm-host :global(.cm-cmt.cur) {
+		background: color-mix(in oklab, var(--color-primary) 26%, transparent);
+	}
+	.cm-host :global(.cm-gone) {
+		height: 0;
+		border-top: 2px dotted color-mix(in oklab, var(--color-primary) 55%, transparent);
+		margin: 2px 0;
+	}
+	/* The Comment button at a selection, where the margin is a drawer. */
+	.cm-host :global(.cm-tooltip.cm-tooltip) {
+		z-index: 20;
+	}
+	.cm-host :global(.cm-tooltip.cm-cbtn),
+	.cm-host :global(.cm-tooltip:has(> .cm-cbtn)) {
+		border: 0;
+		background: transparent;
+	}
+	.cm-host :global(.cm-cbtn .btn) {
+		box-shadow: var(--bar-shadow);
 	}
 	.cm-host :global(.cm-edited) {
 		position: relative;
@@ -277,9 +405,6 @@ the way out, so a quick navigation never drops the last words typed.
 		background: color-mix(in oklab, var(--color-base-300) 55%, transparent);
 		border-radius: 3px;
 		padding: 0 0.2em;
-	}
-	.cm-host :global(.notewidget) {
-		padding: 6px 0 10px;
 	}
 	@media (max-width: 639.98px) {
 		.cm-host :global(.cm-scroller),

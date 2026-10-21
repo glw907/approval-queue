@@ -14,7 +14,12 @@ export type KeyAction =
 	| 'move-now'
 	| 'move-defer'
 	| 'move-drop'
-	| 'submit';
+	| 'submit'
+	| 'comment'
+	| 'next-comment'
+	| 'prev-comment'
+	| 'save-comment'
+	| 'cancel-comment';
 
 export interface KeyContext {
 	page: 'pr' | 'design' | 'triage' | 'packet' | 'blueprint' | 'page' | 'change';
@@ -31,6 +36,8 @@ export interface KeyContext {
 	 * first open ask, card, or call instead of approving.
 	 */
 	approveLocked: boolean;
+	/** A comment box holds focus, so Ctrl+Enter saves it and Escape cancels it instead of deciding. */
+	commentOpen: boolean;
 }
 
 export interface KeyMods {
@@ -41,6 +48,8 @@ export interface KeyMods {
 }
 
 const MOVES: Record<string, KeyAction> = { '1': 'move-now', '2': 'move-defer', '3': 'move-drop' };
+const DOCS: ReadonlyArray<KeyContext['page']> = ['blueprint', 'page', 'change'];
+const COMMENT_KEYS: Record<string, KeyAction> = { m: 'comment', n: 'next-comment', p: 'prev-comment' };
 
 /**
  * Follows the catalogue's global handler order: the open sheet takes everything but `?`, then
@@ -48,9 +57,19 @@ const MOVES: Record<string, KeyAction> = { '1': 'move-now', '2': 'move-defer', '
  * A held decision belongs to an item already left behind, so it gates nothing on the open one.
  */
 export function keyAction(key: string, mods: KeyMods, context: KeyContext): KeyAction | null {
-	const { page, typing, singleKeys, sheetOpen, held, noteOpen, approveLocked } = context;
+	const { page, typing, singleKeys, sheetOpen, held, noteOpen, approveLocked, commentOpen } = context;
 	const plain = !mods.ctrl && !mods.meta && !mods.alt;
 	if (sheetOpen) return key === '?' && plain ? 'toggle-sheet' : null;
+
+	if (commentOpen) {
+		if (key === 'Escape') return 'cancel-comment';
+		if (key === 'Enter' && (mods.ctrl || mods.meta)) return 'save-comment';
+	}
+	// The comment chords work from the editor, which is a typing target, and with single keys off.
+	if (DOCS.includes(page) && mods.ctrl && mods.alt && !mods.meta && !mods.shift) {
+		const action = COMMENT_KEYS[key.toLowerCase()];
+		if (action) return action;
+	}
 
 	if (key === 'Escape') return page !== 'triage' && noteOpen ? 'close-note' : null;
 	if (key === 'Enter' && (mods.ctrl || mods.meta)) {
