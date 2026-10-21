@@ -1,6 +1,7 @@
 <!-- @component
-A PR in the order its reader needs it: the headline block (Survey header, what changes, what approving
-does, and one footnote), the "Decide first" cards, the brief's detail rows, then the evidence rows.
+A PR's work in the order its reader needs it, under the frame's Survey header: what changes, what
+approving does, and one footnote, the "Decide first" cards, the brief's detail rows, then the
+evidence rows.
 Color marks only the must-act note rules and the diff signs.
 
 `picks` passes through to `DecideCards` and is bound up to the panel so its bar can unlock Approve.
@@ -13,17 +14,16 @@ A PR whose body has no brief shows its title and the rows it still has.
 	import BriefBlock from './BriefBlock.svelte';
 	import DecideCards from './DecideCards.svelte';
 	import DetailRows from './DetailRows.svelte';
+	import DiffTable from './DiffTable.svelte';
 	import Disclosure from './Disclosure.svelte';
 
 	interface Props {
 		data: Extract<PageData, { kind: 'pr' }>;
 		/** The chosen choice index for each card, or undefined while it has none. */
 		picks: Array<number | undefined>;
-		/** The name and number the meta line leads with, such as `workstation #41`. */
-		subject: string;
 	}
 
-	let { data, picks = $bindable([]), subject }: Props = $props();
+	let { data, picks = $bindable([]) }: Props = $props();
 
 	const VERDICTS = { accept: 'Accepted', fix: 'Fix', escalate: 'Escalate' };
 	const CHECK_NOTES = { pass: '', fail: 'failed', skip: 'skipped', pending: 'pending' };
@@ -65,16 +65,15 @@ A PR whose body has no brief shows its title and the rows it still has.
 		`${data.totals.files} ${plural(data.totals.files, 'file', 'files')}, +${count(data.totals.adds)} −${count(data.totals.dels)}.`
 	);
 
-	$effect(() => {
-		desk.handlers = {
-			...desk.handlers,
+	$effect(() =>
+		desk.register({
 			'focus-filter': async () => {
 				filesOpen = true;
 				await tick();
 				filter?.focus();
 			}
-		};
-	});
+		})
+	);
 
 	function toggleAll() {
 		for (const g of shown) groupOpen[g.name] = !allOpen;
@@ -93,21 +92,7 @@ A PR whose body has no brief shows its title and the rows it still has.
 	}
 </script>
 
-<BriefBlock
-	headlineHtml={data.headlineHtml}
-	ledeHtml={data.ledeHtml}
-	whatChanges={data.whatChanges}
-	ifYouApprove={data.ifYouApprove}
-	worthKnowing={data.worthKnowing}
->
-	{#snippet trail()}
-		<a href="/">Board</a><span aria-hidden="true">/</span><span>Pull request</span><span aria-hidden="true">/</span><span>{subject}</span>
-		{#if data.link}
-			<span aria-hidden="true">/</span><span>{data.link.head} → {data.link.base}</span>
-			<a href={data.link.url} target="_blank" rel="noopener noreferrer">GitHub</a>
-		{/if}
-	{/snippet}
-</BriefBlock>
+<BriefBlock whatChanges={data.whatChanges} ifYouApprove={data.ifYouApprove} worthKnowing={data.worthKnowing} />
 
 <DecideCards cards={data.cards} bind:picks decided={data.decided} />
 
@@ -199,18 +184,7 @@ A PR whose body has no brief shows its title and the rows it still has.
 											</span>
 										</summary>
 										<div class="collapse-content">
-											<table class="desk-diff" aria-label="Diff of {file.path}">
-												<tbody>
-													{#each file.rows as row, i (i)}
-														<tr class={row.kind}>
-															<td class="ln">{row.kind === 'add' || row.kind === 'hunk' ? '' : (row.oldLine ?? '')}</td>
-															<td class="ln">{row.kind === 'del' || row.kind === 'hunk' ? '' : (row.newLine ?? '')}</td>
-															<td class="sg">{row.kind === 'add' ? '+' : row.kind === 'del' ? '−' : ''}</td>
-															<td class="cd">{row.text}</td>
-														</tr>
-													{/each}
-												</tbody>
-											</table>
+											<DiffTable {file} />
 										</div>
 									</details>
 								</li>
@@ -260,65 +234,9 @@ A PR whose body has no brief shows its title and the rows it still has.
 		background-color: var(--color-base-200);
 	}
 
-	.desk-diff {
-		width: 100%;
-		border-collapse: collapse;
-		font-family: var(--font-mono);
-		font-size: 0.76rem;
-		line-height: 1.55;
-	}
-	.desk-diff td {
-		padding: 0;
-		vertical-align: top;
-	}
-	.desk-diff .ln {
-		width: 1%;
-		min-width: 3.2em;
-		padding-inline: 8px;
-		text-align: right;
-		white-space: nowrap;
-		color: var(--color-muted);
-		font-variant-numeric: tabular-nums;
-		user-select: none;
-		border-inline-end: 1px solid var(--color-base-300);
-	}
-	.desk-diff .sg {
-		width: 1.4em;
-		text-align: center;
-		user-select: none;
-	}
-	.desk-diff .cd {
-		white-space: pre-wrap;
-		overflow-wrap: anywhere;
-		padding-inline-end: 12px;
-	}
-	.desk-diff tr.add td {
-		background-color: color-mix(in oklab, var(--color-success) 13%, var(--color-base-100));
-	}
-	.desk-diff tr.add .sg {
-		color: var(--cairn-success-ink);
-		font-weight: 700;
-	}
-	.desk-diff tr.del td {
-		background-color: color-mix(in oklab, var(--color-error) 11%, var(--color-base-100));
-	}
-	.desk-diff tr.del .sg {
-		color: var(--cairn-error-ink);
-		font-weight: 700;
-	}
-	.desk-diff tr.hunk td {
-		background-color: var(--color-base-200);
-		color: var(--cairn-info-ink);
-		padding-block: 2px;
-	}
-
 	.desk-md {
 		font-size: 0.9rem;
 		line-height: 1.62;
-	}
-	.desk-md.desk-card {
-		font-size: 0.95rem;
-		line-height: 1.625;
 	}
 	.desk-md > :global(:first-child) {
 		margin-top: 0;

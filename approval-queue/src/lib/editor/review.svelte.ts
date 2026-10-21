@@ -1,4 +1,6 @@
 import type { EditorView } from '@codemirror/view';
+import { tick } from 'svelte';
+import { desk } from '#lib/desk.svelte.ts';
 import { isCall, outline, type Heading, type PlacedNote, type Range } from './notes.ts';
 import { headingAbove, jumpTo, noteRanges, replaceNoteText, setDecided, type EditorHooks } from './setup.ts';
 
@@ -13,9 +15,33 @@ export interface ReviewInit {
 	notes: PlacedNote[];
 	/** Writes and commits the text; `base` is the blob the text was edited from. */
 	save: (text: string, base: string) => Promise<SaveResult>;
+	/** The calls already made, by note id: a decided item's recorded answers. */
+	decided?: Record<string, number>;
+	/**
+	 * Where the reader's open choices are remembered across a reload, a `localStorage` key; omitted
+	 * for a decided item, whose choices come from its decision.
+	 */
+	remember?: string;
+	/** The text takes no edits at all, as in a change review: a choice records its answer only. */
+	readonly?: boolean;
 }
 
 const PAUSE_MS = 800;
+
+/** The stored choices that still name one of these notes' choices; anything else is dropped. */
+function recalled(key: string | undefined, notes: PlacedNote[]): Record<string, number> {
+	if (!key) return {};
+	let stored: unknown;
+	try {
+		stored = JSON.parse(localStorage.getItem(key) ?? '{}');
+	} catch {
+		return {};
+	}
+	if (!stored || typeof stored !== 'object') return {};
+	return Object.fromEntries(
+		Object.entries(stored).filter(([id, i]) => typeof i === 'number' && notes.find((n) => n.id === id && isCall(n))?.choices?.[i])
+	);
+}
 
 /**
  * The state one document review shares between its editor, its review pane, and the decision bar:
@@ -35,15 +61,22 @@ export class DocReview {
 	markChanges = $state(false);
 	/** The outline heading the reader has scrolled to. */
 	current = $state<number | null>(null);
+	/** No text edits are taken, so a choice records its answer without rewriting its line. */
+	readonly = $state(false);
+	/** The calls are frozen too, as while a decision is held or once the item is decided. */
+	locked = $state(false);
 
 	readonly notes: PlacedNote[];
 	readonly original: string;
 	private readonly originalLines: Set<string>;
 	private readonly saver: ReviewInit['save'];
+	private readonly remember: string | undefined;
+	private readonly fixedReadonly: boolean;
 	private view: EditorView | null = null;
 	private timer: ReturnType<typeof setTimeout> | null = null;
 	private dirty = false;
 	private inFlight: Promise<void> | null = null;
+	private savedOnce = false;
 
 	constructor(init: ReviewInit) {
 		this.text = init.doc;
@@ -52,6 +85,10 @@ export class DocReview {
 		this.blob = init.blob;
 		this.notes = init.notes;
 		this.saver = init.save;
+		this.remember = init.remember;
+		this.fixedReadonly = init.readonly ?? false;
+		this.readonly = this.fixedReadonly;
+		this.decided = init.decided ?? recalled(init.remember, init.notes);
 		this.starts = Object.fromEntries(init.notes.map((n) => [n.id, n.range?.[0] ?? null]));
 		this.calls = init.notes.filter(isCall);
 		this.openCalls = $derived(this.calls.filter((n) => this.decided[n.id] === undefined));
@@ -78,12 +115,18 @@ export class DocReview {
 		},
 		save: () => void this.flush(),
 		choose: (id, index) => this.choose(id, index),
-		reopen: (id) => {
-			const { [id]: _, ...rest } = this.decided;
-			this.decided = rest;
-			if (this.view) setDecided(this.view, rest);
-		}
+		reopen: (id) => this.reopen(id)
 	};
+
+	/** An edit is waiting for its pause, being saved, or not yet sent. */
+	get pending(): boolean {
+		return this.dirty || this.timer !== null || this.inFlight !== null;
+	}
+
+	/** Sets whether text edits are taken; a review built read-only stays so. */
+	setReadonly(readonly: boolean) {
+		this.readonly = this.fixedReadonly || readonly;
+	}
 
 	attach(view: EditorView | null) {
 		this.view = view;
@@ -95,21 +138,42 @@ export class DocReview {
 		this.starts = Object.fromEntries(Object.entries(ranges).map(([id, r]) => [id, r?.[0] ?? null]));
 	}
 
+	private setChoices(decided: Record<string, number>) {
+		this.decided = decided;
+		if (this.view) setDecided(this.view, decided);
+		if (!this.remember) return;
+		try {
+			localStorage.setItem(this.remember, JSON.stringify(decided));
+		} catch {
+			// Storage only carries the choices across a reload; the review works without it.
+		}
+	}
+
 	/** Records a call's choice; a choice with text rewrites the anchored line, one marked `edit` selects it to rewrite. */
 	choose(id: string, index: number) {
 		const note = this.notes.find((n) => n.id === id);
 		const c = note?.choices?.[index];
-		if (!note || !c) return;
-		this.decided = { ...this.decided, [id]: index };
+		if (!note || !c || this.locked) return;
 		const view = this.view;
-		if (!view) return;
-		if (c.text !== undefined) replaceNoteText(view, id, c.text);
-		setDecided(view, this.decided);
-		const r: Range | null = noteRanges(view)[id];
-		if (r) {
-			view.dispatch({ selection: c.edit ? { anchor: r[0], head: r[1] } : { anchor: r[0] } });
+		if (view && c.text !== undefined && !this.readonly) replaceNoteText(view, id, c.text);
+		this.setChoices({ ...this.decided, [id]: index });
+		desk.announce(`Decided: ${c.done}`);
+		const r: Range | null = view ? noteRanges(view)[id] : null;
+		if (view && r) {
+			view.dispatch({ selection: c.edit && !this.readonly ? { anchor: r[0], head: r[1] } : { anchor: r[0] } });
 			view.focus();
 		}
+	}
+
+	/** Opens a decided call again and puts focus on its first choice, since the button pressed is gone. */
+	async reopen(id: string) {
+		const note = this.notes.find((n) => n.id === id);
+		if (!note || this.locked) return;
+		const { [id]: _, ...rest } = this.decided;
+		this.setChoices(rest);
+		desk.announce(`Reopened ${note.title}`);
+		await tick();
+		document.querySelector<HTMLElement>(`#note-${CSS.escape(id)} button`)?.focus();
 	}
 
 	/** Saves now if anything is unsaved, and resolves once every save so far has finished. */
@@ -137,9 +201,13 @@ export class DocReview {
 		if (result.ok) {
 			this.blob = result.blob;
 			if (!this.dirty) this.saveStatus = 'All changes saved';
+			// Only the first save is read aloud; every later pause in typing would repeat it.
+			if (!this.savedOnce) desk.announce('Your edits are saving as you type.');
+			this.savedOnce = true;
 		} else {
 			this.saveFailed = true;
 			this.saveStatus = `Not saved: ${result.message}`;
+			desk.announce(this.saveStatus);
 			// A refused save is not retried on its own; the next edit tries again.
 			this.dirty = false;
 		}

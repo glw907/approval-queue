@@ -1,20 +1,25 @@
 <!-- @component
-One open item in the three-pane frame: a switch on the item's kind picks its work, its review
-pane, and the decision bar's labels, and the frame supplies the rest. The page renders it inside a
-`{#key}` on the item's id, so per-item state here (the note, a failed post) starts fresh when the
-next item loads. Triage calls are the exception: unsent ones are kept in `desk.drafts`, so
+One open item in the three-pane frame: a switch on the item's kind picks its header, its work, its
+review pane, and the decision bar's labels, and the frame supplies the rest. The page renders it
+inside a `{#key}` on the item's id, so per-item state here (the note, a failed post) starts fresh
+when the next item loads. Triage calls are the exception: unsent ones are kept in `desk.drafts`, so
 opening another item and coming back keeps them.
 
 A decision is held in the page for five seconds before the form posts: the submit function awaits
 the hold, and Undo calls `cancel()` so nothing is sent. Opening another item during the hold sends
 the decision at once, while closing the tab undoes it, since a closing page cannot finish a post.
 A post that fails unlocks the bar and shows why; a post that succeeds navigates to the item the
-server named, replacing the history entry so the tab stays script-closable.
+server named, replacing the history entry so the tab stays script-closable. A send-back closes its
+note before the hold starts, so the toast never covers it, and Undo opens it again as it was.
 
-A packet holds the same way, with its Undo, countdown, and status in the bar so the hold can pause
-while the pointer is over it. Its Approve uses `aria-disabled`, so a locked press still arrives and
-moves focus to the first open ask. A packet whose steps cannot be undone asks for one confirmation
+A packet holds the same way, with its Undo, Pause, countdown, and status in the bar, so the hold
+can pause while the pointer is over it or on a press of Pause. Every Approve uses `aria-disabled`
+rather than `disabled` while calls are open, so a locked press still arrives and moves focus to the
+first open ask, card, or call. A packet whose steps cannot be undone asks for one confirmation
 first, which posts as `irreversible=yes`. A withdrawn packet answers 410 with the board to offer.
+
+A document review saves as the reader types. Opening another item while an edit is unsaved waits
+for that save first, and closing the tab then asks before leaving.
 -->
 <script lang="ts">
 	import { deserialize, enhance, type SubmitFunction } from '$app/forms';
@@ -26,6 +31,7 @@ first, which posts as `irreversible=yes`. A withdrawn packet answers 410 with th
 	import { nextItem } from '#lib/queue.ts';
 	import { changedCount, seedRows, type Row } from '#lib/triage.ts';
 	import { VERDICT_LOOK } from '#lib/packet-view.ts';
+	import type { PlacedNote } from '#lib/editor/notes.ts';
 	import { DocReview, type SaveResult } from '#lib/editor/review.svelte.ts';
 	import type { PageData } from '../../routes/item/[id=id]/$types';
 	import BlueprintView from './BlueprintView.svelte';
@@ -54,6 +60,7 @@ first, which posts as `irreversible=yes`. A withdrawn packet answers 410 with th
 
 	let form = $state<HTMLFormElement>();
 	let noteField = $state<HTMLTextAreaElement>();
+	let noteText = $state('');
 	let approveButton = $state<HTMLButtonElement>();
 	let rejectButton = $state<HTMLButtonElement>();
 	let sendButton = $state<HTMLButtonElement>();
@@ -63,6 +70,11 @@ first, which posts as `irreversible=yes`. A withdrawn packet answers 410 with th
 	let hold: ReturnType<typeof startHold> | null = null;
 	// Set when a held decision is sent because another item is opening, so success must not navigate too.
 	let leaving = false;
+
+	// The poll hands the panel a new `data` every two seconds, so effects read these instead: a
+	// derived that keeps its value does not re-run them.
+	const kind = $derived(data.kind);
+	const isDecided = $derived(data.decided);
 
 	// The page keys this component on the item id, so the rows are read once per item.
 	// svelte-ignore state_referenced_locally
@@ -82,8 +94,6 @@ first, which posts as `irreversible=yes`. A withdrawn packet answers 410 with th
 	let picks = $state<Array<number | undefined>>([]);
 	const cards = $derived(data.kind === 'pr' || data.kind === 'design' ? data.cards : []);
 	const decided = $derived(gate(cards, picks));
-	const approvable = $derived(!decided.locked);
-	const tip = $derived(!approvable && decided.open.length ? `Decide ${decided.open[0].title} first` : undefined);
 	const readySub = $derived.by(() => {
 		if (cards.length > 0) return 'Every decision is made.';
 		if (data.kind !== 'pr') return '';
@@ -169,49 +179,84 @@ first, which posts as `irreversible=yes`. A withdrawn packet answers 410 with th
 			? data.steps.filter((s) => s.tag === 'you').map((s) => ({ href: `#step-${s.n}`, label: `${s.n}. ${s.label ?? s.text}`, dot: 'call' as const }))
 			: []
 	);
-	/** The packet's sections in page order; Asks carries a dot while any is open. */
+	/** The screen's sections in page order, numbered; a section holding an open call carries a dot. */
 	const outline = $derived.by((): PaneItem[] => {
-		if (data.kind !== 'packet') return [];
-		const sections: Array<Omit<PaneItem, 'n'>> = [
-			{ href: '#background', label: 'Background' },
-			{ href: '#if-you-approve', label: 'If you approve' },
-			{ href: '#not-checked', label: 'Not checked' }
-		];
-		if (data.asks.length) sections.push({ href: '#asks', label: 'Asks', mark: openAsks.length ? 'call' : undefined });
-		if (partRows.length) sections.push({ href: '#parts', label: 'Parts' });
+		const sections: Array<Omit<PaneItem, 'n'>> = [];
+		if (data.kind === 'packet') {
+			sections.push({ href: '#background', label: 'Background' }, { href: '#if-you-approve', label: 'If you approve' }, { href: '#not-checked', label: 'Not checked' });
+			if (data.asks.length) sections.push({ href: '#asks', label: 'Asks', mark: openAsks.length ? 'call' : undefined });
+			if (partRows.length) sections.push({ href: '#parts', label: 'Parts' });
+		} else if (data.kind === 'pr' || data.kind === 'design') {
+			if (data.whatChanges.length) sections.push({ href: '#what-changes', label: 'What changes' });
+			if (data.ifYouApprove.length) sections.push({ href: '#if-you-approve', label: 'If you approve' });
+			if (cards.length) sections.push({ href: '#decide-first', label: 'Decide first', mark: decided.open.length ? 'call' : undefined });
+			if (data.details.length) sections.push({ href: '#details', label: 'Details' });
+			sections.push(data.kind === 'pr' ? { href: '#evidence', label: 'Evidence' } : { href: '#design', label: 'The design' });
+		} else if (data.kind === 'triage') {
+			sections.push({ href: '#group-now', label: 'Do now' }, { href: '#group-defer', label: 'Do later' }, { href: '#group-drop', label: 'Don’t do' });
+		}
 		return sections.map((s, i) => ({ ...s, n: i + 1 }));
 	});
 	const packet = $derived(data.kind === 'packet' ? data : null);
+
+	// The page keys this component on the item id, so the save's address is fixed once per item: a
+	// save that lands after the reader has moved on still reaches this item, never the next one.
+	// svelte-ignore state_referenced_locally
+	const saveUrl = `/item/${encodeURIComponent(data.meta.id)}?/save`;
 
 	/** Posts a blueprint's text to the save action, which commits it in the worktree. */
 	async function saveBlueprint(text: string, base: string): Promise<SaveResult> {
 		const body = new FormData();
 		body.set('text', text);
 		body.set('base', base);
-		const res = await fetch('?/save', { method: 'POST', body, headers: { 'x-sveltekit-action': 'true' } });
+		const res = await fetch(saveUrl, { method: 'POST', body, headers: { 'x-sveltekit-action': 'true' } });
 		const result = deserialize(await res.text());
 		if (result.type === 'success') return { ok: true, blob: String(result.data?.blob ?? '') };
 		if (result.type === 'failure') return { ok: false, message: String(result.data?.message ?? 'refused') };
 		return { ok: false, message: result.type === 'error' ? result.error.message : 'unexpected answer' };
 	}
 
-	// The page keys this component on the item id, so the review is built once per item.
+	/** A decided item's calls as choice indexes, so its notes show what was chosen. */
+	function answeredCalls(notes: PlacedNote[]): Record<string, number> {
+		const decision = 'decision' in data ? data.decision : undefined;
+		if (decision?.decision !== 'approve') return {};
+		const out: Record<string, number> = {};
+		for (const call of decision.calls ?? []) {
+			const at = notes.find((n) => n.id === call.id)?.choices?.findIndex((c) => c.label === call.choice) ?? -1;
+			if (at >= 0) out[call.id] = at;
+		}
+		return out;
+	}
+	// The page keys this component on the item id, so each review is built once per item.
+	// svelte-ignore state_referenced_locally
+	const remember = data.decided ? undefined : `desk.calls.${data.meta.id}`;
 	// svelte-ignore state_referenced_locally
 	const review =
 		data.kind === 'blueprint' || data.kind === 'page'
-			? new DocReview({ doc: data.doc, original: data.original, blob: data.blob, notes: data.notes, save: saveBlueprint })
+			? new DocReview({
+					doc: data.doc,
+					original: data.original,
+					blob: data.blob,
+					notes: data.notes,
+					save: saveBlueprint,
+					decided: data.decided ? answeredCalls(data.notes) : undefined,
+					remember
+				})
 			: null;
 	// A change review shows each changed document read-only, with the lines the change edited marked.
 	// svelte-ignore state_referenced_locally
 	const changeReviews =
 		data.kind === 'change'
-			? data.docs.map((d) => {
+			? data.docs.map((d, i) => {
 					const r = new DocReview({
 						doc: d.doc,
 						original: d.original,
 						blob: '',
 						notes: d.notes,
-						save: async () => ({ ok: false, message: 'a change review takes no edits' })
+						save: async () => ({ ok: false, message: 'a change review takes no edits' }),
+						decided: data.decided ? answeredCalls(d.notes) : undefined,
+						remember: remember && `${remember}.${i}`,
+						readonly: true
 					});
 					r.markChanges = true;
 					r.saveStatus = 'Read only';
@@ -223,6 +268,15 @@ first, which posts as `irreversible=yes`. A withdrawn packet answers 410 with th
 	const decidedCount = $derived(docReviews.reduce((n, r) => n + Object.keys(r.decided).length, 0));
 	const blueprint = $derived(data.kind === 'blueprint' || data.kind === 'page' ? data : null);
 	const change = $derived(data.kind === 'change' ? data : null);
+	const frozen = $derived(isDecided || desk.held);
+	const missing = $derived(data.kind === 'blueprint' || data.kind === 'page' ? data.missing : false);
+
+	// A held or decided review takes no choices, and no text edits either while the file is gone.
+	$effect(() => {
+		for (const r of docReviews) r.locked = frozen;
+		review?.setReadonly(frozen || missing);
+	});
+
 	const WORDS = ['no', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten'];
 	const word = (n: number) => WORDS[n] ?? String(n);
 	const capital = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
@@ -282,7 +336,8 @@ first, which posts as `irreversible=yes`. A withdrawn packet answers 410 with th
 	let barNote = $state<string | null>(null);
 	let holding = $state(false);
 	let holdLeft = $state(5);
-	let holdPaused = $state(false);
+	/** Why a packet's hold is paused: the pointer over the bar, or a press of Pause; null while it runs. */
+	let pausedBy = $state<'pointer' | 'button' | null>(null);
 	// Where a withdrawn packet's failed post offers to go.
 	let withdrawn = $state<string | null>(null);
 
@@ -294,35 +349,27 @@ first, which posts as `irreversible=yes`. A withdrawn packet answers 410 with th
 	}
 
 	$effect(() => {
-		desk.page = data.kind;
-		if (!data.decided) {
-			desk.handlers = {
-				...desk.handlers,
-				approve:
-					data.kind === 'packet'
-						? approvePacket
-						: docReviews.length
-							? approveDoc
-							: () => approveButton && !approveButton.disabled && form?.requestSubmit(approveButton),
-				'next-call': nextCall,
-				'open-note': openNote,
-				'close-note': closeNote,
-				'send-rejection': () => form?.requestSubmit(sendButton),
-				submit: () => form?.requestSubmit(submitButton),
-				undo: () => desk.undo?.()
-			};
-		}
-		return () => {
-			desk.handlers = {};
-			desk.page = 'design';
-		};
+		desk.page = kind;
+		return () => (desk.page = 'design');
 	});
 
-	// The queue poll hands the panel fresh `data` every two seconds and re-runs the effect above,
-	// so the note closes only when the panel itself goes, on opening another item.
+	$effect(() => {
+		if (isDecided) return;
+		return desk.register({
+			approve: kind === 'packet' ? approvePacket : docReviews.length ? approveDoc : approveCards,
+			'next-call': nextCall,
+			'open-note': openNote,
+			'close-note': closeNote,
+			'send-rejection': () => form?.requestSubmit(sendButton),
+			submit: () => form?.requestSubmit(submitButton),
+			undo: () => desk.undo?.()
+		});
+	});
+
+	// Only the panel going, on opening another item, closes the note.
 	$effect(() => () => (desk.noteOpen = false));
 
-	// Its own effect: a pick must not re-run the handler registration, whose teardown clears every handler.
+	// Its own effect: a pick must not re-run the handler registration.
 	$effect(() => {
 		desk.approveLocked = data.kind === 'packet' ? openAsks.length > 0 : docReviews.length ? openCalls.length > 0 : decided.locked;
 		return () => (desk.approveLocked = false);
@@ -343,13 +390,24 @@ first, which posts as `irreversible=yes`. A withdrawn packet answers 410 with th
 	});
 
 	beforeNavigate((navigation) => {
-		if (!hold) return;
-		if (navigation.willUnload) {
-			desk.undo?.();
+		if (hold) {
+			if (navigation.willUnload) {
+				desk.undo?.();
+				return;
+			}
+			leaving = true;
+			hold.flush();
 			return;
 		}
-		leaving = true;
-		hold.flush();
+		if (!review?.pending) return;
+		// A closing tab cannot wait for the save, so the browser asks first.
+		navigation.cancel();
+		if (navigation.willUnload || !navigation.to) return;
+		const to = navigation.to.url;
+		void review.flush().then(() => {
+			if (review.saveFailed) desk.announce(`${review.saveStatus}. You are still on this item.`);
+			else void goto(to);
+		});
 	});
 
 	/** Approve on a packet: a locked press moves to the first open ask, an irreversible packet asks once more. */
@@ -361,6 +419,18 @@ first, which posts as `irreversible=yes`. A withdrawn packet answers 410 with th
 		}
 		if (data.kind === 'packet' && data.irreversible) confirmDialog?.showModal();
 		else form?.requestSubmit(approveButton);
+	}
+
+	/** Approve on a PR or design: a locked press moves to the first open card. */
+	function approveCards() {
+		if (desk.held || decided.sendBack) return;
+		if (decided.open.length) {
+			const card = document.getElementById(`card-${cards.indexOf(decided.open[0])}`);
+			card?.scrollIntoView({ block: 'center' });
+			card?.querySelector<HTMLElement>('input[type="radio"]')?.focus();
+			return;
+		}
+		form?.requestSubmit(approveButton);
 	}
 
 	/** Approve on a document review: a locked press moves to the next open call; otherwise the last edit saves first. */
@@ -380,10 +450,22 @@ first, which posts as `irreversible=yes`. A withdrawn packet answers 410 with th
 		form?.requestSubmit(approveButton);
 	}
 
+	/** What a document review's send-back starts with: each call still open, and how much was edited. */
+	function prefill() {
+		const lines = openCalls.map((n) => `- Still open: ${n.title}`);
+		if (review?.changedLines) {
+			const n = review.changedLines;
+			lines.push(`- ${n} ${n === 1 ? 'line' : 'lines'} changed in the ${data.kind === 'page' ? 'page' : 'plan'}`);
+		}
+		return lines.length ? `${lines.join('\n')}\n` : '';
+	}
+
 	async function openNote() {
+		if (docReviews.length && !noteText) noteText = prefill();
 		desk.noteOpen = true;
 		await tick();
 		noteField?.focus();
+		noteField?.setSelectionRange(noteText.length, noteText.length);
 	}
 
 	async function closeNote() {
@@ -405,7 +487,7 @@ first, which posts as `irreversible=yes`. A withdrawn packet answers 410 with th
 	function decisionText(action: URL) {
 		if (action.search === '?/approve') return `Approved ${subject()}.`;
 		if (action.search === '?/reject') {
-			return noteField?.value.trim() ? `Sent ${subject()} back with a note.` : `Sent ${subject()} back.`;
+			return noteText.trim() ? `Sent ${subject()} back with a note.` : `Sent ${subject()} back.`;
 		}
 		return `Submitted ${rows.length} calls.`;
 	}
@@ -416,7 +498,7 @@ first, which posts as `irreversible=yes`. A withdrawn packet answers 410 with th
 		desk.toast = toast;
 		desk.undo = null;
 		holding = false;
-		holdPaused = false;
+		pausedBy = null;
 		if (data.kind === 'packet') barNote = message;
 		else desk.announce(message);
 		await tick();
@@ -424,19 +506,37 @@ first, which posts as `irreversible=yes`. A withdrawn packet answers 410 with th
 		(focusTo?.isConnected ? focusTo : approveButton)?.focus();
 	}
 
-	const decide: SubmitFunction = async ({ cancel, action, submitter }) => {
-		// A send-back carries the edits too, so the last one is committed before the hold starts.
-		if (review) await review.flush();
+	/** The pointer pauses only a running hold; Pause takes over a pointer's pause, so leaving the bar keeps it. */
+	function pauseHold(by: 'pointer' | 'button') {
+		if (!holding || pausedBy === 'button' || pausedBy === by) return;
+		hold?.pause();
+		pausedBy = by;
+	}
+
+	function resumeHold(by: 'pointer' | 'button') {
+		if (pausedBy !== by) return;
+		hold?.resume();
+		pausedBy = null;
+	}
+
+	const decide: SubmitFunction = async ({ cancel, action, submitter, formData }) => {
+		// A send-back carries the edits too, so the last one is committed before the hold starts, and
+		// the post names the blob that save returned rather than the one the form rendered with.
+		if (review) {
+			await review.flush();
+			formData.set('blob', review.blob);
+		}
 		const text = decisionText(action);
 		const upNext = nextItem(data.queue, data.meta.id);
 		const packet = data.kind === 'packet';
+		const sendingBack = action.search === '?/reject';
 		const where = packet ? 'Returning to the board' : upNext ? `Opening ${upNext.title}` : 'Closing the queue';
 		// The confirmation dialog closes as it submits, so focus returns to the button that opened it.
 		returnTo = packet && submitter?.closest('dialog') ? (approveButton ?? null) : submitter;
 		desk.held = true;
 		desk.counting = true;
 		desk.toastError = false;
-		const undoNote = `${text} ${where} in 5 seconds. Press z or the Undo button to undo.`;
+		const undoNote = `${text} ${where} in 5 seconds. ${desk.singleKeys ? 'Press z or the Undo button' : 'Press the Undo button'} to undo.`;
 		if (packet) {
 			// The bar carries the Undo, the countdown, and the status, so the pointer over it pauses the hold.
 			barNote = undoNote;
@@ -445,6 +545,8 @@ first, which posts as `irreversible=yes`. A withdrawn packet answers 410 with th
 			holdLeft = 5;
 			desk.toast = null;
 		} else {
+			// The note has posted with the form, so it closes for the hold and its text waits for an Undo.
+			if (sendingBack) desk.noteOpen = false;
 			desk.toast = `${text} ${where} in 5 s.`;
 			desk.announce(undoNote);
 		}
@@ -466,12 +568,13 @@ first, which posts as `irreversible=yes`. A withdrawn packet answers 410 with th
 		});
 		hold = null;
 		holding = false;
-		holdPaused = false;
+		pausedBy = null;
 		// The next item is already opening, so its keys and rows must not wait on this post.
 		if (leaving) desk.held = false;
 		if (!fired) {
 			cancel();
 			await unlock('Undone. Nothing was sent.', returnTo, null);
+			if (sendingBack && !packet) await openNote();
 			return;
 		}
 
@@ -486,6 +589,11 @@ first, which posts as `irreversible=yes`. A withdrawn packet answers 410 with th
 		return async ({ result }) => {
 			if (result.type === 'success') {
 				desk.drafts.delete(data.meta.id);
+				try {
+					for (const key of Object.keys(localStorage)) if (remember && key.startsWith(remember)) localStorage.removeItem(key);
+				} catch {
+					// The remembered choices are a convenience; a stale entry is ignored once the item is decided.
+				}
 				if (leaving) {
 					desk.toast = null;
 					// Reopening the same item keeps the panel, so its decided state comes only from a reload.
@@ -522,7 +630,7 @@ first, which posts as `irreversible=yes`. A withdrawn packet answers 410 with th
 			? 'Outline and calls'
 			: data.kind === 'change'
 				? 'Calls and documents'
-				: 'Calls for you'}
+				: 'Calls and outline'}
 >
 	{#snippet header()}
 		{#if packet}
@@ -559,6 +667,38 @@ first, which posts as `irreversible=yes`. A withdrawn packet answers 410 with th
 				{/snippet}
 				{#snippet lede()}{changeLede}{/snippet}
 			</FrameHeader>
+		{:else if data.kind === 'pr' || data.kind === 'design' || data.kind === 'triage'}
+			{@const item = data}
+			<FrameHeader long={item.headlineHtml.length > 90}>
+				{#snippet crumb()}
+					<a href="/">Board</a><span aria-hidden="true">/</span>
+					{#if item.kind === 'pr'}
+						<span>Pull request</span><span aria-hidden="true">/</span><span>{subject()}</span>
+						{#if item.link}
+							<span aria-hidden="true">/</span><span>{item.link.head} → {item.link.base}</span>
+							<a href={item.link.url} target="_blank" rel="noopener noreferrer">GitHub</a>
+						{/if}
+					{:else if item.kind === 'design'}
+						<span>Design</span><span aria-hidden="true">/</span><span>{item.meta.repo.split('/').pop()}</span>
+						{#if item.meta.file}<span aria-hidden="true">/</span><span>{item.meta.file}</span>{/if}
+						<span aria-hidden="true">·</span><span>{item.minutes} min read</span>
+					{:else}
+						<span>Triage</span><span aria-hidden="true">/</span><span>{item.meta.title}</span>
+					{/if}
+				{/snippet}
+				{#snippet headline()}{@html item.headlineHtml}{/snippet}
+				{#snippet lede()}{@html item.ledeHtml}{/snippet}
+			</FrameHeader>
+		{/if}
+	{/snippet}
+
+	{#snippet place()}
+		{#if docReviews.length}
+			{#if openCalls.length}
+				<button type="button" class="linkbtn next-call" onclick={nextCall}>Next call for you <kbd>F8</kbd></button>
+			{:else}
+				<span class="nothing-open">Nothing open</span>
+			{/if}
 		{/if}
 	{/snippet}
 
@@ -573,36 +713,21 @@ first, which posts as `irreversible=yes`. A withdrawn packet answers 410 with th
 			<p class="bg bg-first bg-flat">The worktree no longer holds {blueprint.file} at a commit, so this is the copy that was queued and takes no edits.</p>
 		{/if}
 		{#if blueprint.kind === 'page'}
-			<PageView {review} file={blueprint.file} readonly={blueprint.decided || blueprint.missing || desk.held} pr={blueprint.pr} />
+			<PageView {review} file={blueprint.file} pr={blueprint.pr} />
 		{:else}
-			<BlueprintView {review} file={blueprint.file} readonly={blueprint.decided || blueprint.missing || desk.held} />
+			<BlueprintView {review} file={blueprint.file} />
 		{/if}
 	{:else if change}
 		<ChangeView data={change} reviews={changeReviews} />
 	{:else if data.kind === 'pr'}
-		<PrView {data} bind:picks subject={subject() ?? ''} />
+		<PrView {data} bind:picks />
 	{:else if data.kind === 'design'}
-		<p class="mb-2 text-xs tracking-wide text-(--color-muted)">
-			{data.meta.repo.split('/').pop()}{#if data.meta.file} · {data.meta.file}{/if} · {data.minutes} min read
-		</p>
-		<BriefBlock
-			headlineHtml={data.headlineHtml}
-			ledeHtml={data.ledeHtml}
-			whatChanges={data.whatChanges}
-			ifYouApprove={data.ifYouApprove}
-			worthKnowing={data.worthKnowing}
-		/>
+		<BriefBlock whatChanges={data.whatChanges} ifYouApprove={data.ifYouApprove} worthKnowing={data.worthKnowing} />
 		<DecideCards cards={data.cards} bind:picks decided={data.decided} />
 		<DetailRows details={data.details} />
 		<div class="mt-10"><DesignView docHtml={data.docHtml} /></div>
 	{:else if data.kind === 'triage'}
-		<TriageView
-			bind:rows
-			html={data.html}
-			headlineHtml={data.headlineHtml}
-			ledeHtml={data.ledeHtml}
-			meta="Triage · {data.meta.title}"
-		/>
+		<TriageView bind:rows html={data.html} />
 	{/if}
 
 	{#snippet pane()}
@@ -616,26 +741,30 @@ first, which posts as `irreversible=yes`. A withdrawn packet answers 410 with th
 		{:else if change}
 			<ChangePane reviews={changeReviews} paths={change.docs.map((d) => d.path)} hasCode={change.groups.length > 0} />
 		{:else if data.kind === 'triage'}
-			<PaneSection title="Calls">
+			{@const html = data.html}
+			<PaneSection title="Calls for you">
 				<PaneList
 					empty="Nothing proposed."
 					items={rows.map((row, i) => ({
 						href: `#item-${i}`,
 						label: row.action,
-						what: TRIAGE_WORD[row.disposition],
-						dot: row.disposition === row.proposed ? 'done' : 'call'
+						labelHtml: html[i]?.action,
+						what: row.disposition === row.proposed ? `${TRIAGE_WORD[row.disposition]}, as proposed` : `${TRIAGE_WORD[row.disposition]}, your change`,
+						dot: 'call'
 					}))}
 				/>
 			</PaneSection>
+			<PaneSection title="Contents" contents><PaneList numbered items={outline} /></PaneSection>
 		{:else}
 			<PaneSection title="Calls for you"><PaneList items={callItems} empty="Nothing to decide first." /></PaneSection>
+			<PaneSection title="Contents" contents><PaneList numbered items={outline} /></PaneSection>
 		{/if}
 	{/snippet}
 
 	{#snippet bar()}
 		{#if data.decided}
 			<DecisionBar>
-				{#snippet status()}<p class="s1">Decided</p>{/snippet}
+				{#snippet status()}<p class="s1" role="status">Decided</p>{/snippet}
 			</DecisionBar>
 		{:else}
 			<form
@@ -645,15 +774,8 @@ first, which posts as `irreversible=yes`. A withdrawn packet answers 410 with th
 				bind:this={form}
 				use:enhance={decide}
 				aria-label="Decision"
-				onpointerenter={() => {
-					if (!holding) return;
-					hold?.pause();
-					holdPaused = true;
-				}}
-				onpointerleave={() => {
-					hold?.resume();
-					holdPaused = false;
-				}}
+				onpointerenter={() => pauseHold('pointer')}
+				onpointerleave={() => resumeHold('pointer')}
 			>
 				{#if packet}
 					<input type="hidden" name="fingerprint" value={packet.fingerprint} />
@@ -683,7 +805,7 @@ first, which posts as `irreversible=yes`. A withdrawn packet answers 410 with th
 									{packet
 										? 'Your verdicts go with this note.'
 										: review
-											? 'Your edits are already committed, and the author reads them with this note.'
+											? 'Your edits and decisions go with this note.'
 											: change
 												? 'The change’s author reads this note and makes the edits.'
 												: 'The session reads it as the reason; leave it empty to send back without one.'}
@@ -693,6 +815,7 @@ first, which posts as `irreversible=yes`. A withdrawn packet answers 410 with th
 									name="note"
 									class="textarea desk-field w-full"
 									bind:this={noteField}
+									bind:value={noteText}
 									disabled={desk.held}
 								></textarea>
 								<div class="acts">
@@ -716,14 +839,14 @@ first, which posts as `irreversible=yes`. A withdrawn packet answers 410 with th
 					{/snippet}
 					{#snippet status()}
 						{#if packet}
-							<p class="s1">{barNote ?? packetLock}</p>
+							<p class="s1" role="status">{barNote ?? packetLock}</p>
 							{#if barNote === null}
 								<p class="s2">{packetSub}</p>
 							{:else if withdrawn}
 								<p class="s2"><a class="link" href={withdrawn}>Open the board</a></p>
 							{/if}
 						{:else if docReviews.length}
-							<p class="s1">
+							<p class="s1" role="status">
 								{openCalls.length ? `Make ${plural(openCalls.length, 'call')} to approve` : 'Ready to approve'}
 							</p>
 							<p class="s2">
@@ -741,18 +864,18 @@ first, which posts as `irreversible=yes`. A withdrawn packet answers 410 with th
 								)}
 							</p>
 						{:else if data.kind === 'triage'}
-							<p class="s1">{rows.length} calls, {changed === 0 ? 'none' : changed} changed</p>
+							<p class="s1" role="status">{rows.length} calls, {changed === 0 ? 'none' : changed} changed</p>
 							<p class="s2">Submit sends your calls back to the session.</p>
 						{:else if decided.sendBack}
-							<p class="s1">Sending back</p>
+							<p class="s1" role="status">Sending back</p>
 							<p class="s2">You chose to send this back to the session.</p>
 						{:else if decided.open.length}
-							<p class="s1">{decided.open.length} {decided.open.length === 1 ? 'decision' : 'decisions'} left</p>
+							<p class="s1" role="status">{decided.open.length} {decided.open.length === 1 ? 'decision' : 'decisions'} left</p>
 							<p class="s2">
 								Decide <a class="link" href="#card-{cards.indexOf(decided.open[0])}">{decided.open[0].title}</a> to unlock Approve.
 							</p>
 						{:else}
-							<p class="s1">Ready to approve</p>
+							<p class="s1" role="status">Ready to approve</p>
 							<p class="s2">{readySub}</p>
 						{/if}
 					{/snippet}
@@ -760,10 +883,20 @@ first, which posts as `irreversible=yes`. A withdrawn packet answers 410 with th
 						{#if holding}
 							<div class="holding">
 								<div class="min-w-0 flex-1" aria-hidden="true">
-									<p class="s1">{holdPaused ? 'Paused' : `Sending in ${holdLeft} s`}</p>
-									<p class="s2">{holdPaused ? 'Move off the bar to carry on.' : 'Point at the bar to pause.'}</p>
+									<p class="s1">{pausedBy ? 'Paused' : `Sending in ${holdLeft} s`}</p>
+									<p class="s2">
+										{pausedBy === 'button' ? 'Press Resume to carry on.' : pausedBy ? 'Move off the bar to carry on.' : 'Point at the bar to pause.'}
+									</p>
 									<progress class="progress progress-primary" value={holdLeft} max="5"></progress>
 								</div>
+								<button
+									type="button"
+									class="btn"
+									aria-pressed={pausedBy === 'button'}
+									onclick={() => (pausedBy === 'button' ? resumeHold('button') : pauseHold('button'))}
+								>
+									{pausedBy === 'button' ? 'Resume' : 'Pause'}
+								</button>
 								<button type="button" class="btn" id="undo" onclick={() => desk.undo?.()}>Undo <kbd class="desk-sk">Z</kbd></button>
 							</div>
 						{/if}
@@ -808,17 +941,21 @@ first, which posts as `irreversible=yes`. A withdrawn packet answers 410 with th
 								Submit calls <kbd>Ctrl</kbd><kbd>Enter</kbd>
 							</button>
 						{:else if !decided.sendBack}
-							<div class={tip && 'tooltip tooltip-top'} data-tip={tip}>
-								<button
-									class="btn btn-primary"
-									formaction="?/approve"
-									bind:this={approveButton}
-									aria-describedby="bar-state"
-									disabled={desk.held || !approvable}
-								>
-									{data.kind === 'pr' ? 'Approve and merge' : 'Approve'} <kbd class="desk-sk">A</kbd>
-								</button>
-							</div>
+							<button
+								type="submit"
+								class="btn btn-primary bar-approve"
+								formaction="?/approve"
+								bind:this={approveButton}
+								aria-describedby="bar-state"
+								aria-disabled={decided.locked}
+								disabled={desk.held}
+								onclick={(e) => {
+									e.preventDefault();
+									approveCards();
+								}}
+							>
+								{data.kind === 'pr' ? 'Approve and merge' : 'Approve the design'} <kbd>Ctrl</kbd><kbd>Enter</kbd>
+							</button>
 						{/if}
 					{/snippet}
 				</DecisionBar>

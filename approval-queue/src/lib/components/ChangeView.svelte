@@ -67,7 +67,12 @@ author edits, and a send-back goes to that author with a note.
 				<DiffTable file={doc.file} />
 			</Disclosure>
 		{/if}
-		<DocEditor review={reviews[i]} file={name(doc.path)} label="{KIND[doc.kind]}, read only" readonly />
+		<DocEditor
+			review={reviews[i]}
+			file={name(doc.path)}
+			label="{KIND[doc.kind]} {name(doc.path)}, read only"
+			yaml={/\.ya?ml$/.test(doc.path)}
+		/>
 	</section>
 {/each}
 

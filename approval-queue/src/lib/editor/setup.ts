@@ -34,11 +34,19 @@ export interface EditorOptions {
 	label: string;
 	decided: Record<string, number>;
 	readonly: boolean;
+	/** The calls are frozen: every choice and Reopen button is disabled. */
+	locked: boolean;
+	/**
+	 * A YAML file rather than markdown: set in the monospace face with no markdown marking, and each
+	 * wrapped line hangs at its own indentation so the nesting stays readable.
+	 */
+	yaml?: boolean;
 	hooks: EditorHooks;
 }
 
 const markChangesEffect = StateEffect.define<boolean>();
 const decidedEffect = StateEffect.define<Record<string, number>>();
+const lockedEffect = StateEffect.define<boolean>();
 const rangeEffect = StateEffect.define<{ id: string; range: Range }>();
 
 const markChangesField = StateField.define<boolean>({
@@ -49,6 +57,11 @@ const markChangesField = StateField.define<boolean>({
 const decidedField = StateField.define<Record<string, number>>({
 	create: () => ({}),
 	update: (v, tr) => tr.effects.reduce((acc, e) => (e.is(decidedEffect) ? e.value : acc), v)
+});
+
+const lockedField = StateField.define<boolean>({
+	create: () => false,
+	update: (v, tr) => tr.effects.reduce((acc, e) => (e.is(lockedEffect) ? e.value : acc), v)
 });
 
 /** Each note's range, mapped through every change; null for a note whose anchor named nothing. */
@@ -65,20 +78,23 @@ const rangesField = StateField.define<Record<string, Range | null>>({
 	}
 });
 
-/** A note under its line, rendered by `NoteCard`; rebuilt only when its decided state changes. */
-class NoteWidget extends WidgetType {
-	private card: ReturnType<typeof mount> | null = null;
+// The mounted card by its widget's DOM: CodeMirror keeps the old DOM when `eq` holds but hands the
+// new widget instance to `destroy`, so the handle must live with the DOM, not the instance.
+const cards = new WeakMap<HTMLElement, ReturnType<typeof mount>>();
 
+/** A note under its line, rendered by `NoteCard`; rebuilt only when its decided or locked state changes. */
+class NoteWidget extends WidgetType {
 	constructor(
 		readonly note: PlacedNote,
 		readonly choice: number | undefined,
+		readonly locked: boolean,
 		readonly hooks: EditorHooks
 	) {
 		super();
 	}
 
 	eq(other: NoteWidget) {
-		return other.note.id === this.note.id && other.choice === this.choice;
+		return other.note.id === this.note.id && other.choice === this.choice && other.locked === this.locked;
 	}
 
 	toDOM(view: EditorView) {
@@ -86,21 +102,24 @@ class NoteWidget extends WidgetType {
 		wrap.className = 'notewidget';
 		// Opening "What changed" grows the block, and the editor only measures on its own changes.
 		wrap.addEventListener('toggle', () => view.requestMeasure(), true);
-		this.card = mount(NoteCard, {
+		const card = mount(NoteCard, {
 			target: wrap,
 			props: {
 				note: this.note,
 				choice: this.choice,
+				disabled: this.locked,
 				onchoose: (i: number) => this.hooks.choose(this.note.id, i),
 				onreopen: () => this.hooks.reopen(this.note.id)
 			}
 		});
+		cards.set(wrap, card);
 		return wrap;
 	}
 
-	destroy() {
-		if (this.card) unmount(this.card);
-		this.card = null;
+	destroy(dom: HTMLElement) {
+		const card = cards.get(dom);
+		if (card) void unmount(card);
+		cards.delete(dom);
 	}
 
 	ignoreEvent() {
@@ -111,11 +130,12 @@ class NoteWidget extends WidgetType {
 function noteDecorations(state: EditorState, notes: PlacedNote[], hooks: EditorHooks): DecorationSet {
 	const ranges = state.field(rangesField);
 	const decided = state.field(decidedField);
+	const locked = state.field(lockedField);
 	const out = [];
 	for (const note of notes) {
 		const r = ranges[note.id];
 		const choice = decided[note.id];
-		const widget = new NoteWidget(note, choice, hooks);
+		const widget = new NoteWidget(note, choice, locked, hooks);
 		// A note whose anchor resolved to nothing sits at the top of the document, never dropped.
 		if (!r || r[0] > state.doc.length) {
 			out.push(Decoration.widget({ widget, block: true, side: -1 }).range(0));
@@ -134,7 +154,7 @@ function notesExtension(notes: PlacedNote[], hooks: EditorHooks): Extension {
 	const field = StateField.define<DecorationSet>({
 		create: (state) => noteDecorations(state, notes, hooks),
 		update: (v, tr) =>
-			tr.docChanged || tr.effects.some((e) => e.is(decidedEffect) || e.is(rangeEffect))
+			tr.docChanged || tr.effects.some((e) => e.is(decidedEffect) || e.is(lockedEffect) || e.is(rangeEffect))
 				? noteDecorations(tr.state, notes, hooks)
 				: v,
 		provide: (f) => EditorView.decorations.from(f)
@@ -143,6 +163,9 @@ function notesExtension(notes: PlacedNote[], hooks: EditorHooks): Extension {
 }
 
 const line = (cls: string) => Decoration.line({ class: cls });
+/** A YAML line whose wrapped rows hang at its own indentation, so the nesting survives a wrap. */
+const hang = (indent: number, classes: string[]) =>
+	Decoration.line({ class: ['cm-yaml', ...classes].join(' '), attributes: { style: `--hang: ${indent}ch` } });
 const mark = (cls: string) => Decoration.mark({ class: cls });
 
 /**
@@ -150,7 +173,7 @@ const mark = (cls: string) => Decoration.mark({ class: cls });
  * purpose line, inline directives, code spans, and links. The fence scan needs the whole document,
  * since a line's container can open far above it, so it is cached and rerun on a change only.
  */
-function sourcePlugin(original: string) {
+function sourcePlugin(original: string, yaml: boolean) {
 	const originalLines = new Set(original.split('\n'));
 	return ViewPlugin.fromClass(
 		class {
@@ -178,6 +201,12 @@ function sourcePlugin(original: string) {
 						const classes: string[] = [];
 						const marks: Array<[number, number, string]> = [];
 						const role = this.scan.roles[i];
+						if (yaml) {
+							if (changes && tx.trim() && !originalLines.has(tx)) classes.push('cm-edited');
+							b.add(l.from, l.from, hang(/^ */.exec(tx)?.[0].length ?? 0, classes));
+							pos = l.to + 1;
+							continue;
+						}
 						if (front && l.from < front.to) classes.push('cm-front');
 						else if (role) {
 							classes.push('cm-fence');
@@ -221,7 +250,12 @@ const highlight = HighlightStyle.define([
 ]);
 
 const editable = new Compartment();
-const editableExt = (readonly: boolean) => [EditorState.readOnly.of(readonly), EditorView.editable.of(!readonly)];
+// A read-only editor is not contenteditable, so it takes a tab stop of its own to stay reachable and caret-browsable.
+const editableExt = (readonly: boolean) => [
+	EditorState.readOnly.of(readonly),
+	EditorView.editable.of(!readonly),
+	EditorView.contentAttributes.of(readonly ? { tabindex: '0' } : {})
+];
 
 // Ctrl+Enter is the screen's approve, so the editor must not take it as "insert a blank line".
 const keys = defaultKeymap.filter((b) => b.key !== 'Mod-Enter');
@@ -233,6 +267,7 @@ export function createEditor(parent: HTMLElement, opts: EditorOptions): EditorVi
 		doc: opts.doc,
 		extensions: [
 			history(),
+			lockedField.init(() => opts.locked),
 			keymap.of([
 				{
 					key: 'Mod-s',
@@ -244,11 +279,10 @@ export function createEditor(parent: HTMLElement, opts: EditorOptions): EditorVi
 				...keys,
 				...historyKeymap
 			]),
-			markdown({ base: markdownLanguage }),
-			syntaxHighlighting(highlight),
+			opts.yaml ? [] : [markdown({ base: markdownLanguage }), syntaxHighlighting(highlight)],
 			EditorView.lineWrapping,
 			markChangesField,
-			sourcePlugin(opts.original),
+			sourcePlugin(opts.original, opts.yaml ?? false),
 			notesExtension(opts.notes, opts.hooks),
 			editable.of(editableExt(opts.readonly)),
 			EditorView.scrollMargins.of(() => ({ top: 56, bottom: 140 })),
@@ -264,6 +298,8 @@ export function createEditor(parent: HTMLElement, opts: EditorOptions): EditorVi
 
 export const setDecided = (view: EditorView, decided: Record<string, number>) =>
 	view.dispatch({ effects: decidedEffect.of({ ...decided }) });
+
+export const setLocked = (view: EditorView, locked: boolean) => view.dispatch({ effects: lockedEffect.of(locked) });
 
 export const setMarkChanges = (view: EditorView, on: boolean) => view.dispatch({ effects: markChangesEffect.of(on) });
 

@@ -670,7 +670,7 @@ describe('a blueprint', () => {
 			);
 			return out;
 		};
-		const approve = call('approve', answered(base));
+		const approve = Promise.resolve(call('approve', answered(base)));
 		const approving = settle(approve);
 		await new Promise((r) => setTimeout(r, 100));
 		const save = Promise.resolve(call('save', [['text', `${SAMPLE_DOC}raced\n`], ['base', base]]));

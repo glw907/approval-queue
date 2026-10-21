@@ -1,37 +1,20 @@
 <!-- @component
-What every item opens with: the Survey header (crumb, headline, lede) and, for a PR or a design,
-the "What changes" and "If you approve" sections with the brief's one footnote. All text arrives
-as HTML the server rendered from the brief; a triage passes only the headline and the lede.
-
-The screen supplies its own crumb as `trail`. A caller that passes none gets "Board / Design", the one
-screen that does not yet hand this block its item. The header sits inside the work rather than
-above the place bar, so below 1260px the sticky place bar comes first.
+What a PR or a design opens its work with, under the Survey header: the brief's "What changes" and
+"If you approve" sections and its one footnote. All text arrives as HTML the server rendered from
+the brief. The header itself is the frame's, so below 1260px the place bar follows it, as on every
+screen.
 -->
 <script lang="ts">
-	import type { Snippet } from 'svelte';
-	import FrameHeader from './frame/FrameHeader.svelte';
 	import PacketIcon from './PacketIcon.svelte';
 
 	interface Props {
-		headlineHtml: string;
-		ledeHtml?: string;
 		whatChanges?: string[];
 		ifYouApprove?: string[];
 		worthKnowing?: string | null;
-		/** The whole crumb, Board link included, as links and spans. */
-		trail?: Snippet;
 	}
 
-	let { headlineHtml, ledeHtml = '', whatChanges = [], ifYouApprove = [], worthKnowing = null, trail }: Props = $props();
+	let { whatChanges = [], ifYouApprove = [], worthKnowing = null }: Props = $props();
 </script>
-
-<FrameHeader long={headlineHtml.length > 90}>
-	{#snippet crumb()}
-		{#if trail}{@render trail()}{:else}<a href="/">Board</a><span aria-hidden="true">/</span><span>Design</span>{/if}
-	{/snippet}
-	{#snippet headline()}{@html headlineHtml}{/snippet}
-	{#snippet lede()}{@html ledeHtml}{/snippet}
-</FrameHeader>
 
 {#if whatChanges.length}
 	<section class="sec" id="what-changes" aria-labelledby="changes-h">

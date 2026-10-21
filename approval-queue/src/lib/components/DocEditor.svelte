@@ -5,25 +5,27 @@ under the line its anchor names. The editor is built on mount, so the server ren
 loading line; until then, and if scripts fail, nothing is editable.
 
 All state lives in the `DocReview` it is handed, which the review pane and the decision bar read
-too. Edits save through that review; this component only shows the result.
+too: whether the text takes edits and whether the calls are frozen come from it. Edits save through
+that review; this component only shows the result. Leaving with an edit not yet saved sends it on
+the way out, so a quick navigation never drops the last words typed.
 -->
 <script lang="ts">
 	import type { EditorView } from '@codemirror/view';
 	import { onMount } from 'svelte';
 	import type { DocReview } from '#lib/editor/review.svelte.ts';
-	import { createEditor, setMarkChanges, setReadonly } from '#lib/editor/setup.ts';
+	import { createEditor, setLocked, setMarkChanges, setReadonly } from '#lib/editor/setup.ts';
 
 	interface Props {
 		review: DocReview;
 		/** The file name the bar shows, such as `debug-your-site.blueprint.md`. */
 		file: string;
-		/** The editable region's accessible name. */
+		/** The editable region's accessible name; it names the file, since a screen can hold several. */
 		label: string;
-		/** No edits are taken, as while a decision is held or once the item is decided. */
-		readonly?: boolean;
+		/** A YAML file, set in the monospace face with each wrapped line hanging at its indentation. */
+		yaml?: boolean;
 	}
 
-	let { review, file, label, readonly = false }: Props = $props();
+	let { review, file, label, yaml = false }: Props = $props();
 
 	let host = $state<HTMLDivElement>();
 	let view = $state<EditorView | null>(null);
@@ -36,7 +38,9 @@ too. Edits save through that review; this component only shows the result.
 			original: review.original,
 			label,
 			decided: $state.snapshot(review.decided),
-			readonly,
+			readonly: review.readonly,
+			locked: review.locked,
+			yaml,
 			hooks: review.hooks
 		});
 		review.attach(v);
@@ -46,13 +50,18 @@ too. Edits save through that review; this component only shows the result.
 		track();
 		return () => {
 			window.removeEventListener('scroll', track);
+			if (review.pending) void review.flush();
 			review.attach(null);
 			v.destroy();
 		};
 	});
 
 	$effect(() => {
-		if (view) setReadonly(view, readonly);
+		if (view) setReadonly(view, review.readonly);
+	});
+
+	$effect(() => {
+		if (view) setLocked(view, review.locked);
 	});
 
 	$effect(() => {
@@ -71,10 +80,11 @@ too. Edits save through that review; this component only shows the result.
 <div class="edwrap">
 	<div class="edbar">
 		<span class="fname">{file}</span>
-		<span class={['esaved', review.saveFailed && 'failed']} role="status" aria-live="polite">{review.saveStatus}</span>
+		<!-- Not a live region: the review announces the first save and any failure, not every pause in typing. -->
+		<span class={['esaved', review.saveFailed && 'failed']}>{review.saveStatus}</span>
 	</div>
-	<!-- svelte-ignore a11y_no_static_element_interactions -->
-	<div class="cm-host" bind:this={host} onmousedown={focusFromPadding}></div>
+	<!-- svelte-ignore a11y_no_static_element_interactions: the padding forwards a pointer press to the editor, which has its own keyboard focus -->
+	<div class={['cm-host', yaml && 'yaml']} bind:this={host} onmousedown={focusFromPadding}></div>
 	{#if !view}<p class="loading">Loading the editor…</p>{/if}
 </div>
 
@@ -232,7 +242,27 @@ too. Edits save through that review; this component only shows the result.
 		background: color-mix(in oklab, var(--color-info) 12%, transparent);
 	}
 	.cm-host :global(.cm-edited) {
+		position: relative;
 		box-shadow: inset 3px 0 0 var(--color-primary);
+	}
+	/* A glyph in the margin as well, so a changed line is not marked by color alone. */
+	.cm-host :global(.cm-edited)::before {
+		content: '+' / '';
+		position: absolute;
+		left: -14px;
+		top: 0;
+		font: 700 0.85rem/1.7 var(--font-mono);
+		color: var(--color-primary);
+	}
+	.cm-host.yaml :global(.cm-scroller),
+	.cm-host.yaml :global(.cm-content) {
+		font-family: var(--font-mono) !important;
+		font-size: 0.8rem;
+		line-height: 1.6;
+	}
+	.cm-host.yaml :global(.cm-yaml) {
+		padding-left: calc(var(--hang) + 6px);
+		text-indent: calc(-1 * var(--hang));
 	}
 	.cm-host :global(.cm-link) {
 		color: var(--color-primary);

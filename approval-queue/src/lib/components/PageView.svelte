@@ -13,13 +13,12 @@ pause in typing commits it there. A page queued with no readable pull request re
 		review: DocReview;
 		/** The page's path in its worktree; the bar shows the file name. */
 		file: string;
-		/** No edits are taken, as while a decision is held or once the item is decided. */
-		readonly: boolean;
 		/** The pull request the page merges with, and its head when the item was queued. */
 		pr: { ref: string; url: string; head: string } | null;
 	}
 
-	let { review, file, readonly, pr }: Props = $props();
+	let { review, file, pr }: Props = $props();
+	const name = $derived(file.split('/').pop() ?? file);
 </script>
 
 {#if pr}
@@ -53,7 +52,7 @@ pause in typing commits it there. A page queued with no readable pull request re
 	</div>
 </details>
 
-<DocEditor {review} file={file.split('/').pop() ?? file} label="Page, markdown" {readonly} />
+<DocEditor {review} file={name} label="Page {name}, markdown" />
 
 <style>
 	code {

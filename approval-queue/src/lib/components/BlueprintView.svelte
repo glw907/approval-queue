@@ -12,11 +12,10 @@ real one in the session's worktree, so every pause in typing commits it there.
 		review: DocReview;
 		/** The blueprint's path in its worktree; the bar shows the file name. */
 		file: string;
-		/** No edits are taken, as while a decision is held or once the item is decided. */
-		readonly: boolean;
 	}
 
-	let { review, file, readonly }: Props = $props();
+	let { review, file }: Props = $props();
+	const name = $derived(file.split('/').pop() ?? file);
 </script>
 
 <details class="bg bg-first">
@@ -44,7 +43,7 @@ real one in the session's worktree, so every pause in typing commits it there.
 	</div>
 </details>
 
-<DocEditor {review} file={file.split('/').pop() ?? file} label="Blueprint, markdown" {readonly} />
+<DocEditor {review} file={name} label="Blueprint {name}" yaml={/\.ya?ml$/.test(file)} />
 
 <style>
 	code {

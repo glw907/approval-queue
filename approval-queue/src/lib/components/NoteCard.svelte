@@ -2,7 +2,8 @@
 One review note as it sits under its line in the document editor: a correction ("Corrected.") with
 what changed, or a call ("Your call.") with its sides and one button per choice. A decided call
 collapses to its outcome and a Reopen link. The editor mounts it inside a block widget, so it takes
-callbacks rather than binding state, and it is rebuilt whenever its decided state changes.
+callbacks rather than binding state, and it is rebuilt whenever its decided or disabled state
+changes. The note itself takes programmatic focus, so a screen can land focus on it after a change.
 -->
 <script lang="ts">
 	import { codeSpans, wordDiff } from '#lib/editor/inline.ts';
@@ -12,11 +13,13 @@ callbacks rather than binding state, and it is rebuilt whenever its decided stat
 		note: Note;
 		/** The index of the chosen choice; undefined while the call is open. */
 		choice?: number;
+		/** The calls are frozen, as while a decision is held or once the item is decided. */
+		disabled?: boolean;
 		onchoose: (index: number) => void;
 		onreopen: () => void;
 	}
 
-	let { note, choice, onchoose, onreopen }: Props = $props();
+	let { note, choice, disabled = false, onchoose, onreopen }: Props = $props();
 
 	const head = $derived(note.kind === 'info' ? 'Corrected.' : 'Your call.');
 	const outcome = $derived(choice === undefined ? null : (note.choices?.[choice]?.done ?? 'Settled'));
@@ -27,14 +30,14 @@ callbacks rather than binding state, and it is rebuilt whenever its decided stat
 {/snippet}
 
 {#if outcome !== null}
-	<div role="group" class="note done collapsed" id="note-{note.id}" aria-label="Decided. {note.title}">
+	<div role="group" class="note done collapsed" id="note-{note.id}" tabindex="-1" aria-label="Decided. {note.title}">
 		<p class="nh">
 			<span class="kind">Decided.</span><span class="outcome">{outcome}</span>
-			<button type="button" class="linkbtn reopen" onclick={onreopen}>Reopen</button>
+			<button type="button" class="linkbtn reopen" {disabled} onclick={onreopen}>Reopen</button>
 		</p>
 	</div>
 {:else}
-	<div role="group" class={['note', note.kind === 'info' ? 'info' : 'decide']} id="note-{note.id}" aria-label="{head} {note.title}">
+	<div role="group" class={['note', note.kind === 'info' ? 'info' : 'decide']} id="note-{note.id}" tabindex="-1" aria-label="{head} {note.title}">
 		<p class="nh"><span class="kind">{head}</span><span>{note.title}</span></p>
 		{#each note.body as para, i (i)}<p>{@render inline(para)}</p>{/each}
 		{#each note.sides ?? [] as side, i (i)}<div class="side"><b>{side.who}:</b> {@render inline(side.text)}</div>{/each}
@@ -42,13 +45,13 @@ callbacks rather than binding state, and it is rebuilt whenever its decided stat
 			<details>
 				<summary>What changed</summary>
 				<!-- One line, so the template adds no whitespace between the diff's runs. -->
-				<span class="was">{#each wordDiff(note.was, note.now) as run, i (i)}{#if run.op === 'del'}<del>{@render inline(run.text)}</del>{:else if run.op === 'ins'}<ins>{@render inline(run.text)}</ins>{:else}{@render inline(run.text)}{/if}{/each}</span>
+				<span class="was">{#each wordDiff(note.was, note.now) as run, i (i)}{#if run.op === 'del'}<del><span class="sr-only">removed: </span>{@render inline(run.text)}</del>{:else if run.op === 'ins'}<ins><span class="sr-only">added: </span>{@render inline(run.text)}</ins>{:else}{@render inline(run.text)}{/if}{/each}</span>
 			</details>
 		{/if}
 		{#if note.choices?.length}
 			<div class="choices">
 				{#each note.choices as c, i (i)}
-					<button type="button" class="choice" onclick={() => onchoose(i)}>{c.label}</button>
+					<button type="button" class="choice" {disabled} onclick={() => onchoose(i)}>{c.label}</button>
 				{/each}
 			</div>
 		{/if}
@@ -61,6 +64,9 @@ callbacks rather than binding state, and it is rebuilt whenever its decided stat
 		line-height: 1.5;
 		white-space: normal;
 		cursor: default;
+	}
+	.note:focus {
+		outline: none;
 	}
 	.note p,
 	.note .side {
@@ -117,8 +123,13 @@ callbacks rather than binding state, and it is rebuilt whenever its decided stat
 		padding: 6px 10px;
 		cursor: pointer;
 	}
-	.choice:hover {
+	.choice:hover:not(:disabled) {
 		background: var(--color-base-200);
+	}
+	.choice:disabled,
+	.reopen:disabled {
+		cursor: not-allowed;
+		opacity: 0.6;
 	}
 	code {
 		font-family: var(--font-mono);

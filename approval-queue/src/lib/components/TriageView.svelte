@@ -9,20 +9,15 @@ which submits them; nothing here posts. A row's number is its position in the fi
 	import { tick } from 'svelte';
 	import { desk } from '#lib/desk.svelte.ts';
 	import { groupRows, moveRow, type Disposition, type Row } from '#lib/triage.ts';
-	import BriefBlock from './BriefBlock.svelte';
 	import PacketIcon from './PacketIcon.svelte';
 
 	interface Props {
 		rows: Row[];
 		/** Each row's action, reason, and technical detail as rendered HTML, in the file's order. */
 		html: Array<{ action: string; why: string; detail: string | null }>;
-		headlineHtml: string;
-		ledeHtml: string;
-		/** The crumb after "Board", such as "Triage · drafter Pass 0". */
-		meta: string;
 	}
 
-	let { rows = $bindable(), html, headlineHtml, ledeHtml, meta }: Props = $props();
+	let { rows = $bindable(), html }: Props = $props();
 
 	const SECTIONS = [
 		{ key: 'now', label: 'Do now' },
@@ -37,16 +32,15 @@ which submits them; nothing here posts. A row's number is its position in the fi
 	let editing = $state<number | null>(null);
 	let original = '';
 
-	$effect(() => {
-		desk.handlers = {
-			...desk.handlers,
+	$effect(() =>
+		desk.register({
 			'row-next': () => stepRow(1),
 			'row-prev': () => stepRow(-1),
 			'move-now': () => moveFocused('now'),
 			'move-defer': () => moveFocused('defer'),
 			'move-drop': () => moveFocused('drop')
-		};
-	});
+		})
+	);
 
 	const rowEl = (index: number) => document.querySelector<HTMLElement>(`[data-row="${index}"]`);
 
@@ -112,14 +106,8 @@ which submits them; nothing here posts. A row's number is its position in the fi
 	}
 </script>
 
-<BriefBlock {headlineHtml} {ledeHtml}>
-	{#snippet trail()}
-		<a href="/">Board</a><span aria-hidden="true">/</span><span>{meta}</span>
-	{/snippet}
-</BriefBlock>
-
 {#each SECTIONS as section (section.key)}
-	<section class="sec" data-group={section.key} aria-labelledby="g-{section.key}">
+	<section class="sec" id="group-{section.key}" data-group={section.key} aria-labelledby="g-{section.key}">
 		<h2 id="g-{section.key}">{section.label}</h2>
 		<p class="sl">
 			{#if groups[section.key].length === 0}Nothing here.{:else}{groups[section.key].length} {groups[section.key].length === 1 ? 'item' : 'items'}.{/if}
@@ -127,8 +115,7 @@ which submits them; nothing here posts. A row's number is its position in the fi
 		{#if groups[section.key].length}
 			<ul class="parts">
 				{#each groups[section.key] as { row, index } (index)}
-					<!-- The list takes one tab stop and the arrows move within it, so each row is focusable. -->
-					<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+					<!-- svelte-ignore a11y_no_noninteractive_tabindex: the list takes one tab stop and the arrows move within it, so each row is focusable -->
 					<li
 						data-row={index}
 						class="part"
