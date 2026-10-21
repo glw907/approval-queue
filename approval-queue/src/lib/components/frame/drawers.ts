@@ -2,6 +2,8 @@ import { tick } from 'svelte';
 import { desk } from '#lib/desk.svelte.ts';
 
 let opener: HTMLElement | null = null;
+/** The elements `shut` made inert, so `sync` clears only those and never an `inert` set elsewhere. */
+const shutting = new Set<HTMLElement>();
 
 /** What goes inert while a drawer is open: everything the drawer does not hold. */
 const BEHIND = ['#rail', '.appbar', '#main', '#review'];
@@ -14,13 +16,15 @@ function shut(el: Element, drawer: Element) {
 	if (el === drawer) return;
 	if (!el.contains(drawer)) {
 		(el as HTMLElement).inert = true;
+		shutting.add(el as HTMLElement);
 		return;
 	}
 	for (const child of el.children) shut(child, drawer);
 }
 
 function sync() {
-	for (const el of document.querySelectorAll<HTMLElement>('[inert]')) el.inert = false;
+	for (const el of shutting) el.inert = false;
+	shutting.clear();
 	const drawer = desk.railOpen ? document.getElementById('rail') : desk.paneOpen ? document.getElementById(desk.pane) : null;
 	if (!drawer) return;
 	for (const el of document.querySelectorAll(BEHIND.join(','))) shut(el, drawer);
@@ -33,6 +37,8 @@ function sync() {
  */
 export async function setDrawer(which: 'rail' | 'pane', open: boolean, from?: HTMLElement | null, pane = 'review') {
 	if (open === (which === 'rail' ? desk.railOpen : desk.paneOpen) && (which === 'rail' || !open || desk.pane === pane)) return;
+	// Switching from one pane to another keeps the first one's opener: focus is now inside the pane being hidden.
+	const switching = open && which === 'pane' && desk.paneOpen;
 	if (which === 'rail') desk.railOpen = open;
 	else {
 		if (open) desk.pane = pane;
@@ -42,7 +48,7 @@ export async function setDrawer(which: 'rail' | 'pane', open: boolean, from?: HT
 	sync();
 	const drawer = document.getElementById(which === 'rail' ? 'rail' : desk.pane);
 	if (open) {
-		opener = from ?? (document.activeElement as HTMLElement | null);
+		if (!switching) opener = from ?? (document.activeElement as HTMLElement | null);
 		drawer?.querySelector<HTMLElement>('button, a')?.focus();
 	} else if (opener) {
 		opener.focus();

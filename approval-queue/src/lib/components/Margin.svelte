@@ -110,7 +110,7 @@ unplaced and hidden.
 <aside
 	id={review.margin}
 	class={['review', 'margin', open && 'open']}
-	aria-label="Comments"
+	aria-label={review.file ? `Comments on ${review.file}` : 'Comments'}
 	role={open ? 'dialog' : undefined}
 	aria-modal={open ? 'true' : undefined}
 >
