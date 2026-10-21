@@ -311,7 +311,8 @@ function sourcePlugin(original: string, yaml: boolean) {
 const highlight = HighlightStyle.define([
 	{ tag: tags.strong, fontWeight: '600' },
 	{ tag: tags.emphasis, fontStyle: 'italic' },
-	{ tag: tags.processingInstruction, color: 'var(--color-muted)', fontWeight: '400' }
+	// A fixed class, so the editor's styles can deepen the markers under a current highlight.
+	{ tag: tags.processingInstruction, class: 'cm-syntax-mark' }
 ]);
 
 const editable = new Compartment();

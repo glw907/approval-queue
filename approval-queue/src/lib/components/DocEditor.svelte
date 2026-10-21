@@ -353,6 +353,15 @@ text drops a box left empty. Below 1260px a tap on a highlight opens the drawer 
 	.cm-host :global(.cm-cmt.cur) {
 		background: color-mix(in oklab, var(--color-primary) 26%, transparent);
 	}
+	/* The muted syntax markers; on a current highlight's deeper fill they take a darker ink to stay readable. */
+	.cm-host :global(.cm-syntax-mark) {
+		color: var(--color-muted);
+		font-weight: 400;
+	}
+	.cm-host :global(:is(.cm-cmt, .cm-anchor).cur .cm-syntax-mark),
+	.cm-host :global(.cm-syntax-mark :is(.cm-cmt, .cm-anchor).cur) {
+		color: color-mix(in oklab, var(--color-muted) 60%, var(--color-base-content));
+	}
 	.cm-host :global(.cm-gone) {
 		height: 0;
 		border-top: 2px dotted color-mix(in oklab, var(--color-primary) 55%, transparent);
