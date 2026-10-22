@@ -236,13 +236,23 @@ export async function readItem(root: string, id: string): Promise<Item | undefin
 	return { meta, content, decided: decision !== undefined, ...(decision && { decision }) };
 }
 
+/** A packet stored before the title and description, with a one-sentence lede and a Background section. */
+type OldPacket = Omit<Packet, 'background' | 'summary'> & { lede: string; background: { text: string } };
+
+/** Reads a stored packet, mapping the old shape's Background to the background and its lede to the summary. */
+function upgradePacket(stored: Packet | OldPacket): Packet {
+	if (!('lede' in stored)) return stored;
+	const { lede, background, ...rest } = stored;
+	return { ...rest, background: background.text, summary: [lede] };
+}
+
 /**
  * Rebuilds a packet's parts from its item directory, never from a post. Part `k` is the index in
  * `packet.parts`, so a step, which has no directory, still holds its slot.
  */
 async function readPacket(dir: string): Promise<ItemContent> {
 	const raw = await readFile(join(dir, 'packet.json'), 'utf8');
-	const packet = JSON.parse(raw) as Packet;
+	const packet = upgradePacket(JSON.parse(raw));
 	const preselected = new Map(packet.routine.map((row) => [row.part.ref, row.verdict]));
 	const parts: PacketPart[] = [];
 	for (const [k, { part, in: lane }] of packet.parts.entries()) {

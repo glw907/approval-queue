@@ -138,13 +138,25 @@ describe('a packet item', () => {
 		await seedPacket(root, 'p', PACKET);
 		const item = await readItem(root, 'p');
 		if (item?.content.kind !== 'packet') throw new Error('not a packet');
-		expect(item.content.packet.headline).toContain('merges two drafter PRs');
+		expect(item.content.packet.headline).toBe('Drafter release notes, first stage');
 		expect(item.content.parts.map((p) => [p.ref, p.kind, p.lane, p.verdict, p.head ?? p.sha256?.length])).toEqual([
 			['glw907/drafter#41', 'pr', 'ask', '', 'aaa111'],
 			['glw907/drafter#42', 'pr', 'routine', 'approve', 'bbb222'],
 			['glw907/drafter:docs/specs/notes-design.md', 'design', 'routine', 'approve', 64],
 			['step:1', 'step', 'routine', 'session', undefined]
 		]);
+	});
+
+	it('reads a packet stored in the old shape, its Background as the background and its lede as the summary', async () => {
+		await seedPacket(root, 'p', PACKET);
+		const file = join(root, 'items', 'p', 'packet.json');
+		const { background, summary, ...rest } = JSON.parse(await readFile(file, 'utf8'));
+		await writeFile(file, JSON.stringify({ ...rest, lede: summary[0], background: { summary: 'S.', text: background } }));
+		const item = await readItem(root, 'p');
+		if (item?.content.kind !== 'packet') throw new Error('not a packet');
+		expect(item.content.packet.background).toBe(background);
+		expect(item.content.packet.summary).toEqual([summary[0]]);
+		expect(item.content.packet).not.toHaveProperty('lede');
 	});
 
 	it('hashes the design copy the reader saw', async () => {

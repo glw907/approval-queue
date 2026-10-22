@@ -189,7 +189,7 @@ for that save first, and closing the tab then asks before leaving.
 	const outline = $derived.by((): PaneItem[] => {
 		const sections: Array<Omit<PaneItem, 'n'>> = [];
 		if (data.kind === 'packet') {
-			sections.push({ href: '#background', label: 'Background' }, { href: '#if-you-approve', label: 'If you approve' }, { href: '#not-checked', label: 'Not checked' });
+			sections.push({ href: '#if-you-approve', label: 'If you approve' }, { href: '#not-checked', label: 'Not checked' });
 			if (data.asks.length) sections.push({ href: '#asks', label: 'Asks', mark: openAsks.length ? 'call' : undefined });
 			if (partRows.length) sections.push({ href: '#parts', label: 'Parts' });
 		} else if (data.kind === 'pr' || data.kind === 'design') {
@@ -851,6 +851,7 @@ for that save first, and closing the tab then asks before leaving.
 >
 	{#snippet header()}
 		{#if packet}
+			<!-- A packet stored before titles can carry a long one-sentence headline. -->
 			<FrameHeader long={packet.headline.length > 90}>
 				{#snippet crumb()}
 					<a href="/">Board</a><span aria-hidden="true">/</span><span>Packet</span>
@@ -860,7 +861,9 @@ for that save first, and closing the tab then asks before leaving.
 					{/if}
 				{/snippet}
 				{#snippet headline()}<Prose text={packet.headline} />{/snippet}
-				{#snippet lede()}<Prose text={packet.lede} />{/snippet}
+				{#snippet description()}
+					{#each [packet.background, ...packet.summary] as paragraph, i (i)}<p><Prose text={paragraph} /></p>{/each}
+				{/snippet}
 			</FrameHeader>
 		{:else if blueprint && review}
 			<FrameHeader>

@@ -1,7 +1,8 @@
 <!-- @component
 The Survey header every screen opens with: crumb, benchmark triangle, headline, lede, and the
 contour texture behind them. The screen passes its own crumb, headline, and lede as snippets, so
-rendered inline Markdown works. A headline over about 120 characters takes the `long` size.
+rendered inline Markdown works. A headline over about 120 characters takes the `long` size. A
+packet passes `description`, its paragraphs each in a `<p>`, in place of the one-paragraph lede.
 -->
 <script lang="ts">
 	import type { Snippet } from 'svelte';
@@ -9,11 +10,12 @@ rendered inline Markdown works. A headline over about 120 characters takes the `
 	interface Props {
 		crumb: Snippet;
 		headline: Snippet;
-		lede: Snippet;
+		lede?: Snippet;
+		description?: Snippet;
 		long?: boolean;
 	}
 
-	let { crumb, headline, lede, long = false }: Props = $props();
+	let { crumb, headline, lede, description, long = false }: Props = $props();
 </script>
 
 <header class="sheethead">
@@ -25,5 +27,9 @@ rendered inline Markdown works. A headline over about 120 characters takes the `
 	</svg>
 	<p class="crumb">{@render crumb()}</p>
 	<h1 class={['desk-title', long && 'long']}><span class="site-benchmark" aria-hidden="true"></span>{@render headline()}</h1>
-	<p class="lede">{@render lede()}</p>
+	{#if description}
+		<div class="lede">{@render description()}</div>
+	{:else if lede}
+		<p class="lede">{@render lede()}</p>
+	{/if}
 </header>

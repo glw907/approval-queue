@@ -277,8 +277,8 @@ usage_refusal "packet without a file" packet drafter
 usage_refusal "packet --check without a file" packet --check drafter
 
 # A defect in the file alone is a parser refusal with the register path.
-sed '1s/.*/# One sentence. Then another./' "$PACKET" >"$root/bad-headline.md"
-refuse "parser refusal" "the headline is one sentence" drafter drafter "$root/bad-headline.md"
+sed '1s/.*/# A title that ends in a period./' "$PACKET" >"$root/bad-title.md"
+refuse "parser refusal" "drop its closing punctuation" drafter drafter "$root/bad-title.md"
 grep -q 'approval-brief.md' "$root/err" || { echo "FAIL: parser refusal: no register path"; fail=1; }
 
 # End-to-end check 5: once the stub reports #43 MERGED, handing it over again exits 2 naming the state.

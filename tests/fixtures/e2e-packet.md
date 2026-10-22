@@ -1,9 +1,8 @@
-# This packet merges three drafter PRs, and approving merges the two that pass cleanly.
+# Drafter release notes, second stage
 
-PR 41 failed a check and one question is yours, so the packet needs your answers before it lands.
-
-## Background
 The drafter initiative replaces hand-written release notes with generated ones. This packet carries the second stage. A gate is the set of checks and the review a PR must pass.
+
+The stage lands as three drafter PRs. Approving merges the two that pass cleanly. PR 41 failed a check and one question is yours, so the packet needs your answers before it lands.
 
 ## If you approve
 1. [session] Merge each approved PR in the order listed.

@@ -334,6 +334,12 @@ html {
 	font-size: 1.05rem;
 	line-height: 1.55;
 }
+.sheethead div.lede p {
+	margin: 0;
+}
+.sheethead div.lede p + p {
+	margin-top: 0.7em;
+}
 
 /* The place bar: below 1260px, where you are and the button that opens the pane. */
 .place {
