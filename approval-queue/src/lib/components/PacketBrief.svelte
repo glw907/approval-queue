@@ -1,14 +1,12 @@
 <!-- @component
-The packet's opening sections, the header aside: Background (a muted row whose closed state is its
-first sentence), "If you approve" (the numbered steps, each with who runs it and, where the packet
-routes the step, a verdict segment), and "Not checked" (a note with a warning rule). A background of
-one sentence has nothing to open.
+The packet's opening sections, the header aside: "If you approve" (the numbered steps, each with
+who runs it and, where the packet routes the step, a verdict segment) and "Not checked" (a note with
+a warning rule).
 
 A step's verdict is a routine row on `step:<n>`; `verdicts` is bound up so the page can follow what
 changed. A step the packet does not route shows no segment.
 -->
 <script lang="ts">
-	import { splitLead } from '#lib/prose.ts';
 	import type { PageData } from '../../routes/item/[id=id]/$types';
 	import PacketIcon from './PacketIcon.svelte';
 	import PacketSeg from './PacketSeg.svelte';
@@ -23,7 +21,6 @@ changed. A step the packet does not route shows no segment.
 
 	let { data, verdicts = $bindable({}), decided }: Props = $props();
 
-	const background = $derived(splitLead(data.background.text));
 	const yours = $derived(data.steps.filter((s) => s.tag === 'you').length);
 	const row = (n: number) => data.routine.find((r) => r.ref === `step:${n}`);
 	const WORDS = ['none', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten'];
@@ -35,18 +32,6 @@ changed. A step the packet does not route shows no segment.
 		you: { icon: 'user', text: 'You run it.', tail: '' }
 	} as const;
 </script>
-
-{#if background.rest}
-	<details class="bg bg-first" id="background">
-		<summary>
-			<PacketIcon name="chev" class="chev" />
-			<span><span class="lead">Background.</span> <Prose text={background.lead} /></span>
-		</summary>
-		<div class="body"><p><Prose text={background.rest} /></p></div>
-	</details>
-{:else}
-	<p class="bg bg-first bg-flat" id="background"><span class="lead">Background.</span> <Prose text={background.lead} /></p>
-{/if}
 
 <section class="sec" id="if-you-approve" aria-labelledby="plan-h">
 	<h2 id="plan-h">If you approve</h2>

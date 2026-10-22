@@ -25,7 +25,7 @@ The hook's `settings.json` entry lives in the workstation repo and calls `claude
 
 ## The packet kind
 
-A packet is one session hand-over: a headline, a lede, background, the plan, what the session did not check, at most three asks for Geoff, and a routine row for every other part with the session's verdict preselected. The file's grammar lives in `approval-queue/src/lib/packet.ts`, and the prose standard in the register at `~/.claude/docs/voice/approval-brief.md`.
+A packet is one session hand-over: a title, a description (a background paragraph, then one or two summary paragraphs), the plan, what the session did not check, at most three asks for Geoff, and a routine row for every other part with the session's verdict preselected. The file's grammar lives in `approval-queue/src/lib/packet.ts`, and the prose standard in the register at `~/.claude/docs/voice/approval-brief.md`.
 
 ```sh
 approval-queue packet <initiative> <file>

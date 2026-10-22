@@ -27,11 +27,15 @@ describe('the baseline packet', () => {
 	if (!result.ok) throw new Error(result.messages.join('\n'));
 	const { packet } = result;
 
-	it('parses the headline, lede, background, and not-checked text', () => {
-		expect(packet.headline).toBe('This packet merges two drafter PRs and one design, and approving runs three follow-up steps.');
-		expect(packet.lede).toBe('The drafter pass is ready to land, but one PR failed a check and one question is yours to settle first.');
-		expect(packet.background.summary).toBe('The drafter initiative replaces hand-written release notes with generated ones.');
-		expect(packet.background.text).toContain('The earlier packet landed the template engine.');
+	it('parses the title, description, and not-checked text', () => {
+		expect(packet.headline).toBe('Drafter release notes, first stage');
+		expect(packet.background).toBe(
+			'The drafter initiative replaces hand-written release notes with generated ones. This packet carries the last pass of the first stage. The earlier packet landed the template engine.'
+		);
+		expect(packet.summary).toEqual([
+			'The pass is ready to land as two drafter PRs and one design. One PR failed a lint check, and one question is yours to settle first.',
+			'Approving merges each approved PR in order and publishes the drafter release. You refresh your registry login before the publish.'
+		]);
 		expect(packet.notChecked).toBe("The release notes were not read on the registry's preview page.");
 	});
 
@@ -95,19 +99,31 @@ describe('the baseline packet', () => {
 });
 
 describe('refusals, one edit each', () => {
-	it('refuses a missing or multi-sentence headline', () => {
-		expect(refusal(baseline.replace(/^# .*\n/, ''))).toContain('the headline is one sentence');
-		expect(refusal(edited('approving runs three follow-up steps.', 'approving runs three steps. It is long.'))).toContain('the headline is one sentence');
+	it('refuses a missing title, a title with closing punctuation, and one over 80 characters', () => {
+		expect(refusal(baseline.replace(/^# .*\n/, ''))).toContain('missing title');
+		expect(refusal(edited('first stage\n', 'first stage.\n'))).toContain('drop its closing punctuation');
+		expect(refusal(edited('first stage\n', `${'x'.repeat(60)}\n`))).toContain('the title runs 83 characters; keep it to 80');
 	});
 
-	it('refuses a missing lede', () => {
-		expect(refusal(edited(/The drafter pass is ready.*\n/, ''))).toContain('missing lede');
+	it('accepts a description of two paragraphs', () => {
+		expect(parsePacket(edited(/\nApproving merges each.*\n/, ''), { designExists }).ok).toBe(true);
+	});
+
+	it('refuses a description of one paragraph or of four', () => {
+		expect(refusal(edited(/The pass is ready[^]*?publish\.\n/, ''))).toContain('a background paragraph, then one or two summary paragraphs');
+		expect(refusal(edited('before the publish.\n', 'before the publish.\n\nA fourth paragraph.\n'))).toContain('the description has 4 paragraphs');
+	});
+
+	it('refuses a Background section, pointing at the description', () => {
+		expect(refusal(edited('## If you approve', '## Background\nOld text.\n\n## If you approve'))).toContain(
+			'`## Background` is not a packet section; its text is the first paragraph under the title'
+		);
 	});
 
 	it('refuses a required section absent, empty, or out of order', () => {
 		expect(refusal(edited(/## Not checked\n.*\n\n/, ''))).toContain('`## Not checked` is missing');
 		expect(refusal(edited(/(## Not checked\n).*\n/, '$1'))).toContain('`## Not checked` is empty');
-		expect(refusal(edited('## Not checked', '## Not checked\nok\n\n## Background\nA second one.'))).toContain('`## Background` appears twice');
+		expect(refusal(edited('## Routine', '## Not checked\nA second one.\n\n## Routine'))).toContain('`## Not checked` appears twice');
 		const swapped = edited('## If you approve', '## Not checked\nNothing.\n\n## If you approve');
 		expect(refusal(swapped)).toContain('`## If you approve` is out of order');
 	});

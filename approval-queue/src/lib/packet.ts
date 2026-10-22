@@ -7,7 +7,7 @@
 import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { REGISTER_PATH, sentences, type Result } from './brief.ts';
+import { REGISTER_PATH, type Result } from './brief.ts';
 
 export type PartKind = 'pr' | 'design' | 'step';
 
@@ -71,10 +71,12 @@ export interface RoutineRow {
 }
 
 export interface Packet {
+	/** The title: a Google-style heading with no closing punctuation. */
 	headline: string;
-	lede: string;
-	/** The first sentence of Background is the closed row. */
-	background: { summary: string; text: string };
+	/** The description's first paragraph: where the packet sits and why it is here now. */
+	background: string;
+	/** The description's other one or two paragraphs: what is proposed, what approving does, and how. */
+	summary: string[];
 	steps: PlanStep[];
 	notChecked: string;
 	asks: PacketAsk[];
@@ -156,6 +158,22 @@ const prose = (lines: Line[]) =>
 		.filter((t) => t !== '')
 		.join(' ');
 
+/** Splits lines into paragraphs at blank lines, each joined into one line of prose. */
+function paragraphsOf(lines: Line[]): string[] {
+	const out: string[] = [];
+	let open = false;
+	for (const line of lines) {
+		const text = line.fenced ? '' : line.text.trim();
+		if (text === '') open = false;
+		else if (open) out[out.length - 1] += ` ${text}`;
+		else {
+			out.push(text);
+			open = true;
+		}
+	}
+	return out;
+}
+
 const BULLET = /^\s{0,3}[-*+]\s+(.*)$/;
 const FIELD = /^(Rule|Part|Recommended|Reason|Summary|Background|Facts|Evidence):(?: (.*))?$/;
 const STEP = /^\[(session|irreversible|you)(?::\s*([^\]]+))?\]\s+/;
@@ -206,9 +224,12 @@ interface RawSection {
 	body: Line[];
 }
 
+/** The longest title the board and the header show on one or two lines. */
+const TITLE_MAX = 80;
+
 /**
  * Parses a packet file. Defects are collected, so one refusal lists everything to fix, except a
- * missing headline or lede, which stops the parse because nothing after them can be placed.
+ * missing title, which stops the parse because nothing after it can be placed.
  */
 export function parsePacket(markdown: string, options: PacketOptions = {}): Result<{ packet: Packet }> {
 	const designExists = options.designExists ?? defaultDesignExists;
@@ -216,43 +237,52 @@ export function parsePacket(markdown: string, options: PacketOptions = {}): Resu
 	const firstContent = lines.findIndex((l) => l.text.trim() !== '');
 	const headingLine = lines[firstContent];
 	if (!headingLine || headingLine.fenced || !headingLine.text.startsWith('# ')) {
-		return refuse('the headline is one sentence: start the file with `# <headline>`');
+		return refuse('missing title: start the file with `# <title>`');
 	}
 	const headline = headingLine.text.slice(2).trim();
-	if (sentences(headline).length !== 1) return refuse('the headline is one sentence');
+	const errors: string[] = [];
+	if (/[.!?]$/.test(headline)) errors.push('the title is a heading: drop its closing punctuation');
+	if (headline.length > TITLE_MAX) errors.push(`the title runs ${headline.length} characters; keep it to ${TITLE_MAX}`);
 
 	const sections: RawSection[] = [];
-	const lede: Line[] = [];
+	const description: Line[] = [];
 	let cur: RawSection | undefined;
 	for (const line of lines.slice(firstContent + 1)) {
 		if (!line.fenced && line.text.startsWith('## ')) {
 			cur = { heading: line.text.slice(3).trim(), body: [] };
 			sections.push(cur);
 		} else if (cur) cur.body.push(line);
-		else lede.push(line);
+		else description.push(line);
 	}
-	const ledeText = prose(lede);
-	if (ledeText === '') return refuse('missing lede: add a paragraph after the headline');
+	const paragraphs = paragraphsOf(description);
+	if (paragraphs.length < 2) {
+		errors.push('the description is a background paragraph, then one or two summary paragraphs, under the title');
+	} else if (paragraphs.length > 3) {
+		errors.push(`the description has ${paragraphs.length} paragraphs; keep it to a background paragraph and one or two summary paragraphs`);
+	}
 
-	const errors: string[] = [];
-	const required = ['Background', 'If you approve', 'Not checked'];
+	const required = ['If you approve', 'Not checked'];
 	const named = new Map<string, RawSection>();
 	const asks: RawSection[] = [];
 	let routine: RawSection | undefined;
 	let lastRank = -1;
 	for (const section of sections) {
 		const h = section.heading;
-		const rank = required.indexOf(h) >= 0 ? required.indexOf(h) : h.startsWith('Ask:') ? 3 : h === 'Routine' ? 4 : -1;
+		const rank = required.indexOf(h) >= 0 ? required.indexOf(h) : h.startsWith('Ask:') ? 2 : h === 'Routine' ? 3 : -1;
+		if (h === 'Background') {
+			errors.push('`## Background` is not a packet section; its text is the first paragraph under the title');
+			continue;
+		}
 		if (rank < 0) {
 			errors.push(`\`## ${h}\` is not a packet section`);
 			continue;
 		}
 		if (rank < lastRank) errors.push(`\`## ${h}\` is out of order; the order is ${required.join(', ')}, the asks, then Routine`);
 		lastRank = Math.max(lastRank, rank);
-		if (rank < 3) {
+		if (rank < 2) {
 			if (named.has(h)) errors.push(`\`## ${h}\` appears twice; keep one`);
 			else named.set(h, section);
-		} else if (rank === 3) asks.push(section);
+		} else if (rank === 2) asks.push(section);
 		else if (routine) errors.push('`## Routine` appears twice; keep one');
 		else routine = section;
 	}
@@ -435,13 +465,12 @@ export function parsePacket(markdown: string, options: PacketOptions = {}): Resu
 	}
 
 	if (errors.length > 0) return refuse(...errors);
-	const background = prose(named.get('Background')!.body);
 	return {
 		ok: true,
 		packet: {
 			headline,
-			lede: ledeText,
-			background: { summary: sentences(background)[0], text: background },
+			background: paragraphs[0],
+			summary: paragraphs.slice(1),
 			steps,
 			notChecked: prose(named.get('Not checked')!.body),
 			asks: parsedAsks,

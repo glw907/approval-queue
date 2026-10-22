@@ -1,9 +1,10 @@
-# This packet merges two drafter PRs and one design, and approving runs three follow-up steps.
+# Drafter release notes, first stage
 
-The drafter pass is ready to land, but one PR failed a check and one question is yours to settle first.
-
-## Background
 The drafter initiative replaces hand-written release notes with generated ones. This packet carries the last pass of the first stage. The earlier packet landed the template engine.
+
+The pass is ready to land as two drafter PRs and one design. One PR failed a lint check, and one question is yours to settle first.
+
+Approving merges each approved PR in order and publishes the drafter release. You refresh your registry login before the publish.
 
 ## If you approve
 1. [session] Merge each approved PR in the order listed.
