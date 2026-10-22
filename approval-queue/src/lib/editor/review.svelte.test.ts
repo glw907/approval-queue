@@ -1,7 +1,7 @@
 import type { EditorView } from '@codemirror/view';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PlacedNote } from './notes.ts';
-import { DocReview, type ReviewInit, type SaveResult } from './review.svelte.ts';
+import { DocReview, type CommentAnswer, type ReviewInit, type SaveResult } from './review.svelte.ts';
 
 const KEY = 'desk.calls.test';
 
@@ -93,5 +93,75 @@ describe('DocReview remembered choices', () => {
 		localStorage.setItem(KEY, JSON.stringify({ blob: 'b1', decided: { B3: 0, Q1: 0 } }));
 		expect(review('b1').decided).toEqual({ Q1: 0 });
 		expect(review('b1', undefined, 'Rewritten line.').decided).toEqual({ B3: 0, Q1: 0 });
+	});
+
+	it('reports every saved pause as all edits saved', async () => {
+		const r = review('b1');
+		r.hooks.change(edited);
+		await r.flush();
+		expect(r.saveStatus).toBe('All edits saved');
+	});
+});
+
+describe('DocReview comments', () => {
+	const anchor = (from: number, to: number) => ({ quote: 'x', prefix: '', suffix: '', from, to, commit: 'c' });
+	const doc = 'One line.\nTwo line.';
+	const make = (comment?: ReviewInit['comment']) =>
+		new DocReview({
+			doc,
+			original: doc,
+			blob: 'b1',
+			notes: [],
+			save: async () => ({ ok: true, blob: 'b2' }),
+			comments: [
+				{ id: 'C2', text: 'Later', anchor: anchor(10, 13), placed: { from: 10, to: 13 } },
+				{ id: 'C1', text: 'Gone', anchor: anchor(40, 44), placed: null }
+			],
+			threads: [
+				{ id: 'T1', status: 'done', text: 'Fixed', quote: 'One', anchor: anchor(0, 3), placed: { from: 0, to: 3 }, reply: '', resolved: false },
+				{ id: 'T2', status: 'kept', text: 'Kept', quote: 'line', anchor: anchor(4, 8), placed: { from: 4, to: 8 }, reply: 'Fine', resolved: true }
+			],
+			comment
+		});
+
+	it('orders the cards by where their text starts and sets a gone one at its clamped offset', () => {
+		const r = make();
+		expect(r.cards.map((c) => c.key)).toEqual(['thread:T1', 'thread:T2', 'comment:C2', 'comment:C1']);
+		expect(r.ranges['comment:C1']).toEqual([doc.length, doc.length]);
+		expect(r.cards.find((c) => c.key === 'comment:C1')).toMatchObject({ gone: true });
+	});
+
+	it('counts the cards still open, the replies unread, and Geoff’s own replies', () => {
+		const r = make();
+		expect(r.cardCount).toBe(3);
+		expect(r.unread).toBe(1);
+		expect(r.replied).toBe(1);
+	});
+
+	it('takes comments only with a poster and while commentable', () => {
+		const r = make();
+		r.commentable = true;
+		expect(r.canComment).toBe(false);
+	});
+
+	it('posts one comment op at a time, so a second press sends nothing, and settles once it lands', async () => {
+		vi.stubGlobal('document', { getElementById: () => null });
+		let answer: (a: CommentAnswer) => void = () => {};
+		const poster = vi.fn(() => new Promise<CommentAnswer>((resolve) => (answer = resolve)));
+		const r = make(poster);
+		r.commentable = true;
+		const first = r.resolveThread('T1', true);
+		await r.resolveThread('T1', true);
+		let settled = false;
+		const waiting = r.settled().then(() => (settled = true));
+		await Promise.resolve();
+		expect(poster).toHaveBeenCalledTimes(1);
+		expect(settled).toBe(false);
+		answer({ ok: true, id: 'T1', comments: [], threads: [{ id: 'T1', resolved: true }] });
+		await first;
+		await waiting;
+		expect(settled).toBe(true);
+		expect(r.threads.find((t) => t.id === 'T1')?.resolved).toBe(true);
+		vi.unstubAllGlobals();
 	});
 });

@@ -9,6 +9,67 @@
 	--bar-shadow: 0 8px 28px -6px rgb(0 0 0 / 0.22), 0 2px 6px -2px rgb(0 0 0 / 0.1);
 	--rule: color-mix(in oklab, var(--color-secondary) 55%, transparent);
 	--frame-text: 46rem;
+	/* Level 2 of the weight ladder: the current or selected state's tint. */
+	--tint: color-mix(in oklab, var(--color-base-300) 62%, transparent);
+	/* The rail widens with the window, from 18rem at 1260px to 23rem at about 2300px. */
+	--rail-w: clamp(18rem, 12rem + 8vw, 23rem);
+}
+
+/* The motion grammar (comments prototype, round-6-spec.md): 907.life's 150ms fades and IBM
+   Carbon's productive motion. Motion answers what the reader did; nothing moves on its own or on
+   page load. These tokens are local until cairn-themes #1 moves them into Survey, beside its
+   radius and depth tokens, so that 907.life inherits them too. */
+:root {
+	--motion-quick: 150ms;
+	--motion-base: 240ms;
+	--motion-ease: cubic-bezier(0.2, 0, 0.38, 0.9);
+	--motion-ease-enter: cubic-bezier(0, 0, 0.38, 0.9);
+}
+@keyframes rise {
+	from {
+		opacity: 0;
+		transform: translateY(4px);
+	}
+}
+@keyframes fade {
+	from {
+		opacity: 0;
+	}
+}
+/* Rule 1: state changes cross-fade in quick time. */
+:is(.btn, .linkbtn, .rail a.q, .rail-keys, .rv-list a, .drawer-x, .appbtn, summary) {
+	transition:
+		color var(--motion-quick) var(--motion-ease),
+		background-color var(--motion-quick) var(--motion-ease),
+		border-color var(--motion-quick) var(--motion-ease);
+}
+/* Rule 2: opened surfaces enter in base time, a fade with a 4px rise; a scrim or a fold's body
+   fades without it. Rule 4: leaving is instant, so none of these animates out, except the toast,
+   which the layout fades. */
+.sendback,
+.desk-toast > .alert,
+dialog.modal[open] > .modal-box {
+	animation: rise var(--motion-base) var(--motion-ease-enter) both;
+}
+.scrim:not([hidden]),
+dialog.modal[open],
+.frame details[open] > :not(summary) {
+	animation: fade var(--motion-base) var(--motion-ease-enter) both;
+}
+/* daisyUI's modal scales in and fades out on its own timing; the grammar above replaces both. */
+dialog.modal,
+dialog.modal > .modal-box {
+	transition: none;
+	scale: none;
+	translate: none;
+}
+
+/* Every scrollbar is thin, a muted thumb at 35% and no track. */
+:root {
+	scrollbar-color: color-mix(in oklab, var(--color-muted) 35%, transparent) transparent;
+}
+* {
+	scrollbar-width: thin;
 }
 html {
 	font-size: clamp(16px, 13.4px + 0.18vw, 18.5px);
@@ -30,9 +91,11 @@ html {
 .rail {
 	background: var(--color-base-200);
 	border-right: 1px solid var(--color-base-300);
-	padding: 16px 12px;
+	/* The right padding plus the reserved scrollbar gutter matches the 20px left. */
+	padding: 16px 12px 16px 20px;
+	scrollbar-gutter: stable;
 	display: grid;
-	/* Bounded tracks, so a decided row's one-line title ellipsizes instead of widening the rail. */
+	/* Bounded tracks, so a long title wraps instead of widening the rail. */
 	grid-template-columns: minmax(0, 1fr);
 	align-content: start;
 	gap: 4px;
@@ -85,7 +148,7 @@ html {
 }
 .rail a.q:hover,
 .rail a.q.on {
-	background: var(--color-base-300);
+	background: var(--tint);
 }
 .rail a.q .meta {
 	font-size: 0.85rem;
@@ -100,6 +163,7 @@ html {
 .rail .dq {
 	display: flex;
 	justify-content: space-between;
+	align-items: baseline;
 	gap: 8px;
 	min-width: 0;
 	padding: 4px 8px 4px 14px;
@@ -112,9 +176,7 @@ html {
 }
 .rail li.dq span:first-child {
 	min-width: 0;
-	overflow: hidden;
-	text-overflow: ellipsis;
-	white-space: nowrap;
+	overflow-wrap: anywhere;
 }
 .rail-keys {
 	margin-top: 18px;
@@ -135,6 +197,17 @@ html {
 	border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
 	border-radius: 3px;
 	padding: 0 4px;
+}
+/* A key inside a control is plain muted text, as `desk-kbd` draws it; the shortcut sheet keeps its keycaps. */
+.shell :is(.btn, .linkbtn, .rail-keys, .place, .hint) kbd {
+	border-color: transparent;
+	padding-inline: 1px;
+	opacity: 0.7;
+}
+@media (min-width: 1260px) {
+	.shell {
+		grid-template-columns: var(--rail-w) minmax(0, 1fr);
+	}
 }
 
 /* Drawers and the app bar are off above their breakpoints. */
@@ -367,7 +440,7 @@ a {
 }
 .rv-list a:hover,
 .rv-contents a.cur {
-	background: var(--color-base-300);
+	background: var(--tint);
 }
 .rv-contents a.cur {
 	font-weight: 600;
@@ -461,14 +534,12 @@ a {
 .bar .state p {
 	margin: 0;
 }
-.bar .s1,
-.holding .s1 {
+.bar .s1 {
 	font-weight: 600;
 	line-height: 1.2;
 	margin: 0;
 }
-.bar .s2,
-.holding .s2 {
+.bar .s2 {
 	font-size: 0.875rem;
 	color: var(--color-muted);
 	margin: 2px 0 0;
@@ -520,20 +591,6 @@ a {
 }
 .bar .tooltip {
 	flex: none;
-}
-.holding {
-	flex: 1;
-	display: flex;
-	align-items: center;
-	gap: 12px 16px;
-	min-width: 0;
-}
-.holding .progress {
-	display: block;
-	width: 100%;
-	max-width: 24rem;
-	height: 6px;
-	margin-top: 6px;
 }
 .sendback {
 	border: 1px solid var(--color-base-300);
@@ -663,7 +720,8 @@ a {
 	height: 16px;
 	flex: none;
 	margin-top: 0.2rem;
-	transition: transform 0.15s;
+	/* Rule 3: a move glides in base time. */
+	transition: transform var(--motion-base) var(--motion-ease);
 }
 .frame details[open] > summary .chev {
 	transform: rotate(90deg);
@@ -962,13 +1020,13 @@ a {
 		transform: translateX(100%);
 		visibility: hidden;
 		transition:
-			transform 0.2s ease,
-			visibility 0s linear 0.2s;
+			transform var(--motion-base) var(--motion-ease),
+			visibility 0s linear var(--motion-base);
 	}
 	.review.open {
 		transform: none;
 		visibility: visible;
-		transition: transform 0.2s ease;
+		transition: transform var(--motion-base) var(--motion-ease);
 	}
 	.review .drawer-x {
 		display: grid;
@@ -990,13 +1048,13 @@ a {
 		transform: translateX(-100%);
 		visibility: hidden;
 		transition:
-			transform 0.2s ease,
-			visibility 0s linear 0.2s;
+			transform var(--motion-base) var(--motion-ease),
+			visibility 0s linear var(--motion-base);
 	}
 	.rail.open {
 		transform: none;
 		visibility: visible;
-		transition: transform 0.2s ease;
+		transition: transform var(--motion-base) var(--motion-ease);
 	}
 	.rail .drawer-x {
 		display: grid;
@@ -1067,9 +1125,6 @@ a {
 	.bar .s2 {
 		display: none;
 	}
-	.bar .holding {
-		grid-column: 1 / -1;
-	}
 	.place .where {
 		display: none;
 	}
@@ -1097,4 +1152,335 @@ a {
 	.rail {
 		transition: none !important;
 	}
+}
+
+/* The margin form, for a document review (comments prototype, round 3): no review pane. The page
+   and its comment margin are one unit, centered between the rail and the window edge, as a Docs
+   page and its comment column are. The place bar and the decision bar span the unit; below 1260px
+   the margin is a drawer from the right, opened from the place bar's Comments button. */
+:root {
+	--margin-w: 20rem;
+	--margin-gap: 28px;
+}
+@media (min-width: 1260px) and (max-width: 1439.98px) {
+	:root {
+		--margin-w: 17rem;
+		--margin-gap: 22px;
+	}
+}
+.frame.margin {
+	grid-template-columns: minmax(0, 1fr);
+}
+.frame.margin .work > .place {
+	display: flex;
+	margin-top: 18px;
+}
+.place .tools {
+	margin-left: auto;
+	display: inline-flex;
+	align-items: center;
+	gap: 8px 14px;
+	white-space: nowrap;
+}
+.place .open + .tools {
+	margin-left: 0;
+}
+.place .tools .linkbtn {
+	margin-left: 0;
+}
+.place .toc-wrap {
+	position: relative;
+}
+.unit {
+	display: block;
+	position: relative;
+}
+.ncount {
+	display: inline-block;
+	min-width: 1.3rem;
+	padding: 0 5px;
+	border-radius: 999px;
+	background: var(--color-base-300);
+	color: var(--color-base-content);
+	font-size: 0.8rem;
+	font-weight: 600;
+	text-align: center;
+	font-variant-numeric: tabular-nums;
+	text-decoration: none;
+}
+.mtitle {
+	display: flex;
+	gap: 8px;
+	align-items: center;
+	font-size: 0.8rem;
+	color: var(--color-muted);
+	padding: 7px 0;
+}
+.mtitle span:first-child {
+	font-weight: 600;
+	color: var(--color-base-content);
+	font-size: 0.9rem;
+}
+.review.margin .mcards {
+	position: relative;
+}
+.mempty {
+	color: var(--color-muted);
+	font-size: 0.92rem;
+	line-height: 1.45;
+	margin: 0;
+}
+.madd {
+	position: absolute;
+	z-index: 3;
+	box-shadow: var(--bar-shadow);
+	animation: fade var(--motion-base) var(--motion-ease-enter) both;
+}
+.madd svg,
+.cm-cbtn .btn svg {
+	width: 15px;
+	height: 15px;
+	fill: none;
+	stroke: currentColor;
+	stroke-width: 1.8;
+	stroke-linejoin: round;
+	stroke-linecap: round;
+}
+/* Rule 3: a card glides to its new place; rule 2: a new card enters with the rise. */
+.mcard {
+	transition:
+		top var(--motion-base) var(--motion-ease),
+		left var(--motion-base) var(--motion-ease),
+		right var(--motion-base) var(--motion-ease);
+}
+/* Transparent rather than hidden, so a new box can take focus before its first layout. */
+.mcard.unplaced {
+	opacity: 0;
+}
+.mcard.enter > .note {
+	animation: rise var(--motion-base) var(--motion-ease-enter) both;
+}
+/* Level 0 of the weight ladder: a margin card is ground, its kind rule at half strength. Level 2:
+   the current card takes the tint and its full rule. */
+.frame .mcard > .note {
+	background: transparent;
+	padding: 8px 10px 8px 14px;
+	transition: background-color var(--motion-quick) var(--motion-ease);
+}
+.frame .mcard > .note::before {
+	width: 2px;
+	border-radius: 1px;
+	opacity: 0.5;
+	transition: opacity var(--motion-quick) var(--motion-ease);
+}
+.frame .mcard.cur > .note {
+	background: var(--tint);
+}
+.frame .mcard.cur > .note::before {
+	opacity: 1;
+}
+.frame .mcard .note .side {
+	border-left: 0;
+	padding-left: 0;
+	margin: 6px 0 0;
+}
+.frame .note.cmt::before {
+	background: var(--color-primary);
+}
+.frame .note.cmt .nh .kind {
+	color: var(--color-primary);
+}
+.frame .note .nh .kind.tone-success {
+	color: var(--cairn-success-ink);
+}
+.frame .note .nh .kind.tone-info {
+	color: var(--cairn-info-ink);
+}
+.frame .note .nh .kind.tone-ink {
+	color: var(--color-base-content);
+}
+.frame .note .cacts {
+	display: flex;
+	gap: 4px;
+	margin-top: 4px;
+}
+/* A quiet action is a ghost button set flush with the text above it. */
+.frame .mcard .note .cacts .btn-ghost:first-child {
+	margin-left: -8px;
+}
+.frame .mcard .note .btn-ghost {
+	color: var(--color-muted);
+	font-weight: 600;
+}
+.frame .mcard .note .btn-ghost:hover {
+	background: var(--tint);
+	color: var(--color-base-content);
+}
+.frame .mcard .note .dacts .btn {
+	white-space: nowrap;
+}
+
+@media (min-width: 1260px) {
+	.frame.margin .sheet {
+		max-width: calc(var(--frame-text) + var(--margin-gap) + var(--margin-w));
+	}
+	.unit {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) var(--margin-w);
+		column-gap: var(--margin-gap);
+		align-items: stretch;
+	}
+	.place .comments-btn {
+		display: none;
+	}
+	.review.margin {
+		position: relative;
+		inset: auto;
+		width: auto;
+		transform: none;
+		visibility: visible;
+		background: none;
+		border: 0;
+		padding: 0;
+		z-index: auto;
+		display: flex;
+		flex-direction: column;
+		min-width: 0;
+		transition: none;
+	}
+	.review.margin .drawer-x {
+		display: none;
+	}
+	/* One rule per edge: the heading sits level with the editor bar, with no rule of its own. */
+	.review.margin .mtitle {
+		height: calc(1.2rem + 15px);
+	}
+	.review.margin .mcards {
+		flex: 1;
+	}
+	.review.margin .mcard {
+		position: absolute;
+		left: 0;
+		right: 0;
+	}
+	.review.margin .mcard.cur {
+		left: -10px;
+		right: 6px;
+	}
+	.review.margin .mempty {
+		padding-top: 10px;
+	}
+	.review.margin .madd {
+		left: 0;
+	}
+	.frame.margin .sheethead h1 {
+		max-width: 30ch;
+	}
+}
+@media (max-width: 1259.98px) {
+	.review.margin {
+		padding: 54px 16px 24px;
+		overflow: auto;
+	}
+	.review.margin .mtitle {
+		padding-top: 0;
+	}
+	.review.margin .madd {
+		display: none;
+	}
+	.review.margin .mcard {
+		margin-bottom: 12px;
+	}
+}
+@media (min-width: 1024px) {
+	.place .toc-wrap {
+		display: none;
+	}
+}
+
+/* The Contents menu in the place bar, below 1024px where the rail holding the outline is a drawer. */
+.toc {
+	position: absolute;
+	top: calc(100% + 4px);
+	right: 0;
+	z-index: 13;
+	width: min(26rem, 92vw);
+	max-height: 70vh;
+	overflow: auto;
+	margin: 0;
+	padding: 8px;
+	list-style: none;
+	background: var(--color-base-100);
+	border: 1px solid var(--color-base-300);
+	border-radius: var(--radius-box);
+	box-shadow: var(--bar-shadow);
+	white-space: normal;
+	animation: rise var(--motion-base) var(--motion-ease-enter) both;
+}
+/* The rail's outline: the open item's sections under its link, on the item's own rule. */
+.rail-toc {
+	list-style: none;
+	margin: 2px 0 8px 6px;
+	padding: 4px 0 4px 6px;
+	border-left: 1px solid var(--color-base-300);
+	display: grid;
+	gap: 1px;
+	min-width: 0;
+}
+.rail-toc li {
+	min-width: 0;
+}
+:is(.rail-toc, .toc) a {
+	display: flex;
+	gap: 6px;
+	align-items: baseline;
+	padding: 3px 8px;
+	border-radius: var(--radius-field);
+	color: var(--color-base-content);
+	text-decoration: none;
+	line-height: 1.35;
+	font-size: 0.9rem;
+}
+.toc a {
+	padding: 5px 8px;
+}
+:is(.rail-toc, .toc) a:hover,
+:is(.rail-toc, .toc) a.cur {
+	background: var(--tint);
+}
+:is(.rail-toc, .toc) a.cur {
+	font-weight: 600;
+}
+:is(.rail-toc, .toc) a.l3 {
+	padding-left: 22px;
+}
+:is(.rail-toc, .toc) .n {
+	color: var(--color-muted);
+	min-width: 1.5rem;
+	font-variant-numeric: tabular-nums;
+	flex: none;
+}
+:is(.rail-toc, .toc) a:is(:hover, .cur) .n {
+	color: color-mix(in oklab, var(--color-muted) 80%, var(--color-base-content));
+}
+:is(.rail-toc, .toc) .mk {
+	margin-left: auto;
+	width: 7px;
+	height: 7px;
+	border-radius: 50%;
+	flex: none;
+	align-self: center;
+}
+/* The ink, not the fill: the warning fill is too light to read as a dot on the light theme. */
+:is(.rail-toc, .toc) .mk.call {
+	background: var(--cairn-warning-ink);
+}
+:is(.rail-toc, .toc) .mk.fix {
+	background: var(--color-info);
+}
+:is(.rail-toc a, .toc a, .madd) {
+	transition:
+		color var(--motion-quick) var(--motion-ease),
+		background-color var(--motion-quick) var(--motion-ease),
+		border-color var(--motion-quick) var(--motion-ease);
 }

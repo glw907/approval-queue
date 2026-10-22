@@ -174,7 +174,8 @@ decide "$page_approve"
 assert_eq "$rc" "0" "page approve: exit code"
 assert_eq "$(cat "$root/out")" \
   "$(jq -cn --arg c "$approved_commit" --arg b "$approved_blob" --arg f "$FILE" --arg pr "$PR" \
-    '{decision: "approve", file: $f, commit: $c, blob: $b, pr: $pr, head: "head1111", calls: [{id: "D1", choice: "Keep the author'"'"'s wording"}, {id: "Q1", choice: "Keep it"}]}')" "page approve: stdout"
+    '{decision: "approve", file: $f, commit: $c, blob: $b, pr: $pr, head: "head1111", calls: [{id: "D1", choice: "Keep the author'"'"'s wording"}, {id: "Q1", choice: "Keep it"}],
+      comments: [], threads: []}')" "page approve: stdout"
 assert_eq "$(wc -l <"$log")" "1" "page approve: one log line"
 assert_eq "$(jq -c '[.kind,.ref,.lane,.verdict,.blob,.commit,.pr,.head,.waived[0].id,.initiative]' "$log")" \
   "[\"page\",\"sample:$FILE\",\"single\",\"approve\",\"$approved_blob\",\"$approved_commit\",\"$PR\",\"head1111\",\"D1\",null]" "page approve: log line"
@@ -199,7 +200,7 @@ queue page "$repo" T "$FILE" --pr "$PR"
 assert_eq "$(cat "$dir/notes.json")" "[]" "page no notes: empty notes.json"
 decide '{"decision":"reject","note":"Say what the table measures."}'
 assert_eq "$rc" "0" "page reject: exit code"
-assert_eq "$(cat "$root/out")" '{"decision":"reject","note":"Say what the table measures."}' "page reject: stdout"
+assert_eq "$(cat "$root/out")" '{"decision":"reject","note":"Say what the table measures.","calls":[],"comments":[],"threads":[]}' "page reject: stdout"
 head_blob=$(git -C "$repo" rev-parse "HEAD:$FILE")
 assert_eq "$(tail -n 1 "$log" | jq -c '[.kind,.verdict,.blob,.pr,.head]')" "[\"page\",\"reject\",\"$head_blob\",\"$PR\",null]" "page reject: log line"
 bash "$SCRIPT" approved --kind page "$FILE" "$head_blob"; assert_eq "$?" "1" "approved --kind page: a rejected blob"
@@ -256,18 +257,41 @@ printf 'head3333\n' >"$root/head"
 queue change "$CPR" "Retarget two links" --notes "$CHANGE/notes.json"
 decide '{"decision":"approve","calls":[{"id":"Q1","choice":"Keep it"}]}'
 assert_eq "$rc" "0" "change approve: exit code"
-assert_eq "$(cat "$root/out")" '{"decision":"approve","pr":"glw907/cairn-cms#77","head":"head3333","calls":[{"id":"Q1","choice":"Keep it"}]}' "change approve: stdout"
-assert_eq "$(tail -n 1 "$log" | jq -c '[.kind,.ref,.lane,.verdict,.head,.calls,.initiative]')" \
-  '["change","glw907/cairn-cms#77","single","approve","head3333",[{"id":"Q1","choice":"Keep it"}],null]' "change approve: log line"
+assert_eq "$(cat "$root/out")" '{"decision":"approve","pr":"glw907/cairn-cms#77","head":"head3333","calls":[{"id":"Q1","choice":"Keep it"}],"comments":[],"threads":[]}' "change approve: stdout"
+assert_eq "$(tail -n 1 "$log" | jq -c '[.kind,.ref,.lane,.verdict,.head,.calls,.initiative,.comments,.replies]')" \
+  '["change","glw907/cairn-cms#77","single","approve","head3333",[{"id":"Q1","choice":"Keep it"}],null,0,0]' "change approve: log line"
 bash "$SCRIPT" approved --kind page docs/extend/share-a-draft-preview.md head3333; assert_eq "$?" "1" "approved: a change line answers nothing"
 
+# A change's threads name their document, which must be one the change carries; an empty list is a valid one.
+share=docs/extend/share-a-draft-preview.md
+cthread=$(jq -nc --arg f "$share" '{id: "C1", status: "answered", text: "It is.", quote: "x", anchor: {quote: "x", prefix: "", suffix: "", from: 0, to: 1, commit: "head3333", file: $f}}')
+printf '[%s]\n' "$cthread" >"$root/change-replies.json"
+jq '.[0].anchor.file = "docs/other.md"' "$root/change-replies.json" >"$root/other-replies.json"
+jq 'del(.[0].anchor.file)' "$root/change-replies.json" >"$root/unnamed-replies.json"
+refuse "change replies on a file the PR does not change" "has threads on files that" change "$CPR" T --replies "$root/other-replies.json"
+refuse "change replies with no file" "needs an anchor file naming a changed document" change "$CPR" T --replies "$root/unnamed-replies.json"
+jq '. + .' "$root/change-replies.json" >"$root/dup-replies.json"
+refuse "change replies with a duplicate id" 'the id "C1" is used 2 times' change "$CPR" T --replies "$root/dup-replies.json"
+refuse "page replies naming a file" "has an anchor file" page "$repo" T "$FILE" --pr "$PR" --replies "$root/change-replies.json"
+
 printf 'head5555\n' >"$root/head"
-queue change "$CPR" "Retarget two links"
+echo '[]' >"$root/no-replies.json"
+queue change "$CPR" "Retarget two links" --replies "$root/no-replies.json"
 assert_eq "$(cat "$dir/notes.json")" "[]" "change no notes: empty notes.json"
-decide '{"decision":"reject","note":"Keep the old link."}'
+assert_eq "$(cat "$dir/replies.json")" "[]" "change empty replies: replies.json"
+comment=$(jq -nc --arg f "$share" '{id: "C2", text: "Why?", anchor: {quote: "x", prefix: "", suffix: "", from: 0, to: 1, commit: "head5555", file: $f}}')
+decide "{\"decision\":\"reject\",\"note\":\"Keep the old link.\",\"calls\":[{\"id\":\"Q1\",\"choice\":\"Keep it\"}],\"comments\":[$comment],\"threads\":[{\"id\":\"C1\",\"reply\":\"Thanks.\"}]}"
 assert_eq "$rc" "0" "change reject: exit code"
-assert_eq "$(cat "$root/out")" '{"decision":"reject","note":"Keep the old link."}' "change reject: stdout"
-assert_eq "$(tail -n 1 "$log" | jq -c '[.kind,.ref,.verdict,.head,.calls]')" '["change","glw907/cairn-cms#77","reject","head5555",null]' "change reject: log line"
+assert_eq "$(cat "$root/out")" \
+  "$(jq -cn --argjson c "$comment" '{decision: "reject", note: "Keep the old link.", calls: [{id: "Q1", choice: "Keep it"}], comments: [$c], threads: [{id: "C1", reply: "Thanks."}]}')" \
+  "change reject: stdout"
+assert_eq "$(tail -n 1 "$log" | jq -c '[.kind,.ref,.verdict,.head,.calls,.comments,.replies]')" '["change","glw907/cairn-cms#77","reject","head5555",null,1,1]' "change reject: log line"
+
+printf 'head6666\n' >"$root/head"
+queue change "$CPR" "Retarget two links" --replies "$root/change-replies.json"
+assert_eq "$(jq -c '[.[].anchor.file]' "$dir/replies.json")" "[\"$share\"]" "change replies: replies.json"
+decide '{"decision":"reject","note":""}'
+assert_eq "$rc" "0" "change reject with replies: exit code"
 
 # A PR with no blueprint or page is a pr-form item, not a change.
 cp "$CHANGE/diff.patch" "$root/full.patch"

@@ -2,10 +2,8 @@
 The decision bar every screen takes its decision in: "Send back with note" at the left, the state
 line, and the approval at the right, with the send-back note panel above it. It is markup only; the
 screen supplies the form around it and the buttons, so each screen names its own approval
-("Approve the packet", "Approve and merge") and keeps its own hold and lock rules.
-
-While a decision is held, the screen passes `hold` (the countdown and Undo) in place of the two
-buttons and sets `hideStatus`, which keeps the status line for screen readers only.
+("Approve the packet", "Approve and merge") and keeps its own lock rules. A decision's Undo lives
+in the layout's toast, not here, since the screen is gone by the time it counts down.
 -->
 <script lang="ts">
 	import type { Snippet } from 'svelte';
@@ -20,21 +18,17 @@ buttons and sets `hideStatus`, which keeps the status line for screen readers on
 		 * on the lead alone, so a count that changes as the reader types is not read aloud each time.
 		 */
 		status: Snippet;
-		/** The state line is read aloud only, because `hold` carries the visible text. */
-		hideStatus?: boolean;
 		/** The id the approval's `aria-describedby` points at. */
 		statusId?: string;
-		hold?: Snippet;
 		approve?: Snippet;
 	}
 
-	let { note, reject, status, hideStatus = false, statusId = 'bar-state', hold, approve }: Props = $props();
+	let { note, reject, status, statusId = 'bar-state', approve }: Props = $props();
 </script>
 
 {@render note?.()}
 <div class="bar">
 	{@render reject?.()}
-	<div id={statusId} class={['state', hideStatus && 'sr-only']}>{@render status()}</div>
-	{@render hold?.()}
+	<div id={statusId} class="state">{@render status()}</div>
 	{@render approve?.()}
 </div>

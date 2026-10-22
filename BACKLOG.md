@@ -4,6 +4,12 @@
 
 ## Medium
 
+- [ ] **#18** A decision goes out while the editor's last save failed `#bug` `#approval-queue` `#initiative:docs-system` *(2026-10-21)*
+  `decide` in `ItemPanel.svelte` never checks `review.saveFailed`, so an approve can post while the file on disk lacks Geoff's last edit. Refuse with a toast until a save lands, as an open comment box refuses. Found in the comments pass's A2 review; out of that pass's scope.
+
+- [ ] **#19** A held decision's Undo can be blocked, and a typed-URL decide on a held item is announced but ignored `#bug` `#approval-queue` `#initiative:docs-system` *(2026-10-21)*
+  From the comments pass's reviews. When the next item has a comment box holding text, the Undo's `goto` is cancelled by the open-box guard: the decision is still cancelled and nothing posts, but the reader stays put with only the "Save or cancel" toast, and the restore is left pending. Separately, a decision posted from a typed URL on an item already held is announced as held while `Held.hold` ignores it. Say why the Undo did not move, and refuse the second decision aloud.
+
 - [ ] **#10** Read the inline notes with a real screen reader `#improvement` `#approval-queue` `#initiative:docs-system` *(2026-10-21)*
   The notes and their choice buttons sit inside CodeMirror's `role="textbox"` (`approval-queue/src/lib/editor/setup.ts`). Tab reaches the buttons and nothing traps the keyboard, but NVDA and JAWS in focus mode may read the notes as plain text. The reviewed-pages accessibility review asked for a run with a real screen reader (its warning 10).
 
@@ -26,12 +32,15 @@
   When a session resends an item after a send-back (#13), the app should show the item against the version Geoff sent back. It already records that version's PR head or blob. The change belongs in the top-line narrative and the title. The title marks the item as a revision, and the headline and lede summarize what the revision changed in answer to each call, well enough to approve or send back from the summary alone. The diff since the send-back sits one level down, ahead of the full diff, for Geoff to open only when he wants the detail. The summary is the session's claim, so the brief checks should test it against that diff.
 
 - [ ] **#13** Give a send-back structured instructions the session can act on `#feature` `#approval-queue` *(2026-10-21)*
-  A reject returns only `{"decision":"reject","note"}`, so the session has to work out from free text what to change. LangChain's Agent Inbox has a "respond" outcome that sends the agent a reply it continues from. Add the same here: a send-back carrying the calls Geoff made, each with its anchor (part, file and line, or ask) and his instruction, in the decision JSON. The session then revises and queues the item again. PR #4 already records a send-back's calls, but only for display.
+  A reject returns only `{"decision":"reject","note"}`, so the session has to work out from free text what to change. LangChain's Agent Inbox has a "respond" outcome that sends the agent a reply it continues from. Add the same here: a send-back carrying the calls Geoff made, each with its anchor (part, file and line, or ask) and his instruction, in the decision JSON. The session then revises and queues the item again. PR #4 already records a send-back's calls, but only for display. Doc-kind half done in the comments pass; packet, PR, design, and triage remain.
 
 - [ ] **#1** The packet fingerprint omits each part's lane and each ask's bound part and rule `#improvement` `#approval-queue` `#initiative:approval-packets` *(2026-10-17)*
   `packetFingerprint` in `approval-queue/src/lib/server/packet-decision.ts` hashes refs, kinds, verdicts, heads, hashes, and each ask's title, labels, and tags. Rebinding an ask to another ask-bound part with the same question and labels keeps the fingerprint. The command's `jq` check closes this for authorization today, since lane and binding come from the stored `packet.json`. Add `a.part?.ref`, `a.rule`, and `p.lane`.
 
 ## Low
+
+- [ ] **#20** The comments pass's review suggestions not taken `#improvement` `#approval-queue` `#initiative:docs-system` *(2026-10-21)*
+  The delete toast's Undo lasts 6 s, which may be short for a screen-reader user (a11y W9); the highlight fills are a spec colour under 3:1 against the page (a11y W5); the comment chords match `e.code`, so on Dvorak or AZERTY they follow the QWERTY key position; `settled()` is awaited once before a decision's flush, so a comment op started during the flush is not awaited; `review.svelte.test.ts` has no case for `restore`, the gone-text path, `focusAfterRemoving`, or `cancelBox` during an op, which need a CodeMirror view the store tests do not build.
 
 - [ ] **#12** The review screens' optional Svelte and accessibility suggestions `#improvement` `#approval-queue` `#initiative:docs-system` *(2026-10-21)*
   From the reviewed-pages close review. Svelte: `$state.raw` for `DocReview.decided`, `starts`, and DocEditor's `view`; announce only save failures; move the headline's long-size threshold into `FrameHeader`; key `PaneList` rows on more than `href`; a note on why the custom enhance never calls `applyAction`; `App.PageData` in `app.d.ts`; rename the `blueprint` derived in `ItemPanel` to `docItem`. Accessibility: `aria-keyshortcuts` with `aria-hidden` key caps in buttons; `<th scope="row">` in the help sheet; a `nav` breadcrumb; `aria-describedby` on the send-back hint; an "opens in a new tab" cue; a heading for each note's header.

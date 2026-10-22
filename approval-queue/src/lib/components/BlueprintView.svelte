@@ -1,9 +1,11 @@
 <!-- @component
 The work of a blueprint review: what the reader is deciding and how to change the plan, as two
-closed rows, then the blueprint file in the document editor with its notes inline. The file is the
-real one in the session's worktree, so every pause in typing commits it there.
+closed rows, then the screen's place bar, then the blueprint file in the document editor with its
+comment margin beside it. The file is the real one in the session's worktree, so every pause in
+typing commits it there.
 -->
 <script lang="ts">
+	import type { Snippet } from 'svelte';
 	import type { DocReview } from '#lib/editor/review.svelte.ts';
 	import DocEditor from './DocEditor.svelte';
 	import PacketIcon from './PacketIcon.svelte';
@@ -12,9 +14,11 @@ real one in the session's worktree, so every pause in typing commits it there.
 		review: DocReview;
 		/** The blueprint's path in its worktree; the bar shows the file name. */
 		file: string;
+		/** The sticky place bar, which sits between the rows and the editor. */
+		place: Snippet;
 	}
 
-	let { review, file }: Props = $props();
+	let { review, file, place }: Props = $props();
 	const name = $derived(file.split('/').pop() ?? file);
 </script>
 
@@ -39,11 +43,17 @@ real one in the session's worktree, so every pause in typing commits it there.
 			is a point the page makes. A <code>:::row</code> block is one troubleshooting row. The <code>:fact[…]</code> tag ties
 			a line to the fact behind it, so leave it on the line it came with.
 		</p>
+		<p>
+			To ask the author for a change instead of making it, select the text, and a comment box opens beside it. To edit the selected
+			text instead, press Escape. Your comments go to the author with your decision.
+		</p>
 		<p>Each save is a commit in the session’s worktree. Ctrl+Z undoes, F8 moves to the next call for you, and Ctrl+Enter approves.</p>
 	</div>
 </details>
 
-<DocEditor {review} file={name} label="Blueprint {name}" yaml={/\.ya?ml$/.test(file)} />
+{@render place()}
+
+<DocEditor {review} file={name} label="Blueprint {name}" kindWord="blueprint" yaml={/\.ya?ml$/.test(file)} />
 
 <style>
 	code {

@@ -1,9 +1,9 @@
 <!-- @component
-One review note as it sits under its line in the document editor: a correction ("Corrected.") with
-what changed, or a call ("Your call.") with its sides and one button per choice. A decided call
-collapses to its outcome and a Reopen link. The editor mounts it inside a block widget, so it takes
-callbacks rather than binding state, and it is rebuilt whenever its decided or disabled state
-changes. The note itself takes programmatic focus, so a screen can land focus on it after a change.
+One review note as a card in the comment margin, level with the text it is about: a correction
+("Corrected.") with what changed and a Resolve button, or a call ("Your call.") with its sides and
+one button per choice. A decided call collapses to its outcome and a resolved correction to its
+title, each with a Reopen link. Resolving a correction changes no decision. The card takes
+programmatic focus, so a screen can land focus on it after a change.
 -->
 <script lang="ts">
 	import { codeSpans, wordDiff } from '#lib/editor/inline.ts';
@@ -13,16 +13,24 @@ changes. The note itself takes programmatic focus, so a screen can land focus on
 		note: Note;
 		/** The index of the chosen choice; undefined while the call is open. */
 		choice?: number;
-		/** The calls are frozen, as while a decision is held or once the item is decided. */
+		/** A correction collapsed in the margin. */
+		resolved?: boolean;
+		/** The calls are frozen, as once the item is decided. */
 		disabled?: boolean;
+		/** The card is current, so it takes the tint and its highlight deepens. */
+		current?: boolean;
 		onchoose: (index: number) => void;
+		/** Opens a decided call or a resolved correction again. */
 		onreopen: () => void;
+		onresolve: () => void;
 	}
 
-	let { note, choice, disabled = false, onchoose, onreopen }: Props = $props();
+	let { note, choice, resolved = false, disabled = false, current = false, onchoose, onreopen, onresolve }: Props = $props();
 
 	const head = $derived(note.kind === 'info' ? 'Corrected.' : 'Your call.');
-	const outcome = $derived(choice === undefined ? null : (note.choices?.[choice]?.done ?? 'Settled'));
+	const outcome = $derived(
+		choice !== undefined ? { head: 'Decided.', text: note.choices?.[choice]?.done ?? 'Settled' } : resolved ? { head: 'Resolved.', text: note.title } : null
+	);
 </script>
 
 {#snippet inline(text: string)}
@@ -30,14 +38,20 @@ changes. The note itself takes programmatic focus, so a screen can land focus on
 {/snippet}
 
 {#if outcome !== null}
-	<div role="group" class="note done collapsed" id="note-{note.id}" tabindex="-1" aria-label="Decided. {note.title}">
+	<div role="group" class="note done collapsed" id="note-{note.id}" tabindex="-1" aria-label="{outcome.head} {note.title}">
 		<p class="nh">
-			<span class="kind">Decided.</span><span class="outcome">{outcome}</span>
+			<span class="kind">{outcome.head}</span><span class="outcome">{outcome.text}</span>
 			<button type="button" class="linkbtn reopen" {disabled} onclick={onreopen}>Reopen</button>
 		</p>
 	</div>
 {:else}
-	<div role="group" class={['note', note.kind === 'info' ? 'info' : 'decide']} id="note-{note.id}" tabindex="-1" aria-label="{head} {note.title}">
+	<div
+		role="group"
+		class={['note', note.kind === 'info' ? 'info' : 'decide', current && 'cur']}
+		id="note-{note.id}"
+		tabindex="-1"
+		aria-label="{head} {note.title}"
+	>
 		<p class="nh"><span class="kind">{head}</span><span>{note.title}</span></p>
 		{#each note.body as para, i (i)}<p>{@render inline(para)}</p>{/each}
 		{#each note.sides ?? [] as side, i (i)}<div class="side"><b>{side.who}:</b> {@render inline(side.text)}</div>{/each}
@@ -54,6 +68,8 @@ changes. The note itself takes programmatic focus, so a screen can land focus on
 					<button type="button" class="choice" {disabled} onclick={() => onchoose(i)}>{c.label}</button>
 				{/each}
 			</div>
+		{:else if !disabled}
+			<div class="cacts"><button type="button" class="btn btn-ghost btn-sm" onclick={onresolve}>Resolve</button></div>
 		{/if}
 	</div>
 {/if}
@@ -68,15 +84,8 @@ changes. The note itself takes programmatic focus, so a screen can land focus on
 	.note:focus {
 		outline: none;
 	}
-	.note p,
-	.note .side {
-		max-width: 64ch;
-	}
 	.nh {
 		margin: 0 0 4px;
-	}
-	.collapsed {
-		padding-block: 6px;
 	}
 	.collapsed .nh {
 		margin: 0;
@@ -106,7 +115,7 @@ changes. The note itself takes programmatic focus, so a screen can land focus on
 	}
 	.choices {
 		display: grid;
-		gap: 6px;
+		gap: 4px 8px;
 		margin-top: 8px;
 	}
 	.choice {

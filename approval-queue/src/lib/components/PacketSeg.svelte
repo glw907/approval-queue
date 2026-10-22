@@ -5,7 +5,6 @@ form (`form="decision-form"`) and post as `part:<ref>`; `verdicts` is bound up s
 follow what changed.
 -->
 <script lang="ts">
-	import { desk } from '#lib/desk.svelte.ts';
 	import { VERDICT_LOOK, overrideOptions } from '#lib/packet-view.ts';
 
 	interface Props {
@@ -35,7 +34,7 @@ follow what changed.
 			value={option}
 			form="decision-form"
 			aria-label={VERDICT_LOOK[option].short}
-			disabled={desk.held || decided}
+			disabled={decided}
 			bind:group={verdicts[ref]}
 		/>
 	{/each}

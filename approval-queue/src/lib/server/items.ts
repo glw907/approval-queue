@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { link, open, readFile, readdir, rename, stat, unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Proposed, Triage } from '#lib/brief.ts';
+import type { Comment, Thread } from '#lib/editor/comments.ts';
 import type { Note } from '#lib/editor/notes.ts';
 import type { Packet } from '#lib/packet.ts';
 import { committed } from './blueprint.ts';
@@ -109,8 +110,15 @@ export type ItemContent =
 	| { kind: 'change'; body: string; diff: string; pr?: PrMeta; docs: ChangeDoc[]; notes: Note[] }
 	| ({ kind: 'triage' } & Triage);
 
+/** What a document review's decision carries to the author; present on the blueprint, page, and change kinds only. */
+export interface Carried {
+	comments?: Comment[];
+	/** Only the threads Geoff replied to; every other thread resolves at the decision. */
+	threads?: Array<{ id: string; reply: string }>;
+}
+
 export type Decision =
-	| {
+	| ({
 			decision: 'approve';
 			choices?: Array<{ title: string; choice: string }>;
 			/** A packet's per-part verdicts and per-ask answers; the command joins the heads and hashes. */
@@ -123,13 +131,13 @@ export type Decision =
 			/** A blueprint's worktree HEAD at approval, and the file's blob there. */
 			commit?: string;
 			blob?: string;
-	  }
-	| {
+	  } & Carried)
+	| ({
 			decision: 'reject';
 			note: string;
 			/** A document review's calls made before it was sent back, so the decided item shows them. */
 			calls?: Array<{ id: string; choice: string }>;
-	  }
+	  } & Carried)
 	| { decision: 'submit'; rows: SubmittedRow[] };
 
 export interface Item {
@@ -303,6 +311,45 @@ export async function writeDecision(root: string, id: string, decision: Decision
 	await writeFile(tmp, JSON.stringify(decision));
 	await rename(tmp, join(dir, 'decision.json'));
 }
+
+/** Geoff's side of a document review's comments, as `comments.json` in the item directory holds it. */
+export interface CommentStore {
+	comments: Comment[];
+	/** Geoff's reply to, or resolution of, a thread from `replies.json`; a thread with neither has no entry. */
+	threads: Array<{ id: string; reply?: string; resolved?: true }>;
+	/** The number in the next comment id, `C<next>`. It only grows, so a deleted id is never reused. */
+	next: number;
+}
+
+/** The author's replies the item was queued with (`--replies`), or none. */
+export async function readReplies(root: string, id: string): Promise<Thread[]> {
+	return (await readJson<Thread[]>(join(root, 'items', id, 'replies.json'))) ?? [];
+}
+
+/**
+ * Reads `comments.json`. An absent file is an empty store whose `next` is past the highest `C<n>`
+ * id in `replies.json`, so a new comment on a re-queued item never takes a thread's id.
+ */
+export async function readComments(root: string, id: string): Promise<CommentStore> {
+	const stored = await readJson<CommentStore>(join(root, 'items', id, 'comments.json'));
+	if (stored) return stored;
+	const taken = (await readReplies(root, id)).map((t) => Number(/^C(\d+)$/.exec(t.id)?.[1] ?? 0));
+	return { comments: [], threads: [], next: Math.max(0, ...taken) + 1 };
+}
+
+/** Writes `comments.json` through a temp file and `rename`, as `writeDecision` does. The caller holds the item's queue. */
+export async function writeComments(root: string, id: string, store: CommentStore): Promise<void> {
+	const dir = join(root, 'items', id);
+	const tmp = join(dir, 'comments.json.tmp');
+	await writeFile(tmp, JSON.stringify(store));
+	await rename(tmp, join(dir, 'comments.json'));
+}
+
+/** The comments and replied threads a decision carries to the author. */
+export const carried = (store: CommentStore): Required<Carried> => ({
+	comments: store.comments,
+	threads: store.threads.flatMap((t) => (t.reply === undefined ? [] : [{ id: t.id, reply: t.reply }]))
+});
 
 /**
  * Writes `decision.json` through a temp file named for this request, synced to disk, then `link`ed
