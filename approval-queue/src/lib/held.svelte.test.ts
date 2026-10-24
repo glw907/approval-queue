@@ -57,6 +57,16 @@ describe('Held', () => {
 		expect(store.ended).toBe('sent');
 	});
 
+	it('keeps the drafts of a deferred item, which comes back to the reader', async () => {
+		const { store, post, refresh } = setup();
+		desk.drafts.set('a', []);
+		store.hold(decision('a', 'defer'));
+		await vi.advanceTimersByTimeAsync(HOLD_MS);
+		expect(post).toHaveBeenCalledTimes(1);
+		expect(refresh).toHaveBeenCalledTimes(1);
+		expect(desk.drafts.has('a')).toBe(true);
+	});
+
 	it('sends nothing on Undo, opens the item again, and hands its decision back once', async () => {
 		const { store, post, open } = setup();
 		const d = decision('a');

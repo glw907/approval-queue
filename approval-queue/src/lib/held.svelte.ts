@@ -20,7 +20,7 @@ export interface HeldDecision {
 	/** The absolute form action `enhance` supplied, such as `http://127.0.0.1:7907/item/x?/approve`. */
 	href: string;
 	form: FormData;
-	outcome: 'approve' | 'reject' | 'submit';
+	outcome: 'approve' | 'reject' | 'submit' | 'defer';
 	toast: string;
 }
 
@@ -182,7 +182,8 @@ export class Held {
 		try {
 			const result = await this.#post(decision);
 			if (result.type === 'success') {
-				forget(decision.id);
+				// A deferred item comes back to the reader, so its draft and remembered calls stay.
+				if (decision.outcome !== 'defer') forget(decision.id);
 				await this.#deps.refresh();
 				return;
 			}
