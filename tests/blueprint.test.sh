@@ -18,8 +18,16 @@ assert_eq() {
   [ "$1" = "$2" ] || { echo "FAIL: $3: got '$1', want '$2'"; fail=1; }
 }
 
+# No packet id this test logged may appear in the live log. A leak fails by name; other sessions'
+# lines in the live log do not matter.
 live_log="$HOME/.local/state/approval-queue/decisions.jsonl"
-live_before=$(stat -c %s "$live_log" 2>/dev/null || echo none)
+live_leak() {
+  local pid
+  [ -e "$live_log" ] && [ -e "$log" ] || return 0
+  while IFS= read -r pid; do
+    if grep -qF "\"packet\":\"$pid\"" "$live_log"; then echo "FAIL: the test wrote packet $pid to the live log"; fail=1; fi
+  done < <(jq -r '.packet' "$log" | sort -u)
+}
 
 # Every blueprint and page takes a description of a background paragraph and one summary paragraph.
 DESC="$root/description.md"
@@ -230,6 +238,6 @@ queue blueprint "$repo" T "$FILE" --description "$DESC"
 assert_eq "$(jq -c '.revises.revision' "$dir/item.json")" "2" "revision: rounds before an approve do not count"
 decide '{"decision":"reject","note":""}'
 
-assert_eq "$(stat -c %s "$live_log" 2>/dev/null || echo none)" "$live_before" "the live log is untouched"
+live_leak
 [ "$fail" -eq 0 ] && echo "blueprint.test.sh: ok"
 exit "$fail"

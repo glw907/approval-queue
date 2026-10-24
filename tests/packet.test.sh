@@ -17,9 +17,16 @@ assert_eq() {
   [ "$1" = "$2" ] || { echo "FAIL: $3: got '$1', want '$2'"; fail=1; }
 }
 
-# The live log must come through the run untouched.
+# No packet id this test logged may appear in the live log. A leak fails by name; other sessions'
+# lines in the live log do not matter.
 live_log="$HOME/.local/state/approval-queue/decisions.jsonl"
-live_before=$(stat -c %s "$live_log" 2>/dev/null || echo none)
+live_leak() {
+  local pid
+  [ -e "$live_log" ] && [ -e "$log" ] || return 0
+  while IFS= read -r pid; do
+    if grep -qF "\"packet\":\"$pid\"" "$live_log"; then echo "FAIL: the test wrote packet $pid to the live log"; fail=1; fi
+  done < <(jq -r '.packet' "$log" | sort -u)
+}
 
 stubs="$root/stubs"
 mkdir -p "$stubs"
@@ -513,8 +520,7 @@ requeue packet drafter "$REVISED"
 assert_eq "$(jq -c '.revises.revision' "$dir/item.json")" "2" "revision: earlier rounds do not count after an approve"
 decide '{"decision":"reject","note":""}'
 
-live_after=$(stat -c %s "$live_log" 2>/dev/null || echo none)
-assert_eq "$live_after" "$live_before" "live decisions.jsonl untouched"
+live_leak
 
 [ "$fail" = 0 ] && echo "packet: ok"
 exit "$fail"
