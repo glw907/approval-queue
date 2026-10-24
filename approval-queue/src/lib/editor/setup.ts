@@ -401,12 +401,25 @@ export function replaceNoteText(view: EditorView, id: string, text: string) {
 	view.dispatch({ changes: { from: r[0], to: r[1], insert: text }, effects: rangeEffect.of({ id, range: [r[0], r[0] + text.length] }) });
 }
 
-/** Scrolls the window so `pos` sits below the sticky header, then puts the caret there or selects `to`. */
+/**
+ * Scrolls the window so `pos` sits below the sticky header, then puts the caret there or selects `to`.
+ * `lineBlockAt` is exact only for a line inside the rendered viewport and an estimate beyond it, so a
+ * line outside it is reached by a scroll target, which makes CodeMirror render and measure the lines
+ * first. That scroll is instant, which is the price of landing in the right place.
+ */
 export function jumpTo(view: EditorView, pos: number, to = pos) {
-	const top = window.scrollY + view.documentTop + view.lineBlockAt(pos).top - 140;
-	const smooth = !matchMedia('(prefers-reduced-motion: reduce)').matches;
-	window.scrollTo({ top, behavior: smooth ? 'smooth' : 'auto' });
-	view.dispatch({ selection: { anchor: pos, head: to } });
+	const rendered = pos >= view.viewport.from && pos <= view.viewport.to;
+	if (rendered) {
+		const top = window.scrollY + view.documentTop + view.lineBlockAt(pos).top - 140;
+		const smooth = !matchMedia('(prefers-reduced-motion: reduce)').matches;
+		window.scrollTo({ top, behavior: smooth ? 'smooth' : 'auto' });
+		view.dispatch({ selection: { anchor: pos, head: to } });
+	} else {
+		view.dispatch({
+			selection: { anchor: pos, head: to },
+			effects: EditorView.scrollIntoView(pos, { y: 'start', yMargin: 140 })
+		});
+	}
 	view.focus();
 }
 

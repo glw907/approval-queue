@@ -1,5 +1,8 @@
 // The review notes a document carries and the anchors that tie each one to a line. Pure functions,
 // shared by the server (which resolves the anchors once for the page) and the editor.
+import GithubSlugger from 'github-slugger';
+import { Lexer, type Token } from 'marked';
+import { place } from './comments.ts';
 import { directiveLineKind, directiveOpenerName, fenceScan, frontmatterSpan } from './directives.ts';
 
 export type NoteKind = 'info' | 'decide' | 'question';
@@ -19,7 +22,8 @@ export interface Note {
 	id: string;
 	/** `info` is a correction already made; `decide` and `question` are calls for the reader. */
 	kind: NoteKind;
-	anchor: string;
+	/** A name from `anchors()`, or a quote the document holds, with optional context to settle a repeat. */
+	anchor: string | { quote: string; prefix?: string; suffix?: string };
 	title: string;
 	body: string[];
 	was?: string;
@@ -42,11 +46,35 @@ export type PlacedNote = Note & { range: Range | null };
 /** Whether a note asks the reader for a choice. */
 export const isCall = (note: Note) => note.kind !== 'info';
 
+/** The text a heading renders as, which rehype-slug slugs: inline Markdown reduced to its words. */
+function plainText(tokens: Token[]): string {
+	return tokens
+		.map((t) => {
+			if (t.type === 'image' || t.type === 'html' || t.type === 'br') return '';
+			if ('tokens' in t && t.tokens) return plainText(t.tokens);
+			return 'text' in t ? t.text : '';
+		})
+		.join('');
+}
+
+/** The slug the page gives a heading, taking `-1`, `-2` for a repeat the way the page does. */
+type Slugger = (heading: string) => string;
+
 /**
- * A heading's anchor slug: inline-code backticks dropped, lowercased, each run of characters other
- * than a-z and 0-9 replaced by one hyphen, and hyphens trimmed from both ends.
+ * One slugger per document, as rehype-slug runs one per page. A blueprint's slugs the front matter's
+ * `page` first, as drafter does, so a heading that repeats the title takes `-1`.
  */
-export function slug(text: string): string {
+function sluggerFor(doc: string, kind: DocKind): Slugger {
+	const github = new GithubSlugger();
+	if (kind === 'blueprint') {
+		const title = frontMatter(doc).page;
+		if (title) github.slug(title);
+	}
+	return (heading) => github.slug(plainText(new Lexer().inlineTokens(heading)));
+}
+
+/** The slug the first version of this tool gave a heading, which notes written then still use. */
+function oldSlug(text: string): string {
 	return text
 		.replace(/`/g, '')
 		.toLowerCase()
@@ -71,69 +99,107 @@ function textSpan(line: string, from: number, start: number): Range {
  * is the n-th item under that heading, counting from 0 over its top-level bullets, numbered steps,
  * and `:::row` blocks in one sequence; `<slug>.p<n>.<part>` is a row's `**Part.**` line, lowercased.
  * Each heading counts its own items, so items under a deeper heading belong to it. Front matter,
- * code blocks, and lines inside other directive containers define nothing. The first heading with
- * a slug keeps it.
+ * code blocks, and lines inside other directive containers define nothing. Slugs follow the page's
+ * rule (see `sluggerFor`), so a repeated heading takes `-1`, `-2`. A key spelled with the first
+ * version's slug resolves too, unless a current key holds that name.
  */
 export function anchors(doc: string, kind: DocKind = 'blueprint'): Map<string, Range> {
-	if (kind === 'page') return pageAnchors(doc);
+	const { out, alias } = scan(doc, kind);
+	for (const [key, range] of alias) if (!out.has(key)) out.set(key, range);
+	return out;
+}
+
+/** The headings `anchors()` names with the current rule, each as its slug and its text. */
+export function headingList(doc: string, kind: DocKind = 'blueprint'): Array<{ slug: string; text: string }> {
+	return [...scan(doc, kind).out]
+		.filter(([key]) => key.endsWith('.heading'))
+		.map(([key, [from, to]]) => ({ slug: key.slice(0, -'.heading'.length), text: doc.slice(from, to) }));
+}
+
+/** The anchors by the current rule, and those by the first version's rule that differ from them. */
+interface Scan {
+	out: Map<string, Range>;
+	alias: Map<string, Range>;
+}
+
+/** Records a key under the current slug and, where the first version's slug differs, under that. */
+function recorder(out: Map<string, Range>, alias: Map<string, Range>) {
+	let section = '';
+	let old = '';
+	return {
+		enter(name: string, oldName: string) {
+			section = name;
+			old = oldName;
+		},
+		put(suffix: string, range: Range) {
+			const key = section + suffix;
+			if (!out.has(key)) out.set(key, range);
+			const oldKey = old + suffix;
+			if (oldKey !== key && !alias.has(oldKey)) alias.set(oldKey, range);
+		},
+		// Replaces the range of a key this section already holds, as a growing page block does.
+		set(suffix: string, range: Range) {
+			out.set(section + suffix, range);
+			if (old !== section) alias.set(old + suffix, range);
+		}
+	};
+}
+
+function scan(doc: string, kind: DocKind): Scan {
+	if (kind === 'page') return scanPage(doc);
 	const out = new Map<string, Range>();
+	const alias = new Map<string, Range>();
+	const rec = recorder(out, alias);
+	const slugOf = sluggerFor(doc, kind);
 	const lines = doc.split('\n');
-	const scan = fenceScan(lines);
+	const scanned = fenceScan(lines);
 	const front = frontmatterSpan(doc);
-	let section: string | null = null;
+	let inSection = false;
 	let n = 0;
-	let row: { key: string; from: number } | null = null;
+	let row: { suffix: string; from: number } | null = null;
 	let offset = 0;
 	for (const [i, line] of lines.entries()) {
 		const from = offset;
 		offset += line.length + 1;
-		if ((front && from < front.to) || scan.inCode[i]) continue;
-		const depth = scan.depths[i];
-		const role = scan.roles[i];
+		if ((front && from < front.to) || scanned.inCode[i]) continue;
+		const depth = scanned.depths[i];
+		const role = scanned.roles[i];
 		if (role === 'opener' && depth === 1) {
-			if (section !== null && directiveOpenerName(line) === 'row') {
-				row = { key: `${section}.p${n++}`, from };
+			if (inSection && directiveOpenerName(line) === 'row') {
+				row = { suffix: `.p${n++}`, from };
 			}
 			continue;
 		}
 		if (role === 'closer' && depth === 1) {
-			if (row && !out.has(row.key)) out.set(row.key, [row.from, from + line.length]);
+			if (row) rec.put(row.suffix, [row.from, from + line.length]);
 			row = null;
 			continue;
 		}
 		if (depth !== null) {
 			const part = row && PART.exec(line);
-			if (row && part) {
-				const key = `${row.key}.${part[1].toLowerCase()}`;
-				if (!out.has(key)) out.set(key, textSpan(line, from, part[0].length));
-			}
+			if (row && part) rec.put(`${row.suffix}.${part[1].toLowerCase()}`, textSpan(line, from, part[0].length));
 			continue;
 		}
 		const heading = HEADING.exec(line);
 		if (heading) {
-			const name = slug(heading[2]);
-			section = name;
+			const name = slugOf(heading[2]);
+			rec.enter(name, oldSlug(heading[2]));
+			inSection = true;
 			n = 0;
-			const key = `${name}.heading`;
 			const [start, end] = heading.indices![2]!;
-			if (name && !out.has(key)) out.set(key, [from + start, from + end]);
+			if (name) rec.put('.heading', [from + start, from + end]);
 			continue;
 		}
 		const item = ITEM.exec(line);
-		if (item && section !== null) {
-			const key = `${section}.p${n++}`;
-			if (!out.has(key)) out.set(key, textSpan(line, from, item[0].length));
-		}
+		if (item && inSection) rec.put(`.p${n++}`, textSpan(line, from, item[0].length));
 	}
-	return out;
+	return { out, alias };
 }
 
 interface PageBlock {
-	key: string;
+	suffix: string;
 	start: number;
 	kind: 'para' | 'item' | 'table';
-	/** The heading's slug was already taken, so the block defines nothing. */
-	dead: boolean;
 }
 
 const TABLE = /^\s{0,3}\|/;
@@ -146,44 +212,44 @@ const INDENTED = /^(?: {2,}|\t)\S/;
  * under that heading, counting from 0 over its paragraphs, top-level list items, and tables in one
  * sequence. A paragraph or table spans its lines; a list item spans from its text to the end of its
  * indented continuation and nested items. Blank lines, front matter, code blocks, rules, and
- * directive containers and leaves count for nothing. The first heading with a slug keeps it.
+ * directive containers and leaves count for nothing.
  */
-function pageAnchors(doc: string): Map<string, Range> {
+function scanPage(doc: string): Scan {
 	const out = new Map<string, Range>();
+	const alias = new Map<string, Range>();
+	const rec = recorder(out, alias);
+	const slugOf = sluggerFor(doc, 'page');
 	const lines = doc.split('\n');
-	const scan = fenceScan(lines);
+	const scanned = fenceScan(lines);
 	const front = frontmatterSpan(doc);
-	let section: string | null = null;
+	let inSection = false;
 	let n = 0;
 	let block: PageBlock | null = null as PageBlock | null;
 	// The block a blank line closed, which an indented line right after the blank still belongs to.
 	let item = null as PageBlock | null;
 	let offset = 0;
-	const open = (kind: PageBlock['kind'], start: number): PageBlock => {
-		const key = `${section}.p${n++}`;
-		return { key, start, kind, dead: out.has(key) };
-	};
+	const open = (kind: PageBlock['kind'], start: number): PageBlock => ({ suffix: `.p${n++}`, start, kind });
+	// A block grows line by line, so its range is set again as each line joins it.
 	const extend = (b: PageBlock, line: string, from: number) => {
-		if (b.dead) return;
 		const tail = TRAILING_FACTS.exec(line);
-		out.set(b.key, [b.start, from + (tail ? tail.index : line.trimEnd().length)]);
+		rec.set(b.suffix, [b.start, from + (tail ? tail.index : line.trimEnd().length)]);
 	};
 	for (const [i, line] of lines.entries()) {
 		const from = offset;
 		offset += line.length + 1;
-		if ((front && from < front.to) || scan.inCode[i] || CODE_DELIMITER.test(line) || scan.depths[i] !== null || directiveLineKind(line) === 'leaf') {
+		if ((front && from < front.to) || scanned.inCode[i] || CODE_DELIMITER.test(line) || scanned.depths[i] !== null || directiveLineKind(line) === 'leaf') {
 			block = item = null;
 			continue;
 		}
 		const heading = HEADING.exec(line);
 		if (heading) {
 			block = item = null;
-			const name = slug(heading[2]);
-			section = name;
+			const name = slugOf(heading[2]);
+			rec.enter(name, oldSlug(heading[2]));
+			inSection = true;
 			n = 0;
-			const key = `${name}.heading`;
 			const [start, end] = heading.indices![2]!;
-			if (name && !out.has(key)) out.set(key, [from + start, from + end]);
+			if (name) rec.put('.heading', [from + start, from + end]);
 			continue;
 		}
 		if (line.trim() === '') {
@@ -191,7 +257,7 @@ function pageAnchors(doc: string): Map<string, Range> {
 			block = null;
 			continue;
 		}
-		if (section === null || RULE.test(line)) {
+		if (!inSection || RULE.test(line)) {
 			block = item = null;
 			continue;
 		}
@@ -212,13 +278,18 @@ function pageAnchors(doc: string): Map<string, Range> {
 		}
 		extend(block!, line, from);
 	}
-	return out;
+	return { out, alias };
 }
 
 /** Places each note on its anchor's range; a note whose anchor names nothing gets a null range. */
 export function placeNotes(doc: string, notes: readonly Note[], kind: DocKind = 'blueprint'): PlacedNote[] {
 	const found = anchors(doc, kind);
-	return notes.map((note) => ({ ...note, range: found.get(note.anchor) ?? null }));
+	return notes.map((note) => {
+		const { anchor } = note;
+		if (typeof anchor === 'string') return { ...note, range: found.get(anchor) ?? null };
+		const at = place(doc, { quote: anchor.quote, prefix: anchor.prefix ?? '', suffix: anchor.suffix ?? '', from: 0, to: 0, commit: '' });
+		return { ...note, range: at ? ([at.from, at.to] as Range) : null };
+	});
 }
 
 /** One `##` or `###` heading, for the outline. */

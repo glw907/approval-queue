@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { codeSpans, wordDiff } from './inline.ts';
-import { anchors, frontMatter, outline, placeNotes, slug, type Note } from './notes.ts';
+import { anchors, frontMatter, headingList, outline, placeNotes, type Note } from './notes.ts';
 
 const DOC = readFileSync(new URL('../fixtures/sample.blueprint.md', import.meta.url), 'utf8');
 const NOTES = JSON.parse(readFileSync(new URL('../fixtures/sample-notes.json', import.meta.url), 'utf8')) as Note[];
@@ -10,14 +10,47 @@ const at = (name: string) => {
 	return r && DOC.slice(r[0], r[1]);
 };
 
-describe('slug', () => {
+const slugs = (headings: string[], kind: 'blueprint' | 'page' = 'page') =>
+	headingList(headings.map((h) => `## ${h}\n`).join('\n'), kind).map((h) => h.slug);
+
+describe('heading slugs', () => {
 	it.each([
 		['Read the build log', 'read-the-build-log'],
-		['`admin.action.session_absent`', 'admin-action-session-absent'],
-		['`event.platform` is undefined', 'event-platform-is-undefined'],
-		['The `site-facts.json` check was skipped', 'the-site-facts-json-check-was-skipped'],
-		['  Trim -- these!  ', 'trim-these']
-	])('%s gives %s', (text, want) => expect(slug(text)).toBe(want));
+		["Set a section's starting state", 'set-a-sections-starting-state'],
+		['`admin.action.session_absent`', 'adminactionsession_absent'],
+		['The `site-facts.json` check was skipped', 'the-site-factsjson-check-was-skipped'],
+		['use foo_bar-_x_', 'use-foo_bar-x'],
+		['a [link](http://x)', 'a-link']
+	])('%s gives %s', (text, want) => expect(slugs([text])).toEqual([want]));
+
+	it('gives a repeated heading -1, -2, as the page does', () => {
+		expect(slugs(['Same', 'Other', 'Same', 'Same'])).toEqual(['same', 'other', 'same-1', 'same-2']);
+	});
+
+	it('seeds a blueprint with its page title, and a page with nothing', () => {
+		const doc = '---\npage: Fix a slow build\n---\n\n# Fix a slow build\n';
+		expect(headingList(doc, 'blueprint').map((h) => h.slug)).toEqual(['fix-a-slow-build-1']);
+		expect(headingList(doc, 'page').map((h) => h.slug)).toEqual(['fix-a-slow-build']);
+	});
+
+	it('still resolves the first version’s spelling to the same range', () => {
+		const doc = "## Set a section's starting state\n\n- First.\n- Second.\n\n## `Run` it\n\n- Third.\n";
+		for (const kind of ['blueprint', 'page'] as const) {
+			const found = anchors(doc, kind);
+			for (const suffix of ['.heading', '.p0', '.p1']) {
+				expect(found.get(`set-a-section-s-starting-state${suffix}`)).toEqual(found.get(`set-a-sections-starting-state${suffix}`));
+			}
+			expect(found.get('set-a-sections-starting-state.p1')).toBeDefined();
+			expect(found.get('run-it.p0')).toBeDefined();
+		}
+	});
+
+	it('lets a current key win over an alias of the same name', () => {
+		const doc = "## A'b\n\n- One.\n\n## A b\n\n- Two.\n";
+		const found = anchors(doc, 'page');
+		expect(doc.slice(...found.get('a-b.p0')!)).toBe('Two.');
+		expect(doc.slice(...found.get('ab.p0')!)).toBe('One.');
+	});
 });
 
 describe('anchors', () => {
@@ -88,11 +121,12 @@ describe('anchors of a page', () => {
 		expect(onPage('cache-the-resized-images.p1')).toBe('See [the cache guide](cache.md).');
 	});
 
-	it('keeps the first heading with a slug', () => {
+	it('gives a repeated heading its own -1 key, and the first keeps the plain one', () => {
 		const doc = '## Same\n\nFirst.\n\n## Same\n\nSecond.\n';
 		const found = anchors(doc, 'page');
 		expect(doc.slice(...found.get('same.p0')!)).toBe('First.');
-		expect(found.size).toBe(2);
+		expect(doc.slice(...found.get('same-1.p0')!)).toBe('Second.');
+		expect(found.size).toBe(4);
 	});
 
 	it('does not read the blueprint scheme on a page, nor the page scheme on a blueprint', () => {
@@ -102,6 +136,46 @@ describe('anchors of a page', () => {
 });
 
 describe('placeNotes', () => {
+	const NOTE: Note = { id: 'Q', kind: 'info', anchor: '', title: 't', body: [] };
+	const quoted = (doc: string, anchor: Note['anchor'], kind: 'blueprint' | 'page' = 'blueprint') => {
+		const r = placeNotes(doc, [{ ...NOTE, anchor }], kind)[0].range;
+		return r && doc.slice(r[0], r[1]);
+	};
+
+	it('places a quote on a bullet, a reader-block line, and a heading', () => {
+		expect(quoted(DOC, { quote: 'A step over a minute' })).toBe('A step over a minute');
+		expect(quoted(DOC, { quote: 'A developer whose site builds slowly' })).toBe('A developer whose site builds slowly');
+		expect(quoted(DOC, { quote: 'Find the slow step' })).toBe('Find the slow step');
+	});
+
+	it('settles a repeated quote by its prefix, else takes the first', () => {
+		const doc = '## A\n\n- Sort by time.\n- Open it. Sort by time.\n';
+		const first = placeNotes(doc, [{ ...NOTE, anchor: { quote: 'Sort by time' } }])[0].range!;
+		const second = placeNotes(doc, [{ ...NOTE, anchor: { quote: 'Sort by time', prefix: 'Open it. ' } }])[0].range!;
+		expect(first[0]).toBe(doc.indexOf('Sort by time'));
+		expect(second[0]).toBe(doc.lastIndexOf('Sort by time'));
+		const suffixed = placeNotes(doc, [{ ...NOTE, anchor: { quote: 'Sort by time', suffix: '.\n- Open' } }])[0].range!;
+		expect(suffixed[0]).toBe(first[0]);
+	});
+
+	it('leaves a quote that matches nothing unplaced', () => {
+		expect(placeNotes(DOC, [{ ...NOTE, anchor: { quote: 'not in the document' } }])[0].range).toBeNull();
+	});
+
+	it('keeps a quote note on its line when a bullet above it splits, while a p<n> note below moves', () => {
+		const before = '## Steps\n\n- One.\n- Two.\n- Three target.\n';
+		const after = '## Steps\n\n- One.\n- Split.\n- Two.\n- Three target.\n';
+		const notes: Note[] = [
+			{ ...NOTE, id: 'A', anchor: { quote: 'Three target' } },
+			{ ...NOTE, id: 'B', anchor: 'steps.p2' }
+		];
+		const lineOf = (doc: string, id: string) => doc.slice(0, placeNotes(doc, notes).find((n) => n.id === id)!.range![0]).split('\n').length;
+		expect(lineOf(after, 'A')).toBe(lineOf(before, 'A') + 1);
+		expect(quoted(after, { quote: 'Three target' })).toBe('Three target');
+		expect(quoted(after, 'steps.p2')).toBe('Two.');
+		expect(quoted(before, 'steps.p2')).toBe('Three target.');
+	});
+
 	it('places a page’s notes with the page scheme', () => {
 		const placed = placeNotes(PAGE, PAGE_NOTES, 'page');
 		const text = (id: string) => {
