@@ -14,19 +14,22 @@ and refuses a post that leaves one unanswered. Renders nothing for a packet with
 	import { splitLead } from '#lib/prose.ts';
 	import type { PageData } from '../../routes/item/[id=id]/$types';
 	import PacketIcon from './PacketIcon.svelte';
+	import PartFiles from './PartFiles.svelte';
 	import Prose from './Prose.svelte';
 
 	type Ask = Extract<PageData, { kind: 'packet' }>['asks'][number];
 
 	interface Props {
 		asks: Ask[];
+		/** Every part, which carries the files an ask's bound part changed since the send-back. */
+		parts: Extract<PageData, { kind: 'packet' }>['parts'];
 		/** The label picked for each ask, by the ask's number counting from 1. */
 		answers: Record<number, string | undefined>;
 		/** A decided packet shows its asks but locks every choice. */
 		decided: boolean;
 	}
 
-	let { asks, answers = $bindable({}), decided }: Props = $props();
+	let { asks, parts, answers = $bindable({}), decided }: Props = $props();
 
 	const answered = $derived(asks.filter((a) => answers[a.index] !== undefined).length);
 </script>
@@ -52,6 +55,10 @@ and refuses a post that leaves one unanswered. Renders nothing for a packet with
 					</h3>
 					{#if ask.part}
 						<p class="ask-part">{refKind(ask.part)} · <code>{ask.part}</code></p>
+						{@const bound = parts.find((p) => p.ref === ask.part)}
+						{#if bound?.kind === 'pr' && bound.since}
+							<PartFiles groups={bound.groups ?? []} since={bound.since} />
+						{/if}
 					{/if}
 					<p class="summary"><Prose text={ask.summary} /></p>
 

@@ -12,6 +12,7 @@ omits one. Renders nothing for a packet with no routine parts.
 	import { refKind } from '#lib/packet-view.ts';
 	import type { PageData } from '../../routes/item/[id=id]/$types';
 	import PacketIcon from './PacketIcon.svelte';
+	import PartFiles from './PartFiles.svelte';
 	import PacketSeg from './PacketSeg.svelte';
 	import Prose from './Prose.svelte';
 
@@ -77,18 +78,13 @@ omits one. Renders nothing for a packet with no routine parts.
 											<a class="link" href={part.link.url} target="_blank" rel="noopener noreferrer">GitHub</a>
 										</p>
 									{/if}
-									<dl class="mt-1 grid grid-cols-[max-content_1fr] gap-x-3 gap-y-0.5 text-[0.85rem]">
+									<dl class="mt-1 grid grid-cols-[5.5rem_1fr] gap-x-3 gap-y-0.5 text-[0.85rem]">
 										<dt>Checks</dt>
 										<dd>{part.checks?.text ?? 'None.'}</dd>
 										<dt>Review</dt>
 										<dd>{part.review ?? 'Not stated.'}</dd>
-										<dt>Files</dt>
-										<dd class="tabular-nums">
-											{part.groups?.reduce((n, g) => n + g.files.length, 0) ?? 0} in {part.groups?.length ?? 0}
-											{plural(part.groups?.length ?? 0, 'group', 'groups')}:
-											{part.groups?.map((g) => g.name).join(', ')}
-										</dd>
 									</dl>
+									<PartFiles groups={part.groups ?? []} since={part.since} />
 								{:else if part?.kind === 'design' && part.doc}
 									<!-- svelte-ignore a11y_no_noninteractive_tabindex: a sideways-scrolling excerpt needs the keyboard to reach it -->
 									<pre class="evidence-code" role="region" tabindex="0" aria-label="The design, scrolls sideways"><code>{part.doc}</code></pre>
