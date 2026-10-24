@@ -16,9 +16,11 @@ typing commits it there.
 		file: string;
 		/** The sticky place bar, which sits between the rows and the editor. */
 		place: Snippet;
+		/** The approved text this file amends; set, the editor shows the diff since it. */
+		amend?: string;
 	}
 
-	let { review, file, place }: Props = $props();
+	let { review, file, place, amend }: Props = $props();
 	const name = $derived(file.split('/').pop() ?? file);
 </script>
 
@@ -53,7 +55,7 @@ typing commits it there.
 
 {@render place()}
 
-<DocEditor {review} file={name} label="Blueprint {name}" kindWord="blueprint" yaml={/\.ya?ml$/.test(file)} />
+<DocEditor {review} {amend} file={name} label="Blueprint {name}" kindWord="blueprint" yaml={/\.ya?ml$/.test(file)} />
 
 <style>
 	code {

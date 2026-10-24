@@ -15,7 +15,7 @@ this session" until the queue reload lists it there itself.
 	import { page } from '$app/state';
 	import { onMount } from 'svelte';
 	import { fade } from 'svelte/transition';
-	import { age, SINGLES } from '#lib/board.ts';
+	import { age, DEFERRED, SINGLES } from '#lib/board.ts';
 	import { closeDrawers, closeDrawersForLink, setDrawer } from '#lib/components/frame/drawers.ts';
 	import { desk } from '#lib/desk.svelte.ts';
 	import { held } from '#lib/held.svelte.ts';
@@ -24,7 +24,7 @@ this session" until the queue reload lists it there itself.
 	let { children, data } = $props();
 
 	const KINDS = { pr: 'PR', design: 'Design', triage: 'Triage', packet: 'Packet', blueprint: 'Blueprint', page: 'Page', change: 'Change' };
-	const OUTCOMES = { approve: 'Approved', reject: 'Sent back', submit: 'Submitted' };
+	const OUTCOMES = { approve: 'Approved', reject: 'Sent back', submit: 'Submitted', defer: 'Deferred' };
 
 	let sheet: HTMLDialogElement;
 	let railButton = $state<HTMLButtonElement>();
@@ -43,17 +43,20 @@ this session" until the queue reload lists it there itself.
 		return [...mine, ...listed];
 	});
 
-	/** The queue by initiative, with every item that is not a packet under "Single items" last. */
+	/** The queue by initiative, then "Single items", then "Deferred", the order the board uses. */
 	const sidebar = $derived.by(() => {
 		const initiativeOf = (item: (typeof data.queue)[number]) =>
-			item.kind !== 'packet'
+			item.deferred
+				? DEFERRED
+				: item.kind !== 'packet'
 				? SINGLES
 				: item.initiativeTitle || (item.initiative && item.initiative !== 'none' ? item.initiative : 'No initiative');
+		const rank = (title: string) => (title === DEFERRED ? 2 : title === SINGLES ? 1 : 0);
 		const groups = new Map<string, typeof waiting>();
 		for (const item of waiting) groups.set(initiativeOf(item), [...(groups.get(initiativeOf(item)) ?? []), item]);
 		return [...groups]
 			.map(([title, items]) => ({ title, items }))
-			.sort((a, b) => Number(a.title === SINGLES) - Number(b.title === SINGLES));
+			.sort((a, b) => rank(a.title) - rank(b.title));
 	});
 
 	type SheetRow = { keys: string[]; text: string; single?: boolean };

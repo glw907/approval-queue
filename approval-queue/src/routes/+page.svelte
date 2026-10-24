@@ -5,7 +5,8 @@ order; picking a sort writes the cookie and reorders here, and the 2-second poll
 rows without moving the reader. Row links replace the history entry, so the empty state's
 `window.close()` keeps working. Each row's one link stretches over the row, so a row is one tab
 stop and the whole row is the target. An item whose decision `held` is counting down or posting
-is left off, and the empty state shows once nothing else waits.
+is left off, and the empty state shows once nothing else waits. A deferred row sits under
+"Deferred"; an orphaned row says no session is waiting for its answer.
 -->
 <script lang="ts">
 	import { age, boardGroups, SORT_COOKIE, type Sort } from '#lib/board.ts';
@@ -110,6 +111,9 @@ is left off, and the empty state shows once nothing else waits.
 												</span>
 											{/if}
 										</div>
+										{#if row.orphaned}
+											<p class="desk-muted mt-0.5 text-[0.8rem]">No session is waiting for this.</p>
+										{/if}
 									</td>
 									<td role="cell" class="num align-top">
 										{#if row.single}<span class="desk-muted">&ndash;</span>{:else}<span class={row.asks ? 'font-semibold' : 'desk-muted'}>{row.asks}</span>{/if}

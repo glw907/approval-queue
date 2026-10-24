@@ -762,6 +762,7 @@ for that save first, and closing the tab then asks before leaving.
 			if (n) return `Sent back with ${plural(n, 'comment')}. The author will answer ${n === 1 ? 'it' : 'them'} and queue the ${docWord} again.`;
 			return noteText.trim() ? `Sent ${subject()} back with a note.` : `Sent ${subject()} back.`;
 		}
+		if (action.search === '?/defer') return `Deferred ${subject()}. It waits under Deferred.`;
 		return `Submitted ${rows.length} calls.`;
 	}
 
@@ -784,14 +785,23 @@ for that save first, and closing the tab then asks before leaving.
 			// the blob that save returned rather than the one the form rendered with.
 			if (review) {
 				await review.flush();
-				const refusal = heldBySave(review, action.search === '?/reject' ? 'reject' : 'approve');
-				if (refusal) {
-					desk.announce(refusal);
-					return;
+				if (action.search !== '?/defer') {
+					const refusal = heldBySave(review, action.search === '?/reject' ? 'reject' : 'approve');
+					if (refusal) {
+						desk.announce(refusal);
+						return;
+					}
+					formData.set('blob', review.blob);
 				}
-				formData.set('blob', review.blob);
 			}
-			const outcome = action.search === '?/approve' ? 'approve' : action.search === '?/reject' ? 'reject' : 'submit';
+			const outcome =
+				action.search === '?/approve'
+					? 'approve'
+					: action.search === '?/reject'
+						? 'reject'
+						: action.search === '?/defer'
+							? 'defer'
+							: 'submit';
 			// Every held item is left out, so the next one is never an item whose decision is still counting.
 			const waiting = data.queue.filter((item) => item.id === data.meta.id || !held.ids.has(item.id));
 			const upNext = nextItem(waiting, data.meta.id);
@@ -902,6 +912,7 @@ for that save first, and closing the tab then asks before leaving.
 				{#snippet crumb()}
 					<a href="/">Board</a><span aria-hidden="true">/</span><span>{blueprint.kind === 'page' ? 'Page' : 'Blueprint'}</span><span aria-hidden="true">/</span><span>{blueprint.meta.repo}</span>
 					{#if blueprint.revision}<span class="badge badge-sm badge-outline rule-badge tone-info">Revision {blueprint.revision}</span>{/if}
+					{#if blueprint.amend}<span class="badge badge-sm badge-outline rule-badge tone-info">Amends the approved version</span>{/if}
 				{/snippet}
 				{#snippet headline()}{blueprint.meta.title}{/snippet}
 				{#snippet lede()}{docLede}{/snippet}
@@ -952,9 +963,9 @@ for that save first, and closing the tab then asks before leaving.
 			<p class="bg bg-first bg-flat">The queue can no longer read <code>{blueprint.file}</code> from the worktree’s latest commit. The editor shows the copy that was queued, and you can’t edit it.</p>
 		{/if}
 		{#if blueprint.kind === 'page'}
-			<PageView {review} file={blueprint.file} pr={blueprint.pr} place={docPlace} />
+			<PageView {review} file={blueprint.file} pr={blueprint.pr} place={docPlace} amend={blueprint.amend?.original} />
 		{:else}
-			<BlueprintView {review} file={blueprint.file} place={docPlace} />
+			<BlueprintView {review} file={blueprint.file} place={docPlace} amend={blueprint.amend?.original} />
 		{/if}
 	{:else if change}
 		<ChangeView data={change} reviews={changeReviews} place={docPlace} />
@@ -1071,6 +1082,11 @@ for that save first, and closing the tab then asks before leaving.
 								bind:this={rejectButton} onclick={openNote}>
 								Send back with note
 							</button>
+						{/if}
+					{/snippet}
+					{#snippet defer()}
+						{#if data.canDefer && !desk.noteOpen}
+							<button type="submit" class="btn" formaction="?/defer">Defer</button>
 						{/if}
 					{/snippet}
 					{#snippet status()}
