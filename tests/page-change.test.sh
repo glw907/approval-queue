@@ -76,6 +76,7 @@ state="$XDG_STATE_HOME/approval-queue"
 DESC="$root/description.md"
 printf 'The page explains the slow build.\n\nThis page documents the cache step. Approving it lets the session merge the pull request.\n' >"$DESC"
 log="$state/decisions.jsonl"
+source tests/collect-check.sh
 printf 'head0000\n' >"$root/head"
 printf 'base0000\n' >"$root/base"
 printf 'tip0000\n' >"$root/tip"
@@ -164,6 +165,17 @@ git -C "$repo" remote rename origin keep
 refuse "page in a worktree with no origin" "has no origin remote" page "$repo" T "$FILE" --pr "$PR" --description "$DESC"
 git -C "$repo" remote rename keep origin
 
+# A page note's anchor may quote the text; a change note's takes a string only.
+printf 'head1111\n' >"$root/head"
+jq '.[0].anchor = {quote: "x", prefix: "p", suffix: "s"}' "$PAGE_NOTES" >"$root/quote-page.json"
+queue page "$repo" T "$FILE" --pr "$PR" --notes "$root/quote-page.json" --description "$DESC"
+assert_eq "$(jq -c '.[0].anchor' "$dir/notes.json")" '{"quote":"x","prefix":"p","suffix":"s"}' "page quote anchor: queued with the notes"
+kill -TERM "$bgpid"; wait "$bgpid" 2>/dev/null; bgpid=""
+rm -rf "$state/items"
+jq '.[0].anchor = {quote: ""}' "$PAGE_NOTES" >"$root/bad-quote.json"
+refuse "page notes with an empty quote" "an anchor quote that is a non-empty string" page "$repo" T "$FILE" --pr "$PR" --notes "$root/bad-quote.json" --description "$DESC"
+rm -f "$root/gh.record"
+
 queued_blob=$(git -C "$repo" rev-parse "HEAD:$FILE")
 printf 'head1111\n' >"$root/head"
 queue page "$repo" "Approve the page Fix a slow build" "./$FILE" --pr "$PR" --notes "$PAGE_NOTES" --description "$DESC"
@@ -205,6 +217,8 @@ page_id=$(basename "$dir")
 grep -Fxq "approval-queue: queued $page_id at http://127.0.0.1:7907/item/$page_id" "$root/err" \
   || { echo "FAIL: page: the queued link is not on stderr: $(cat "$root/err")"; fail=1; }
 assert_eq "$(jq -e . "$root/out" >/dev/null; echo $?)" "0" "page: stdout holds only the decision JSON"
+assert_eq "$(jq -r '[(.pid | type), (.pidStart | type), (.pid as $p | .id | endswith("-\($p)"))] | join(" ")' "$dir/item.json")" "number number true" "page queue: pid and pidStart"
+collect_check page "$dir"
 
 # approved matches the kind: a page line answers --kind page only, and a blueprint line the default only.
 bash "$SCRIPT" approved --kind page "$FILE" "$approved_blob"; assert_eq "$?" "0" "approved --kind page: the approved blob"
@@ -228,10 +242,23 @@ assert_eq "$(jq -c 'has("revises")' "$dir/item.json")" "false" "page: an approve
 page_round1=$(basename "$dir")
 decide '{"decision":"reject","note":"Say what the table measures."}'
 assert_eq "$rc" "0" "page reject: exit code"
-assert_eq "$(cat "$root/out")" '{"decision":"reject","note":"Say what the table measures.","calls":[],"comments":[],"threads":[]}' "page reject: stdout"
+assert_eq "$(cat "$root/out")" "{\"decision\":\"reject\",\"note\":\"Say what the table measures.\",\"calls\":[],\"comments\":[],\"threads\":[],\"amends\":\"$approved_blob\"}" "page reject: stdout (an amend of the approved page)"
+assert_eq "$(jq -c '.amends' "$dir/item.json")" "\"$approved_blob\"" "page amend: item.json names the approved blob"
+assert_eq "$(git -C "$repo" cat-file blob "$approved_blob" | cmp - "$dir/approved.md"; echo $?)" "0" "page amend: approved.md is the approved text"
 head_blob=$(git -C "$repo" rev-parse "HEAD:$FILE")
 assert_eq "$(tail -n 1 "$log" | jq -c '[.kind,.verdict,.blob,.pr,.head]')" "[\"page\",\"reject\",\"$head_blob\",\"$PR\",null]" "page reject: log line"
 bash "$SCRIPT" approved --kind page "$FILE" "$head_blob"; assert_eq "$?" "1" "approved --kind page: a rejected blob"
+
+# A page queued after only a blueprint approve of the same path is no amend: the approve must be of the same kind.
+SECOND=docs/extend/second.md
+cp "$PAGE" "$repo/$SECOND"
+git -C "$repo" add "$SECOND"
+git -C "$repo" commit -q -m "Add a second page"
+jq -nc --arg r "sample:$SECOND" --arg b "$(git -C "$repo" rev-parse "HEAD:$SECOND")" '{kind: "blueprint", ref: $r, verdict: "approve", blob: $b}' >>"$log"
+queue page "$repo" T "$SECOND" --pr "$PR" --description "$DESC"
+assert_eq "$(jq -c 'has("amends")' "$dir/item.json")" "false" "page amend: a blueprint approve of the path is no amend"
+[ ! -e "$dir/approved.md" ] || { echo "FAIL: page amend: approved.md for a blueprint approve"; fail=1; }
+decide '{"decision":"reject","note":"Second."}'
 
 # A head that gh cannot read at approval is a failure that logs nothing.
 lines=$(wc -l <"$log")
@@ -257,6 +284,8 @@ jq '.[1].choices[0].edit = true' "$CHANGE/notes.json" >"$root/edit-choice.json"
 refuse "change notes naming a file the PR does not change" "names files that" change "$CPR" T --notes "$root/other-file.json"
 refuse "change notes without a file" "needs a file string" change "$CPR" T --notes "$root/no-file.json"
 refuse "change notes with an editing choice" "takes no edits" change "$CPR" T --notes "$root/edit-choice.json"
+jq '.[0].anchor = {quote: "x"}' "$CHANGE/notes.json" >"$root/quote-change.json"
+refuse "change notes with a quote anchor" "takes an anchor string, not a quote object" change "$CPR" T --notes "$root/quote-change.json"
 
 queue change "$CPR" "Retarget two links" --notes "$CHANGE/notes.json"
 assert_eq "$(jq -c '[.kind,.repo,.number,.title,.headline,.head]' "$dir/item.json")" \
@@ -289,6 +318,8 @@ assert_eq "$rc" "0" "change approve: exit code"
 assert_eq "$(cat "$root/out")" '{"decision":"approve","pr":"glw907/cairn-cms#77","head":"head3333","calls":[{"id":"Q1","choice":"Keep it"}],"comments":[],"threads":[]}' "change approve: stdout"
 assert_eq "$(tail -n 1 "$log" | jq -c '[.kind,.ref,.lane,.verdict,.head,.calls,.initiative,.comments,.replies]')" \
   '["change","glw907/cairn-cms#77","single","approve","head3333",[{"id":"Q1","choice":"Keep it"}],null,0,0]' "change approve: log line"
+assert_eq "$(jq -r '[(.pid | type), (.pidStart | type), (.pid as $p | .id | endswith("-\($p)"))] | join(" ")' "$dir/item.json")" "number number true" "change queue: pid and pidStart"
+collect_check change "$dir"
 bash "$SCRIPT" approved --kind page docs/extend/share-a-draft-preview.md head3333; assert_eq "$?" "1" "approved: a change line answers nothing"
 
 # A change's threads name their document, which must be one the change carries; an empty list is a valid one.
