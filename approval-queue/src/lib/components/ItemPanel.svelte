@@ -49,6 +49,7 @@ for that save first, and closing the tab then asks before leaving.
 	import PacketBrief from './PacketBrief.svelte';
 	import PacketIcon from './PacketIcon.svelte';
 	import PacketRoutine from './PacketRoutine.svelte';
+	import PacketWhatChanged from './PacketWhatChanged.svelte';
 	import PrView from './PrView.svelte';
 	import Prose from './Prose.svelte';
 	import TriageView from './TriageView.svelte';
@@ -189,6 +190,7 @@ for that save first, and closing the tab then asks before leaving.
 	const outline = $derived.by((): PaneItem[] => {
 		const sections: Array<Omit<PaneItem, 'n'>> = [];
 		if (data.kind === 'packet') {
+			if (data.whatChanged) sections.push({ href: '#what-changed', label: 'What changed' });
 			sections.push({ href: '#if-you-approve', label: 'If you approve' }, { href: '#not-checked', label: 'Not checked' });
 			if (data.asks.length) sections.push({ href: '#asks', label: 'Asks', mark: openAsks.length ? 'call' : undefined });
 			if (partRows.length) sections.push({ href: '#parts', label: 'Parts' });
@@ -861,6 +863,7 @@ for that save first, and closing the tab then asks before leaving.
 				{#snippet crumb()}
 					<a href="/">Board</a><span aria-hidden="true">/</span><span>Packet</span>
 					{#if packet.meta.initiativeTitle}<span aria-hidden="true">/</span><span>{packet.meta.initiativeTitle}</span>{/if}
+					{#if packet.revision}<span class="badge badge-sm badge-outline rule-badge tone-info">Revision {packet.revision}</span>{/if}
 					{#if packet.irreversible}
 						<span class="badge badge-sm badge-outline rule-badge tone-error gap-1"><PacketIcon name="lock" class="size-3.5" />Irreversible</span>
 					{/if}
@@ -871,15 +874,15 @@ for that save first, and closing the tab then asks before leaving.
 				{/snippet}
 			</FrameHeader>
 		{:else if blueprint && review}
-			<FrameHeader>
+			{#snippet paragraphs()}
+				{#each blueprint.description ?? [] as paragraph, i (i)}<p><Prose text={paragraph} /></p>{/each}
+			{/snippet}
+			<FrameHeader description={blueprint.description ? paragraphs : undefined}>
 				{#snippet crumb()}
 					<a href="/">Board</a><span aria-hidden="true">/</span><span>{blueprint.kind === 'page' ? 'Page' : 'Blueprint'}</span><span aria-hidden="true">/</span><span>{blueprint.meta.repo}</span>
+					{#if blueprint.revision}<span class="badge badge-sm badge-outline rule-badge tone-info">Revision {blueprint.revision}</span>{/if}
 				{/snippet}
-				{#snippet headline()}
-					{blueprint.kind === 'page'
-						? `Approving this draft clears “${blueprint.page}” to merge.`
-						: `Approving this blueprint lets drafter write “${blueprint.page}” from it.`}
-				{/snippet}
+				{#snippet headline()}{blueprint.meta.title}{/snippet}
 				{#snippet lede()}{docLede}{/snippet}
 			</FrameHeader>
 		{:else if change}
@@ -919,8 +922,9 @@ for that save first, and closing the tab then asks before leaving.
 
 
 	{#if packet}
+		{#if packet.whatChanged}<PacketWhatChanged bullets={packet.whatChanged} note={packet.sentBack?.note} />{/if}
 		<PacketBrief data={packet} bind:verdicts decided={packet.decided} />
-		<PacketAsks asks={packet.asks} bind:answers decided={packet.decided} />
+		<PacketAsks asks={packet.asks} parts={packet.parts} bind:answers decided={packet.decided} />
 		<PacketRoutine routine={packet.routine} parts={packet.parts} bind:verdicts decided={packet.decided} />
 	{:else if blueprint && review}
 		{#if blueprint.missing}
