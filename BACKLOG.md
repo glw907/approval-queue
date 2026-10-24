@@ -4,6 +4,18 @@
 
 ## Medium
 
+- [ ] **#29** `tests/packet.test.sh` fails when another session logs a decision mid-gate `#bug` `#approval-queue` `#initiative:approval-queue` *(2026-10-24)*
+  The test guards the live queue by comparing the size of `~/.local/state/approval-queue/decisions.jsonl` before and after the run, so any real decision logged during the gate reads as a leak. It failed three times this way in the send-back revisions pass. Assert instead that no line the test wrote (its packet ids or refs) appears in the live log.
+  Record: `~/Projects/initiatives/approval-queue/plans/2026-10-24-sendback-revisions.md`
+
+- [ ] **#28** A packet send-back marks every part sent back, so each reads as a revision `#improvement` `#approval-queue` `#initiative:approval-queue` *(2026-10-24)*
+  The revision lookup takes the latest reject line per ref, and a packet send-back logs one reject line per part, so a resend of one fixed part and one unchanged part needs `## What changed` for both and gives both a since diff when their heads moved. A send-back verdict on one part inside an approve is not counted at all (the plan's "Later"). Decide whether a revision should count only the parts Geoff set to send back.
+  Record: `~/Projects/initiatives/approval-queue/plans/2026-10-24-sendback-revisions.md`
+
+- [ ] **#27** An Undo-restored send-back note counts as text the reader typed `#bug` `#approval-queue` `#initiative:approval-queue` *(2026-10-24)*
+  `drafted` starts empty on every mount, so after Undo reopens a note that was an untouched draft, `noteStart` keeps it and a later answered call stays listed as "Still open". Set `drafted` to the restored text when it equals the draft rebuilt at restore time (svelte-reviewer, warning 3, in `ItemPanel.svelte`).
+  Record: `~/Projects/initiatives/approval-queue/plans/2026-10-24-sendback-revisions.md`
+
 - [ ] **#26** Print a blueprint's anchors and document the slug rule `#improvement` `#approval-queue` `#initiative:docs-system` *(2026-10-24)*
   The README's slug rule turns an apostrophe into a hyphen (`set-a-section-s-starting-state`), easy to get wrong by hand, and no tool prints a blueprint's anchors; the session wrote a script (record 39).
   Record: `~/Projects/initiatives/docs-system/research/2026-10-22-extend-blueprints-batch-2-friction.md`
@@ -12,7 +24,7 @@
   Withdrawing a queued item means killing the blueprint process and relying on its exit trap (record 38).
   Record: `~/Projects/initiatives/docs-system/research/2026-10-22-extend-blueprints-batch-2-friction.md`
 
-- [ ] **#24** Stop prefixing "Still open:" on a send-back note Geoff answered `#bug` `#approval-queue` `#initiative:docs-system` *(2026-10-24)*
+- [x] **#24** Stop prefixing "Still open:" on a send-back note Geoff answered `#bug` `#approval-queue` `#initiative:docs-system` *(2026-10-24)*
   A send-back note auto-prefixes "Still open: <title>" even for a question Geoff answered; the sidebar's figure note carried his call, "Keep the fixture as is", and still came back as open (record 37).
   Record: `~/Projects/initiatives/docs-system/research/2026-10-22-extend-blueprints-batch-2-friction.md`
 - [ ] **#23** Make note anchors survive edits and address reader-block lines `#improvement` `#approval-queue` `#initiative:docs-system` *(2026-10-22)*
@@ -22,7 +34,7 @@
 - [ ] **#22** Carry a ruling across items, or offer an amend review of an approved document `#feature` `#approval-queue` `#initiative:docs-system` *(2026-10-22)*
   A decide ruling on the architecture blueprint reached the approved Access blueprint; a one-clause deletion sent it back through a full review (record 21).
   Record: `~/Projects/initiatives/docs-system/research/2026-10-22-extend-blueprints-pilot-friction.md`
-- [ ] **#18** A decision goes out while the editor's last save failed `#bug` `#approval-queue` `#initiative:docs-system` *(2026-10-21)*
+- [x] **#18** A decision goes out while the editor's last save failed `#bug` `#approval-queue` `#initiative:docs-system` *(2026-10-21)*
   `decide` in `ItemPanel.svelte` never checks `review.saveFailed`, so an approve can post while the file on disk lacks Geoff's last edit. Refuse with a toast until a save lands, as an open comment box refuses. Found in the comments pass's A2 review; out of that pass's scope.
 
 - [ ] **#19** A held decision's Undo can be blocked, and a typed-URL decide on a held item is announced but ignored `#bug` `#approval-queue` `#initiative:docs-system` *(2026-10-21)*
@@ -47,17 +59,17 @@
   Today the only way to say "not now" is a reject, which tells the session the work is wrong, or leaving the item waiting while its session blocks. Add a defer outcome: the session gets `{"decision":"defer"}` and is free to end, and the item stays on the board, marked deferred, until Geoff decides it or the session withdraws it. A decided deferral needs a way back to a session, so it builds on `approval-queue collect` (#16).
 
 - [ ] **#14** Lead a resent item with what changed since the send-back `#feature` `#approval-queue` *(2026-10-21)*
-  When a session resends an item after a send-back (#13), the app should show the item against the version Geoff sent back. It already records that version's PR head or blob. The change belongs in the top-line narrative and the title. The title marks the item as a revision, and the headline and lede summarize what the revision changed in answer to each call, well enough to approve or send back from the summary alone. The diff since the send-back sits one level down, ahead of the full diff, for Geoff to open only when he wants the detail. The summary is the session's claim, so the brief checks should test it against that diff.
+  When a session resends an item after a send-back (#13), the app should show the item against the version Geoff sent back. It already records that version's PR head or blob. The change belongs in the top-line narrative and the title. The title marks the item as a revision, and the headline and lede summarize what the revision changed in answer to each call, well enough to approve or send back from the summary alone. The diff since the send-back sits one level down, ahead of the full diff, for Geoff to open only when he wants the detail. The summary is the session's claim, so the brief checks should test it against that diff. Packets and the blueprint and page badge are done (a `## What changed` section, "Revision N", and the since-send-back diff); the single `pr`, `design`, and `triage` kinds remain.
 
 - [ ] **#13** Give a send-back structured instructions the session can act on `#feature` `#approval-queue` *(2026-10-21)*
-  A reject returns only `{"decision":"reject","note"}`, so the session has to work out from free text what to change. LangChain's Agent Inbox has a "respond" outcome that sends the agent a reply it continues from. Add the same here: a send-back carrying the calls Geoff made, each with its anchor (part, file and line, or ask) and his instruction, in the decision JSON. The session then revises and queues the item again. PR #4 already records a send-back's calls, but only for display. Doc-kind half done in the comments pass; packet, PR, design, and triage remain.
+  A reject returns only `{"decision":"reject","note"}`, so the session has to work out from free text what to change. LangChain's Agent Inbox has a "respond" outcome that sends the agent a reply it continues from. Add the same here: a send-back carrying the calls Geoff made, each with its anchor (part, file and line, or ask) and his instruction, in the decision JSON. The session then revises and queues the item again. PR #4 already records a send-back's calls, but only for display. Doc-kind half done in the comments pass; the packet half is done (a packet send-back returns `calls`: each part's verdict and each ask's pick); the single PR, design, and triage kinds remain.
 
 - [ ] **#1** The packet fingerprint omits each part's lane and each ask's bound part and rule `#improvement` `#approval-queue` `#initiative:approval-packets` *(2026-10-17)*
   `packetFingerprint` in `approval-queue/src/lib/server/packet-decision.ts` hashes refs, kinds, verdicts, heads, hashes, and each ask's title, labels, and tags. Rebinding an ask to another ask-bound part with the same question and labels keeps the fingerprint. The command's `jq` check closes this for authorization today, since lane and binding come from the stored `packet.json`. Add `a.part?.ref`, `a.rule`, and `p.lane`.
 
 ## Low
 
-- [ ] **#21** Print the queued item's id or URL from `approval-queue blueprint` `#improvement` `#approval-queue` `#initiative:docs-system` *(2026-10-22)*
+- [x] **#21** Print the queued item's id or URL from `approval-queue blueprint` `#improvement` `#approval-queue` `#initiative:docs-system` *(2026-10-22)*
   A successful queue prints nothing; the author learns it is queued only from `pgrep` (record 22).
   Record: `~/Projects/initiatives/docs-system/research/2026-10-22-extend-blueprints-pilot-friction.md`
   Batch 2: still prints nothing on a successful queue; the session confirmed each queue with `pgrep` (record 36).

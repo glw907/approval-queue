@@ -31,7 +31,7 @@ for that save first, and closing the tab then asks before leaving.
 	import { changedCount, seedRows, type Row } from '#lib/triage.ts';
 	import { VERDICT_LOOK } from '#lib/packet-view.ts';
 	import type { PlacedNote } from '#lib/editor/notes.ts';
-	import { boxes, DocReview, refuseOpenBox, type CommentAnswer, type SaveResult } from '#lib/editor/review.svelte.ts';
+	import { boxes, DocReview, heldBySave, noteStart, refuseOpenBox, sendBackDraft, type CommentAnswer, type SaveResult } from '#lib/editor/review.svelte.ts';
 	import type { PageData } from '../../routes/item/[id=id]/$types';
 	import BlueprintView from './BlueprintView.svelte';
 	import BriefBlock from './BriefBlock.svelte';
@@ -49,6 +49,7 @@ for that save first, and closing the tab then asks before leaving.
 	import PacketBrief from './PacketBrief.svelte';
 	import PacketIcon from './PacketIcon.svelte';
 	import PacketRoutine from './PacketRoutine.svelte';
+	import PacketWhatChanged from './PacketWhatChanged.svelte';
 	import PrView from './PrView.svelte';
 	import Prose from './Prose.svelte';
 	import TriageView from './TriageView.svelte';
@@ -189,6 +190,7 @@ for that save first, and closing the tab then asks before leaving.
 	const outline = $derived.by((): PaneItem[] => {
 		const sections: Array<Omit<PaneItem, 'n'>> = [];
 		if (data.kind === 'packet') {
+			if (data.whatChanged || data.sentBack) sections.push({ href: '#what-changed', label: 'What changed' });
 			sections.push({ href: '#if-you-approve', label: 'If you approve' }, { href: '#not-checked', label: 'Not checked' });
 			if (data.asks.length) sections.push({ href: '#asks', label: 'Asks', mark: openAsks.length ? 'call' : undefined });
 			if (partRows.length) sections.push({ href: '#parts', label: 'Parts' });
@@ -242,6 +244,7 @@ for that save first, and closing the tab then asks before leaving.
 		if (decision?.decision !== 'approve' && decision?.decision !== 'reject') return {};
 		const out: Record<string, number> = {};
 		for (const call of decision.calls ?? []) {
+			if (!('id' in call)) continue;
 			const at = notes.find((n) => n.id === call.id)?.choices?.findIndex((c) => c.label === call.choice) ?? -1;
 			if (at >= 0) out[call.id] = at;
 		}
@@ -685,37 +688,37 @@ for that save first, and closing the tab then asks before leaving.
 		for (const r of docReviews) await r.settled();
 		if (review) {
 			await review.flush();
-			if (review.saveFailed) {
-				desk.announce(`Not approved: ${review.saveStatus}`);
+			const held = heldBySave(review, 'approve');
+			if (held) {
+				desk.announce(held);
 				return;
 			}
 		}
 		form?.requestSubmit(approveButton);
 	}
 
-	/** What a document review's send-back starts with: each call still open, and how much was edited. */
-	function prefill() {
-		const lines = openCalls.map((n) => `- Still open: ${n.title}`);
-		if (review?.changedLines) {
-			const n = review.changedLines;
-			lines.push(`- ${n} ${n === 1 ? 'line' : 'lines'} changed in the ${data.kind === 'page' ? 'page' : 'plan'}`);
-		}
-		return lines.length ? `${lines.join('\n')}\n` : '';
-	}
+	// The last draft the note was given, so reopening it can tell an untouched one from the reader's text.
+	let drafted = '';
 
 	async function openNote() {
 		if (refuseOpenBox()) return;
-		if (docReviews.length && !noteText) noteText = prefill();
+		if (docReviews.length) {
+			const fresh = sendBackDraft(openCalls, review?.changedLines ?? 0, data.kind === 'page' ? 'page' : 'plan');
+			noteText = noteStart(noteText, drafted, fresh);
+			drafted = fresh;
+		}
 		desk.noteOpen = true;
 		await tick();
-		noteField?.focus();
+		// The bar is sticky, so the note is in view as soon as it renders and focusing it needs no scroll.
+		noteField?.focus({ preventScroll: true });
 		noteField?.setSelectionRange(noteText.length, noteText.length);
 	}
 
 	async function closeNote() {
 		desk.noteOpen = false;
 		await tick();
-		rejectButton?.focus();
+		// The opener sits in the sticky bar, inside the scroll padding, so a plain focus() scrolls the document.
+		rejectButton?.focus({ preventScroll: true });
 	}
 
 	/** The repo's name with the item's number when it has one; a design reads as its title. */
@@ -761,6 +764,11 @@ for that save first, and closing the tab then asks before leaving.
 			// the blob that save returned rather than the one the form rendered with.
 			if (review) {
 				await review.flush();
+				const refusal = heldBySave(review, action.search === '?/reject' ? 'reject' : 'approve');
+				if (refusal) {
+					desk.announce(refusal);
+					return;
+				}
 				formData.set('blob', review.blob);
 			}
 			const outcome = action.search === '?/approve' ? 'approve' : action.search === '?/reject' ? 'reject' : 'submit';
@@ -856,6 +864,7 @@ for that save first, and closing the tab then asks before leaving.
 				{#snippet crumb()}
 					<a href="/">Board</a><span aria-hidden="true">/</span><span>Packet</span>
 					{#if packet.meta.initiativeTitle}<span aria-hidden="true">/</span><span>{packet.meta.initiativeTitle}</span>{/if}
+					{#if packet.revision}<span class="badge badge-sm badge-outline rule-badge tone-info">Revision {packet.revision}</span>{/if}
 					{#if packet.irreversible}
 						<span class="badge badge-sm badge-outline rule-badge tone-error gap-1"><PacketIcon name="lock" class="size-3.5" />Irreversible</span>
 					{/if}
@@ -866,15 +875,15 @@ for that save first, and closing the tab then asks before leaving.
 				{/snippet}
 			</FrameHeader>
 		{:else if blueprint && review}
-			<FrameHeader>
+			{#snippet paragraphs()}
+				{#each blueprint.description ?? [] as paragraph, i (i)}<p><Prose text={paragraph} /></p>{/each}
+			{/snippet}
+			<FrameHeader description={blueprint.description?.length ? paragraphs : undefined}>
 				{#snippet crumb()}
 					<a href="/">Board</a><span aria-hidden="true">/</span><span>{blueprint.kind === 'page' ? 'Page' : 'Blueprint'}</span><span aria-hidden="true">/</span><span>{blueprint.meta.repo}</span>
+					{#if blueprint.revision}<span class="badge badge-sm badge-outline rule-badge tone-info">Revision {blueprint.revision}</span>{/if}
 				{/snippet}
-				{#snippet headline()}
-					{blueprint.kind === 'page'
-						? `Approving this draft clears “${blueprint.page}” to merge.`
-						: `Approving this blueprint lets drafter write “${blueprint.page}” from it.`}
-				{/snippet}
+				{#snippet headline()}{blueprint.meta.title}{/snippet}
 				{#snippet lede()}{docLede}{/snippet}
 			</FrameHeader>
 		{:else if change}
@@ -914,8 +923,9 @@ for that save first, and closing the tab then asks before leaving.
 
 
 	{#if packet}
+		{#if packet.whatChanged || packet.sentBack}<PacketWhatChanged bullets={packet.whatChanged ?? []} note={packet.sentBack?.note} />{/if}
 		<PacketBrief data={packet} bind:verdicts decided={packet.decided} />
-		<PacketAsks asks={packet.asks} bind:answers decided={packet.decided} />
+		<PacketAsks asks={packet.asks} parts={packet.parts} bind:answers decided={packet.decided} />
 		<PacketRoutine routine={packet.routine} parts={packet.parts} bind:verdicts decided={packet.decided} />
 	{:else if blueprint && review}
 		{#if blueprint.missing}
@@ -1034,7 +1044,7 @@ for that save first, and closing the tab then asks before leaving.
 						{/if}
 					{/snippet}
 					{#snippet reject()}
-						{#if data.kind !== 'triage'}
+						{#if data.kind !== 'triage' && !desk.noteOpen}
 							<button
 								type="button"
 								class={['btn', decided.sendBack && !packet ? 'btn-primary' : 'btn-outline']}

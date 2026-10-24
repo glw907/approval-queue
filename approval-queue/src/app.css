@@ -63,6 +63,11 @@ html {
 	scroll-padding-bottom: var(--desk-bar-pad, 9rem);
 	font-synthesis-weight: none;
 }
+/* The bar is sticky, so the note inside it can never clear the pad: with the pad on, every key typed
+   in the send-back note makes the browser scroll the document to reveal the caret. */
+html:has(#note:focus) {
+	scroll-padding-bottom: 0;
+}
 
 @media (prefers-reduced-motion: reduce) {
 	*,

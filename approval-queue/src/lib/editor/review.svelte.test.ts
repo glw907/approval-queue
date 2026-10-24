@@ -1,7 +1,7 @@
 import type { EditorView } from '@codemirror/view';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PlacedNote } from './notes.ts';
-import { DocReview, type CommentAnswer, type ReviewInit, type SaveResult } from './review.svelte.ts';
+import { DocReview, heldBySave, noteStart, sendBackDraft, type CommentAnswer, type ReviewInit, type SaveResult } from './review.svelte.ts';
 
 const KEY = 'desk.calls.test';
 
@@ -100,6 +100,50 @@ describe('DocReview remembered choices', () => {
 		r.hooks.change(edited);
 		await r.flush();
 		expect(r.saveStatus).toBe('All edits saved');
+	});
+
+	// The panel opens the note, closes it, and opens it again; `text` and `drafted` are its two fields.
+	it('rebuilds an untouched send-back draft when a call was answered while the note was closed', () => {
+		const r = review('b1');
+		const draft = () => sendBackDraft(r.openCalls, r.changedLines, 'plan');
+		let text = noteStart('', '', draft());
+		const drafted = text;
+		expect(text).toBe('- Still open: Why\n- Still open: Keep it here?\n');
+		r.choose('Q1', 0);
+		text = noteStart(text, drafted, draft());
+		expect(r.openCalls.map((n) => n.id)).toEqual(['B3']);
+		expect(text).toBe('- Still open: Why\n');
+	});
+
+	it('keeps a send-back note the reader has typed in', () => {
+		const r = review('b1');
+		const drafted = sendBackDraft(r.openCalls, 0, 'plan');
+		r.choose('Q1', 0);
+		const typed = `${drafted}Tighten the second section.`;
+		expect(noteStart(typed, drafted, sendBackDraft(r.openCalls, 0, 'plan'))).toBe(typed);
+	});
+
+	it('holds a decision back while the last save failed, naming the decision', async () => {
+		const r = review('b1', async () => ({ ok: false, message: 'refused' }));
+		expect(heldBySave(r, 'reject')).toBeNull();
+		r.hooks.change(edited);
+		await r.flush();
+		expect(heldBySave(r, 'reject')).toBe('Not sent back: Not saved: refused');
+		expect(heldBySave(r, 'approve')).toBe('Not approved: Not saved: refused');
+	});
+
+	it('retries a refused save on the next flush, so a decision press is the retry', async () => {
+		let accept = false;
+		const saver = vi.fn(async (): Promise<SaveResult> => (accept ? { ok: true, blob: 'b2' } : { ok: false, message: 'refused' }));
+		const r = review('b1', saver);
+		r.hooks.change(edited);
+		await r.flush();
+		expect(r.saveFailed).toBe(true);
+		accept = true;
+		await r.flush();
+		expect(saver).toHaveBeenCalledTimes(2);
+		expect(r.saveFailed).toBe(false);
+		expect(heldBySave(r, 'reject')).toBeNull();
 	});
 });
 

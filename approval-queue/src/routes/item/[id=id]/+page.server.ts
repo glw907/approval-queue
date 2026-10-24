@@ -18,13 +18,14 @@ import {
 	queuedItem,
 	sentBackCalls
 } from '#lib/server/blueprint.ts';
-import { buildApprove, isIrreversible, packetFingerprint } from '#lib/server/packet-decision.ts';
+import { buildApprove, buildSentBackCalls, isIrreversible, packetFingerprint } from '#lib/server/packet-decision.ts';
 import {
 	carried,
 	listWaiting,
 	readComments,
 	readItem,
 	readReplies,
+	readSentBack,
 	writeComments,
 	writeDecision,
 	writeDecisionOnce,
@@ -296,6 +297,8 @@ export const load: PageServerLoad = async ({ params }) => {
 			// A page names its pull request and the head it was queued at; a blueprint has none.
 			pr: pr ? { ref: content.pr ?? '', url: `https://github.com/${pr[1]}/pull/${pr[2]}`, head: content.prHead ?? '' } : null,
 			doc: content.doc,
+			...(content.description && { description: content.description }),
+			...(meta.revises && { revision: meta.revises.revision }),
 			original: content.original,
 			blob: content.blob,
 			file: content.file,
@@ -313,6 +316,7 @@ export const load: PageServerLoad = async ({ params }) => {
 	}
 	if (content.kind === 'packet') {
 		const { packet, parts } = content;
+		const sentBack = meta.revises && (await readSentBack(APPROVAL_QUEUE_STATE, meta.revises.item));
 		return {
 			meta,
 			decided,
@@ -320,6 +324,9 @@ export const load: PageServerLoad = async ({ params }) => {
 			headline: packet.headline,
 			background: packet.background,
 			summary: packet.summary,
+			...(packet.whatChanged && { whatChanged: packet.whatChanged }),
+			...(meta.revises && { revision: meta.revises.revision }),
+			...(sentBack && { sentBack }),
 			steps: packet.steps,
 			notChecked: packet.notChecked,
 			asks: packet.asks.map((ask, i) => ({ index: i + 1, ...ask, part: ask.part?.ref ?? null })),
@@ -335,7 +342,8 @@ export const load: PageServerLoad = async ({ params }) => {
 					checks: checksSummary(part.pr?.statusCheckRollup),
 					review: reviewVerdict(part.body ?? ''),
 					groups: fileGroups(part.diff ?? ''),
-					link: part.pr ? { url: part.pr.url, head: part.pr.headRefName, base: part.pr.baseRefName } : null
+					link: part.pr ? { url: part.pr.url, head: part.pr.headRefName, base: part.pr.baseRefName } : null,
+					...(part.since && { since: 'patch' in part.since ? { groups: fileGroups(part.since.patch) } : part.since })
 				}),
 				...(part.kind === 'design' && { doc: part.doc })
 			})),
@@ -441,7 +449,11 @@ export const actions: Actions = {
 			const form = await request.formData().catch(() => null);
 			if (!form) return fail(400, { message: 'Not a form post' });
 			const note = form.get('note');
-			return decideOnce(params.id, { decision: 'reject', note: typeof note === 'string' ? note : '' });
+			return decideOnce(params.id, {
+				decision: 'reject',
+				note: typeof note === 'string' ? note : '',
+				calls: buildSentBackCalls(found.content, form)
+			});
 		}
 		if (found.content.kind === 'blueprint' || found.content.kind === 'page' || found.content.kind === 'change') {
 			if (found.decided) return fail(409, ALREADY_DECIDED);

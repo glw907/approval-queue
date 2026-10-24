@@ -64,6 +64,9 @@ export STUB_DIR="$root" CHANGE XDG_STATE_HOME="$root/state" PATH="$stubs:$PATH"
 export GIT_CONFIG_GLOBAL=/dev/null GIT_AUTHOR_NAME=Test GIT_AUTHOR_EMAIL=test@example.com \
   GIT_COMMITTER_NAME=Test GIT_COMMITTER_EMAIL=test@example.com
 state="$XDG_STATE_HOME/approval-queue"
+# Every blueprint and page takes a description of a background paragraph and one summary paragraph.
+DESC="$root/description.md"
+printf 'The page explains the slow build.\n\nThis page documents the cache step. Approving it lets the session merge the pull request.\n' >"$DESC"
 log="$state/decisions.jsonl"
 printf 'head0000\n' >"$root/head"
 printf 'base0000\n' >"$root/base"
@@ -124,34 +127,45 @@ refuse() {
 }
 
 # ---- page ----
-refuse "page without --pr" "usage:" page "$repo" T "$FILE"
-refuse "page with a bad ref" "owner/repo#n" page "$repo" T "$FILE" --pr glw907/sample
-refuse "page not a worktree" "is not a git worktree" page "$root/nowhere" T "$FILE" --pr "$PR"
-refuse "page uncommitted" "is not committed" page "$repo" T docs/extend/new.md --pr "$PR"
-refuse "page absolute path" "give the file as a path inside" page "$repo" T "/etc/hostname" --pr "$PR"
-refuse "page dotted path" "give the file as a path inside" page "$repo" T "docs/../$FILE" --pr "$PR"
+refuse "page without --pr" "usage:" page "$repo" T "$FILE" --description "$DESC"
+refuse "page with a bad ref" "owner/repo#n" page "$repo" T "$FILE" --pr glw907/sample --description "$DESC"
+refuse "page not a worktree" "is not a git worktree" page "$root/nowhere" T "$FILE" --pr "$PR" --description "$DESC"
+refuse "page uncommitted" "is not committed" page "$repo" T docs/extend/new.md --pr "$PR" --description "$DESC"
+refuse "page absolute path" "give the file as a path inside" page "$repo" T "/etc/hostname" --pr "$PR" --description "$DESC"
+refuse "page dotted path" "give the file as a path inside" page "$repo" T "docs/../$FILE" --pr "$PR" --description "$DESC"
 printf 'edit\n' >>"$repo/$FILE"
-refuse "page uncommitted change" "has uncommitted changes" page "$repo" T "$FILE" --pr "$PR"
+refuse "page uncommitted change" "has uncommitted changes" page "$repo" T "$FILE" --pr "$PR" --description "$DESC"
 git -C "$repo" checkout -q -- "$FILE"
 printf '{"id":"A"}' >"$root/obj.json"
-refuse "page notes not an array" "a JSON array of notes" page "$repo" T "$FILE" --pr "$PR" --notes "$root/obj.json"
+refuse "page notes not an array" "a JSON array of notes" page "$repo" T "$FILE" --pr "$PR" --notes "$root/obj.json" --description "$DESC"
 jq '.[0].file = "x.md"' "$PAGE_NOTES" >"$root/file-field.json"
 refuse "page notes with a file field" "has an unknown field file" page "$repo" T "$FILE" --pr "$PR" \
-  --notes "$root/file-field.json"
-refuse "blueprint refuses --pr" "usage:" blueprint "$repo" T "$FILE" --pr "$PR"
-refuse "page --pr in another repository" "is not in" page "$repo" T "$FILE" --pr glw907/other#7
+  --notes "$root/file-field.json" --description "$DESC"
+refuse "page without a description" "needs --description <file>" page "$repo" T "$FILE" --pr "$PR"
+refuse "page description file missing" "no description file at $root/none.md" page "$repo" T "$FILE" --pr "$PR" --description "$root/none.md"
+printf 'Only one paragraph.\n' >"$root/one.md"
+refuse "page with a one-paragraph description" "a background paragraph, then one or two summary paragraphs" page "$repo" T "$FILE" --pr "$PR" --description "$root/one.md"
+printf 'One.\n\nTwo.\n\nThree.\n\nFour.\n' >"$root/four.md"
+refuse "page with a four-paragraph description" "the description has 4 paragraphs" page "$repo" T "$FILE" --pr "$PR" --description "$root/four.md"
+refuse "page with a title ending in a period" "drop its closing punctuation" page "$repo" "A title." "$FILE" --pr "$PR" --description "$DESC"
+refuse "page with an 81-character title" "the title runs 81 characters; keep it to 80" page "$repo" "$(printf 'x%.0s' $(seq 81))" "$FILE" --pr "$PR" --description "$DESC"
+refuse "change takes no description" "usage:" change glw907/cairn-cms#77 T --description "$DESC"
+refuse "blueprint refuses --pr" "usage:" blueprint "$repo" T "$FILE" --pr "$PR" --description "$DESC"
+refuse "page --pr in another repository" "is not in" page "$repo" T "$FILE" --pr glw907/other#7 --description "$DESC"
 git -C "$repo" remote rename origin keep
-refuse "page in a worktree with no origin" "has no origin remote" page "$repo" T "$FILE" --pr "$PR"
+refuse "page in a worktree with no origin" "has no origin remote" page "$repo" T "$FILE" --pr "$PR" --description "$DESC"
 git -C "$repo" remote rename keep origin
 
 queued_blob=$(git -C "$repo" rev-parse "HEAD:$FILE")
 printf 'head1111\n' >"$root/head"
-queue page "$repo" "Approve the page Fix a slow build" "./$FILE" --pr "$PR" --notes "$PAGE_NOTES"
+queue page "$repo" "Approve the page Fix a slow build" "./$FILE" --pr "$PR" --notes "$PAGE_NOTES" --description "$DESC"
 assert_eq "$(jq -c '[.kind,.repo,.file,.blob,.pr,.prHead,.headline]' "$dir/item.json")" \
   "[\"page\",\"sample\",\"$FILE\",\"$queued_blob\",\"$PR\",\"head1111\",\"Approve the page Fix a slow build\"]" "page queue: item.json"
 cmp -s "$dir/doc.md" "$PAGE" || { echo "FAIL: page queue: doc.md is not the committed file"; fail=1; }
 assert_eq "$(jq -c '[.[].id]' "$dir/notes.json")" '["R1","D1","Q1"]' "page queue: notes.json"
 assert_eq "$(grep -c 'headRefOid' "$root/gh.record")" "1" "page queue: one head read"
+cmp -s "$dir/description.md" "$DESC" || { echo "FAIL: page queue: description.md is not the description file"; fail=1; }
+assert_eq "$(jq -c 'has("revises")' "$dir/item.json")" "false" "page queue: a first page is no revision"
 
 # The page approve names the head the item was queued at and the screen showed. A PR that moved while the
 # item waited is refused: the approval would cover commits nobody saw.
@@ -168,7 +182,7 @@ assert_eq "$(cat "$root/out")" "" "page approve after the PR moved: no decision 
 [ ! -e "$log" ] || { echo "FAIL: page approve after the PR moved: something was logged"; fail=1; }
 
 printf 'head1111\n' >"$root/head"
-queue page "$repo" "Approve the page Fix a slow build" "$FILE" --pr "$PR" --notes "$PAGE_NOTES"
+queue page "$repo" "Approve the page Fix a slow build" "$FILE" --pr "$PR" --notes "$PAGE_NOTES" --description "$DESC"
 assert_eq "$(jq -r '.prHead' "$dir/item.json")" "head1111" "page requeue: item.json"
 decide "$page_approve"
 assert_eq "$rc" "0" "page approve: exit code"
@@ -179,6 +193,10 @@ assert_eq "$(cat "$root/out")" \
 assert_eq "$(wc -l <"$log")" "1" "page approve: one log line"
 assert_eq "$(jq -c '[.kind,.ref,.lane,.verdict,.blob,.commit,.pr,.head,.waived[0].id,.initiative]' "$log")" \
   "[\"page\",\"sample:$FILE\",\"single\",\"approve\",\"$approved_blob\",\"$approved_commit\",\"$PR\",\"head1111\",\"D1\",null]" "page approve: log line"
+page_id=$(basename "$dir")
+grep -Fxq "approval-queue: queued $page_id at http://127.0.0.1:7907/item/$page_id" "$root/err" \
+  || { echo "FAIL: page: the queued link is not on stderr: $(cat "$root/err")"; fail=1; }
+assert_eq "$(jq -e . "$root/out" >/dev/null; echo $?)" "0" "page: stdout holds only the decision JSON"
 
 # approved matches the kind: a page line answers --kind page only, and a blueprint line the default only.
 bash "$SCRIPT" approved --kind page "$FILE" "$approved_blob"; assert_eq "$?" "0" "approved --kind page: the approved blob"
@@ -196,8 +214,10 @@ git -C "$repo" commit -q --allow-empty -m "A later commit"
 printf 'Later.\n' >>"$repo/$FILE"
 git -C "$repo" commit -q -am "A later edit"
 # A page send-back prints the note and logs a reject with the PR, which never counts as approved.
-queue page "$repo" T "$FILE" --pr "$PR"
+queue page "$repo" T "$FILE" --pr "$PR" --description "$DESC"
 assert_eq "$(cat "$dir/notes.json")" "[]" "page no notes: empty notes.json"
+assert_eq "$(jq -c 'has("revises")' "$dir/item.json")" "false" "page: an approved page is no revision"
+page_round1=$(basename "$dir")
 decide '{"decision":"reject","note":"Say what the table measures."}'
 assert_eq "$rc" "0" "page reject: exit code"
 assert_eq "$(cat "$root/out")" '{"decision":"reject","note":"Say what the table measures.","calls":[],"comments":[],"threads":[]}' "page reject: stdout"
@@ -207,7 +227,8 @@ bash "$SCRIPT" approved --kind page "$FILE" "$head_blob"; assert_eq "$?" "1" "ap
 
 # A head that gh cannot read at approval is a failure that logs nothing.
 lines=$(wc -l <"$log")
-queue page "$repo" T "$FILE" --pr "$PR"
+queue page "$repo" T "$FILE" --pr "$PR" --description "$DESC"
+assert_eq "$(jq -c '.revises' "$dir/item.json")" "{\"item\":\"$page_round1\",\"revision\":2}" "page: a resent page is a revision"
 touch "$root/gh.down"
 decide "{\"decision\":\"approve\",\"calls\":[],\"commit\":\"$(git -C "$repo" rev-parse HEAD)\"}"
 assert_eq "$rc" "1" "page approve with gh down: exit code"
@@ -272,7 +293,7 @@ refuse "change replies on a file the PR does not change" "has threads on files t
 refuse "change replies with no file" "needs an anchor file naming a changed document" change "$CPR" T --replies "$root/unnamed-replies.json"
 jq '. + .' "$root/change-replies.json" >"$root/dup-replies.json"
 refuse "change replies with a duplicate id" 'the id "C1" is used 2 times' change "$CPR" T --replies "$root/dup-replies.json"
-refuse "page replies naming a file" "has an anchor file" page "$repo" T "$FILE" --pr "$PR" --replies "$root/change-replies.json"
+refuse "page replies naming a file" "has an anchor file" page "$repo" T "$FILE" --pr "$PR" --replies "$root/change-replies.json" --description "$DESC"
 
 printf 'head5555\n' >"$root/head"
 echo '[]' >"$root/no-replies.json"
@@ -286,6 +307,9 @@ assert_eq "$(cat "$root/out")" \
   "$(jq -cn --argjson c "$comment" '{decision: "reject", note: "Keep the old link.", calls: [{id: "Q1", choice: "Keep it"}], comments: [$c], threads: [{id: "C1", reply: "Thanks."}]}')" \
   "change reject: stdout"
 assert_eq "$(tail -n 1 "$log" | jq -c '[.kind,.ref,.verdict,.head,.calls,.comments,.replies]')" '["change","glw907/cairn-cms#77","reject","head5555",null,1,1]' "change reject: log line"
+grep -Fxq "approval-queue: queued $(basename "$dir") at http://127.0.0.1:7907/item/$(basename "$dir")" "$root/err" \
+  || { echo "FAIL: change: the queued link is not on stderr: $(cat "$root/err")"; fail=1; }
+assert_eq "$(jq -e . "$root/out" >/dev/null; echo $?)" "0" "change: stdout holds only the decision JSON"
 
 printf 'head6666\n' >"$root/head"
 queue change "$CPR" "Retarget two links" --replies "$root/change-replies.json"

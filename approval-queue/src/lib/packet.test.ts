@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { REGISTER_PATH } from './brief.ts';
-import { parsePacket } from './packet.ts';
+import { descriptionDefects, descriptionParagraphs, parsePacket, titleDefects } from './packet.ts';
 
 const baseline = readFileSync(new URL('./fixtures/packet-baseline.md', import.meta.url), 'utf8');
 const designExists = (repo: string, path: string) => repo === 'drafter' && path === 'docs/specs/notes-design.md';
@@ -126,6 +126,46 @@ describe('refusals, one edit each', () => {
 		expect(refusal(edited('## Routine', '## Not checked\nA second one.\n\n## Routine'))).toContain('`## Not checked` appears twice');
 		const swapped = edited('## If you approve', '## Not checked\nNothing.\n\n## If you approve');
 		expect(refusal(swapped)).toContain('`## If you approve` is out of order');
+	});
+
+	describe('## What changed', () => {
+		const SECTION = '## What changed\n- Split the template change out of PR 41.\n- Added the missing waiver note.\n\n';
+		const revised = (section = SECTION) => edited('## If you approve', `${section}## If you approve`);
+
+		it('is accepted after the description and read as bullets', () => {
+			const result = parsePacket(revised(), { designExists });
+			if (!result.ok) throw new Error(result.messages.join('\n'));
+			expect(result.packet.whatChanged).toEqual(['Split the template change out of PR 41.', 'Added the missing waiver note.']);
+		});
+
+		it('joins a wrapped bullet and leaves a first packet without the field', () => {
+			const wrapped = revised('## What changed\n- Split the template\n  change out of PR 41.\n\n');
+			const result = parsePacket(wrapped, { designExists });
+			if (!result.ok) throw new Error(result.messages.join('\n'));
+			expect(result.packet.whatChanged).toEqual(['Split the template change out of PR 41.']);
+			const first = parsePacket(baseline, { designExists });
+			expect(first.ok && 'whatChanged' in first.packet).toBe(false);
+		});
+
+		it('is refused twice, empty, with prose outside the list, and out of order', () => {
+			expect(refusal(revised(SECTION + SECTION))).toContain('`## What changed` appears twice');
+			expect(refusal(revised('## What changed\n\n'))).toContain('`## What changed` is empty');
+			expect(refusal(revised('## What changed\nSome prose.\n\n'))).toContain('`## What changed` is a bulleted list and nothing else');
+			expect(refusal(revised('## What changed\n- One.\n\nTrailing prose.\n\n'))).toContain('a bulleted list and nothing else');
+			expect(refusal(edited('## Not checked', `${SECTION}## Not checked`))).toContain('`## What changed` is out of order');
+			expect(refusal(edited('## Routine', `${SECTION}## Routine`))).toContain('`## What changed` is out of order');
+		});
+	});
+
+	it('exposes the title and description rules parsePacket applies', () => {
+		expect(titleDefects('A fine title')).toEqual([]);
+		expect(titleDefects('Ends in a period.')).toEqual(['the title is a heading: drop its closing punctuation']);
+		expect(titleDefects('x'.repeat(81))).toEqual(['the title runs 81 characters; keep it to 80']);
+		expect(descriptionDefects(['a'])).toEqual(['the description is a background paragraph, then one or two summary paragraphs, under the title']);
+		expect(descriptionDefects(['a', 'b'])).toEqual([]);
+		expect(descriptionDefects(['a', 'b', 'c'])).toEqual([]);
+		expect(descriptionDefects(['a', 'b', 'c', 'd'])).toEqual(['the description has 4 paragraphs; keep it to a background paragraph and one or two summary paragraphs']);
+		expect(descriptionParagraphs('One\nwrapped line.\n\nTwo.\n')).toEqual(['One wrapped line.', 'Two.']);
 	});
 
 	it('refuses any other heading', () => {

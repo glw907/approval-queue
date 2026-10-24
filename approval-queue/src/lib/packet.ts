@@ -77,6 +77,8 @@ export interface Packet {
 	background: string;
 	/** The description's other one or two paragraphs: what is proposed, what approving does, and how. */
 	summary: string[];
+	/** The revision's bullets, from `## What changed`; absent on a first packet. */
+	whatChanged?: string[];
 	steps: PlanStep[];
 	notChecked: string;
 	asks: PacketAsk[];
@@ -227,6 +229,30 @@ interface RawSection {
 /** The longest title the board and the header show on one or two lines. */
 const TITLE_MAX = 80;
 
+/** Defects of a title: a heading with no closing punctuation, short enough for the board. */
+export function titleDefects(title: string): string[] {
+	const defects: string[] = [];
+	if (/[.!?]$/.test(title)) defects.push('the title is a heading: drop its closing punctuation');
+	if (title.length > TITLE_MAX) defects.push(`the title runs ${title.length} characters; keep it to ${TITLE_MAX}`);
+	return defects;
+}
+
+/** Defects of a description's paragraphs: a background paragraph, then one or two summary paragraphs. */
+export function descriptionDefects(paragraphs: readonly string[]): string[] {
+	if (paragraphs.length < 2) {
+		return ['the description is a background paragraph, then one or two summary paragraphs, under the title'];
+	}
+	if (paragraphs.length > 3) {
+		return [`the description has ${paragraphs.length} paragraphs; keep it to a background paragraph and one or two summary paragraphs`];
+	}
+	return [];
+}
+
+/** Splits a description file into its paragraphs, each joined into one line. */
+export function descriptionParagraphs(text: string): string[] {
+	return paragraphsOf(scan(text.replace(/\r\n?/g, '\n')));
+}
+
 /**
  * Parses a packet file. Defects are collected, so one refusal lists everything to fix, except a
  * missing title, which stops the parse because nothing after it can be placed.
@@ -240,9 +266,7 @@ export function parsePacket(markdown: string, options: PacketOptions = {}): Resu
 		return refuse('missing title: start the file with `# <title>`');
 	}
 	const headline = headingLine.text.slice(2).trim();
-	const errors: string[] = [];
-	if (/[.!?]$/.test(headline)) errors.push('the title is a heading: drop its closing punctuation');
-	if (headline.length > TITLE_MAX) errors.push(`the title runs ${headline.length} characters; keep it to ${TITLE_MAX}`);
+	const errors: string[] = titleDefects(headline);
 
 	const sections: RawSection[] = [];
 	const description: Line[] = [];
@@ -255,20 +279,17 @@ export function parsePacket(markdown: string, options: PacketOptions = {}): Resu
 		else description.push(line);
 	}
 	const paragraphs = paragraphsOf(description);
-	if (paragraphs.length < 2) {
-		errors.push('the description is a background paragraph, then one or two summary paragraphs, under the title');
-	} else if (paragraphs.length > 3) {
-		errors.push(`the description has ${paragraphs.length} paragraphs; keep it to a background paragraph and one or two summary paragraphs`);
-	}
+	errors.push(...descriptionDefects(paragraphs));
 
 	const required = ['If you approve', 'Not checked'];
 	const named = new Map<string, RawSection>();
 	const asks: RawSection[] = [];
 	let routine: RawSection | undefined;
+	let changed: RawSection | undefined;
 	let lastRank = -1;
 	for (const section of sections) {
 		const h = section.heading;
-		const rank = required.indexOf(h) >= 0 ? required.indexOf(h) : h.startsWith('Ask:') ? 2 : h === 'Routine' ? 3 : -1;
+		const rank = h === 'What changed' ? 0 : required.indexOf(h) >= 0 ? required.indexOf(h) + 1 : h.startsWith('Ask:') ? 3 : h === 'Routine' ? 4 : -1;
 		if (h === 'Background') {
 			errors.push('`## Background` is not a packet section; its text is the first paragraph under the title');
 			continue;
@@ -277,12 +298,15 @@ export function parsePacket(markdown: string, options: PacketOptions = {}): Resu
 			errors.push(`\`## ${h}\` is not a packet section`);
 			continue;
 		}
-		if (rank < lastRank) errors.push(`\`## ${h}\` is out of order; the order is ${required.join(', ')}, the asks, then Routine`);
+		if (rank < lastRank) errors.push(`\`## ${h}\` is out of order; the order is What changed (a revision only), ${required.join(', ')}, the asks, then Routine`);
 		lastRank = Math.max(lastRank, rank);
-		if (rank < 2) {
+		if (rank === 0) {
+			if (changed) errors.push('`## What changed` appears twice; keep one');
+			else changed = section;
+		} else if (rank < 3) {
 			if (named.has(h)) errors.push(`\`## ${h}\` appears twice; keep one`);
 			else named.set(h, section);
-		} else if (rank === 2) asks.push(section);
+		} else if (rank === 3) asks.push(section);
 		else if (routine) errors.push('`## Routine` appears twice; keep one');
 		else routine = section;
 	}
@@ -292,6 +316,21 @@ export function parsePacket(markdown: string, options: PacketOptions = {}): Resu
 		else if (prose(section.body) === '') errors.push(`\`## ${name}\` is empty`);
 	}
 	if (asks.length > 3) errors.push('at most three asks; split the packet or settle one');
+
+	const whatChanged: string[] = [];
+	for (const line of changed?.body ?? []) {
+		if (!line.fenced && line.text.trim() === '') continue;
+		const bullet = line.fenced ? null : BULLET.exec(line.text);
+		if (bullet) whatChanged.push(bullet[1].trim());
+		else if (!line.fenced && whatChanged.length > 0 && /^\s/.test(line.text)) whatChanged[whatChanged.length - 1] += ` ${line.text.trim()}`;
+		else {
+			errors.push('`## What changed` is a bulleted list and nothing else');
+			break;
+		}
+	}
+	if (changed && whatChanged.length === 0 && !errors.includes('`## What changed` is a bulleted list and nothing else')) {
+		errors.push('`## What changed` is empty; list at least one bullet');
+	}
 
 	const steps: PlanStep[] = [];
 	const planBody = named.get('If you approve')?.body ?? [];
@@ -472,6 +511,7 @@ export function parsePacket(markdown: string, options: PacketOptions = {}): Resu
 			background: paragraphs[0],
 			summary: paragraphs.slice(1),
 			steps,
+			...(changed && { whatChanged }),
 			notChecked: prose(named.get('Not checked')!.body),
 			asks: parsedAsks,
 			routine: rows,

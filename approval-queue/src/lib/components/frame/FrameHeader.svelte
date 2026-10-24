@@ -2,7 +2,8 @@
 The Survey header every screen opens with: crumb, benchmark triangle, headline, lede, and the
 contour texture behind them. The screen passes its own crumb, headline, and lede as snippets, so
 rendered inline Markdown works. A headline over about 120 characters takes the `long` size. A
-packet passes `description`, its paragraphs each in a `<p>`, in place of the one-paragraph lede.
+packet, blueprint, or page passes `description`, its paragraphs each in a `<p>`; a `lede` passed
+beside it follows as a smaller status line, and one passed alone is the one-paragraph lede.
 -->
 <script lang="ts">
 	import type { Snippet } from 'svelte';
@@ -29,7 +30,18 @@ packet passes `description`, its paragraphs each in a `<p>`, in place of the one
 	<h1 class={['desk-title', long && 'long']}><span class="site-benchmark" aria-hidden="true"></span>{@render headline()}</h1>
 	{#if description}
 		<div class="lede">{@render description()}</div>
-	{:else if lede}
-		<p class="lede">{@render lede()}</p>
+	{/if}
+	{#if lede}
+		<p class={description ? 'doc-status' : 'lede'}>{@render lede()}</p>
 	{/if}
 </header>
+
+<style>
+	.doc-status {
+		max-width: 62ch;
+		margin: 14px 0 0;
+		font-size: 0.9rem;
+		line-height: 1.5;
+		color: var(--color-muted);
+	}
+</style>

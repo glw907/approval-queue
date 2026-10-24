@@ -7,8 +7,8 @@ set -euo pipefail
 
 usage="usage: approval-queue <pr|design|triage> <repo> <title> <source>
        approval-queue packet [--check] <initiative> <file>
-       approval-queue blueprint <worktree> <title> <file> [--notes <notes.json>] [--replies <replies.json>]
-       approval-queue page <worktree> <title> <file> --pr <owner/repo#n> [--notes <notes.json>] [--replies <replies.json>]
+       approval-queue blueprint <worktree> <title> <file> --description <file> [--notes <notes.json>] [--replies <replies.json>]
+       approval-queue page <worktree> <title> <file> --pr <owner/repo#n> --description <file> [--notes <notes.json>] [--replies <replies.json>]
        approval-queue change <owner/repo#n> <title> [--notes <notes.json>] [--replies <replies.json>]
        approval-queue approved [--kind blueprint|page] <file> <blob>"
 root="${XDG_STATE_HOME:-$HOME/.local/state}/approval-queue"
@@ -35,7 +35,7 @@ if [ "${1:-}" = approved ]; then
   exit 1
 fi
 
-check="" initiative="" repo="" title="" source="" worktree="" notes="" replies="" pr="" pr_repo="" number="" prhead=""
+check="" initiative="" repo="" title="" source="" worktree="" notes="" replies="" description="" pr="" pr_repo="" number="" prhead=""
 if [ "${1:-}" = blueprint ] || [ "${1:-}" = page ] || [ "${1:-}" = change ]; then
   kind=$1
   shift
@@ -44,6 +44,7 @@ if [ "${1:-}" = blueprint ] || [ "${1:-}" = page ] || [ "${1:-}" = change ]; the
     case "$1" in
       --notes) [ $# -ge 2 ] || { echo "$usage" >&2; exit 2; }; notes=$2; shift 2 ;;
       --replies) [ $# -ge 2 ] || { echo "$usage" >&2; exit 2; }; replies=$2; shift 2 ;;
+      --description) [ "$kind" != change ] && [ $# -ge 2 ] || { echo "$usage" >&2; exit 2; }; description=$2; shift 2 ;;
       --pr) [ "$kind" = page ] && [ $# -ge 2 ] || { echo "$usage" >&2; exit 2; }; pr=$2; shift 2 ;;
       *) args+=("$1"); shift ;;
     esac
@@ -153,6 +154,54 @@ refuse_packet() {
   exit 2
 }
 
+# check_description: refuses (exit 2) a blueprint or page with no --description file, or one whose title or
+# paragraphs break the register's rules, before any item directory exists.
+check_description() {
+  local rc=0
+  if [ -z "$description" ]; then
+    echo "approval-queue: $kind needs --description <file>: two or three paragraphs, a background paragraph and then one or two summary paragraphs, that the page shows under the title (see the README's \"The description\" section)" >&2
+    exit 2
+  fi
+  if [ ! -f "$description" ]; then echo "approval-queue: no description file at $description" >&2; exit 2; fi
+  node "$app/src/check-brief.ts" description "$description" "$title" >/dev/null 2>"$check_err" || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    cat "$check_err" >&2
+    [ "$rc" -eq 2 ] || echo "approval-queue: the description check failed to run" >&2
+    exit "$((rc == 2 ? 2 : 1))"
+  fi
+}
+
+# The revision lookup. Given $refs, an array of {ref, kind}, it prints null, or {item, revision, parts} when
+# one or more refs are sent back. A ref is sent back when its latest log line (a line that does not parse is
+# skipped) is a reject. `item` is the packet id of the latest such line and `revision` is one more than the
+# number of distinct packet ids among the reject lines naming any ref after that ref's latest approve. `parts`
+# holds the head or sha256 of each sent-back ref's reject line in that item.
+revision_program=$(cat <<'JQ'
+[inputs | fromjson? | objects] as $L
+| ($L | to_entries) as $E
+| def lines($r): [$E[] | select(.value.ref == $r.ref and .value.kind == $r.kind)];
+  [$refs[] | . as $r | (lines($r) | last) as $last
+   | select($last != null and $last.value.verdict == "reject")
+   | {ref: $r.ref, at: $last.key, item: $last.value.packet}] as $sent
+| if ($sent | length) == 0 then null
+  else
+    ($sent | max_by(.at)) as $latest
+    | {item: $latest.item,
+       revision: (1 + ([$refs[] | . as $r | lines($r) as $mine
+           | (([$mine[] | select(.value.verdict == "approve") | .key] | last) // -1) as $ap
+           | $mine[] | select(.value.verdict == "reject" and .key > $ap) | .value.packet] | unique | length)),
+       parts: [$sent[] | select(.item == $latest.item) | $L[.at] as $l
+           | {ref: .ref} + (if $l.head then {head: $l.head} elif $l.sha256 then {sha256: $l.sha256} else {} end)]}
+  end
+JQ
+)
+
+# revision_of <refs json>: prints the lookup's answer, null when nothing is sent back or no log exists yet.
+revision_of() {
+  [ -e "$root/decisions.jsonl" ] || { echo null; return 0; }
+  jq -R -n -c --argjson refs "$1" "$revision_program" "$root/decisions.jsonl"
+}
+
 # waiting_item <ref>: prints the id of a waiting item (one with an item.json and no decision.json)
 # that holds the PR, whether a packet part, a pr-kind item, or a change.
 waiting_item() {
@@ -164,11 +213,35 @@ waiting_item() {
   done | head -n 1
 }
 
+# since_diff <dir> <owner/repo> <old head> <new head>: for a part whose head moved since Geoff sent it back,
+# saves what changed since as since.patch when the old head is still behind the new one, and as since.json
+# {"gone": true} when it is not (a force-push: GitHub answers another status, 404, or 422). A diff too large to
+# serve (406) saves neither, so the part shows its full list; any other gh failure is a tool failure.
+since_diff() {
+  local d=$1 r=$2 old=$3 new=$4 status err
+  [ "$old" != "$new" ] || return 0
+  if status=$(gh api "repos/$r/compare/$old...$new" --jq '.status' 2>"$check_err" </dev/null); then
+    if [ "$status" = ahead ]; then
+      if err=$(gh api -H 'Accept: application/vnd.github.diff' "repos/$r/compare/$old...$new" 2>&1 >"$d/since.patch" </dev/null); then return 0; fi
+      rm -f "$d/since.patch"
+      case $err in *406*) return 0 ;; esac
+      printf '%s\n' "$err" >&2
+      exit 1
+    fi
+    echo '{"gone": true}' >"$d/since.json"
+    return 0
+  fi
+  case $(cat "$check_err") in
+    *404* | *422*) echo '{"gone": true}' >"$d/since.json" ;;
+    *) cat "$check_err" >&2; exit 1 ;;
+  esac
+}
+
 # queue_packet: parses the packet, fetches every part under the queue lock, checks the PR data, and
 # writes the item directory, item.json last. With --check it stops before writing anything. Sets
 # repo and leaves the lock released.
 queue_packet() {
-  local rc=0 k kind_k owner_k repo_k number_k path_k headline initiative_title="" ref st other defects=()
+  local rc=0 k kind_k owner_k repo_k number_k path_k headline initiative_title="" ref st other old revises defects=()
   if [ "$initiative" != none ]; then
     [[ $initiative =~ ^[a-z0-9-]+$ && -e "$projects/initiatives/$initiative/initiative.yaml" ]] \
       || refuse_packet "the initiative is none or the id of a record: no initiatives/$initiative/initiative.yaml under $projects ($register)"
@@ -184,6 +257,12 @@ queue_packet() {
   fi
   mkdir -p "$fetch/parts"
   mv "$fetch.json" "$fetch/packet.json"
+  revises=$(revision_of "$(jq -c '[.parts[].part | select(.kind == "pr" or .kind == "design") | {ref, kind}]' "$fetch/packet.json")")
+  if [ "$revises" != null ] && ! jq -e '.whatChanged' "$fetch/packet.json" >/dev/null; then
+    refuse_packet "this packet resends $(jq -r '[.parts[].ref] | join(", ")' <<<"$revises") that you sent back in the item $(jq -r '.item' <<<"$revises"); add a \`## What changed\` section of bullets saying what changed ($register)"
+  elif [ "$revises" = null ] && jq -e '.whatChanged' "$fetch/packet.json" >/dev/null; then
+    refuse_packet "\`## What changed\` is for a packet that resends a part you sent back, and no part of this packet was sent back; drop the section ($register)"
+  fi
   exec 8>"$root/queue.lock"
   flock 8
   while IFS=$'\x1f' read -r k kind_k owner_k repo_k number_k path_k; do
@@ -224,6 +303,12 @@ queue_packet() {
     refuse_packet "$(printf '%s\n' "${defects[@]}") (see $register)"
   fi
   if [ -n "$check" ]; then exit 0; fi
+  if [ "$revises" != null ]; then
+    while IFS=$'\x1f' read -r k owner_k repo_k old; do
+      since_diff "$fetch/parts/$k" "$owner_k/$repo_k" "$old" "$(jq -r '.head' "$fetch/parts/$k/pr.json")"
+    done < <(jq -r --argjson r "$revises" '.parts | to_entries[] | select(.value.part.kind == "pr") | .key as $k | .value.part as $p
+      | $r.parts[] | select(.ref == $p.ref and .head != null) | [$k, $p.owner, $p.repo, .head] | join("\u001f")' "$fetch/packet.json")
+  fi
   headline=$(jq -r '.headline' "$fetch/packet.json")
   repo=$(jq -r '[.parts[].part | select(.kind != "step")][0] | "\(.owner)/\(.repo)"' "$fetch/packet.json")
   mkdir -p "$item"
@@ -231,9 +316,9 @@ queue_packet() {
   mv "$fetch/packet.json" "$item/packet.json"
   mv "$fetch/parts" "$item/parts"
   jq -n --arg id "$id" --arg initiative "$initiative" --arg ititle "$initiative_title" --arg repo "$repo" --arg headline "$headline" \
-    --arg created "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --slurpfile packet "$item/packet.json" \
+    --arg created "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --slurpfile packet "$item/packet.json" --argjson revises "$revises" \
     '{id: $id, kind: "packet", initiative: $initiative, initiativeTitle: $ititle, repo: $repo, title: $headline, created: $created,
-      headline: $headline, refs: [$packet[0].parts[].part.ref]}' >"$item/item.json.tmp"
+      headline: $headline, refs: [$packet[0].parts[].part.ref]} + (if $revises == null then {} else {revises: $revises} end)' >"$item/item.json.tmp"
   mv "$item/item.json.tmp" "$item/item.json"
   exec 8>&-
 }
@@ -351,6 +436,7 @@ check_replies() {
 blob=""
 check_blueprint() {
   local top common entry
+  check_description
   if ! top=$(git -C "$worktree" rev-parse --show-toplevel 2>/dev/null); then
     echo "approval-queue: $worktree is not a git worktree" >&2; exit 2
   fi
@@ -530,7 +616,7 @@ queue_change() {
   exec 8>&-
 }
 
-head="" file=""
+head="" file="" revises=null
 case "$kind" in
   pr)
     view=$(gh pr view "$source" -R "$repo" --json body,headRefOid,number,url,headRefName,baseRefName,statusCheckRollup)
@@ -556,20 +642,25 @@ case "$kind" in
   packet) queue_packet ;;
   change) queue_change ;;
   blueprint | page)
+    # The log names a document as <repo>:<file>, so `./x` and `x` must read as the same ref across resends.
+    source=${source#./}
     check_blueprint
     if [ "$kind" = page ]; then
       check_origin
       prhead=$(pr_head "$pr_repo" "$number") || { echo "approval-queue: could not read the head of $pr" >&2; exit 1; }
     fi
+    revises=$(revision_of "$(jq -nc --arg ref "$repo:$source" --arg kind "$kind" '[{ref: $ref, kind: $kind}]')")
     mkdir -p "$item"
+    cp "$description" "$item/description.md"
     git -C "$worktree" cat-file blob "$blob" >"$item/doc.md"
     if [ -n "$notes" ]; then jq -c . "$notes" >"$item/notes.json"; else echo '[]' >"$item/notes.json"; fi
     if [ -n "$replies" ]; then jq -c . "$replies" >"$item/replies.json"; fi
     jq -n --arg id "$id" --arg repo "$repo" --arg title "$title" --arg created "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-      --arg worktree "$worktree" --arg file "$source" --arg blob "$blob" --arg kind "$kind" --arg pr "$pr" --arg prhead "$prhead" \
+      --arg worktree "$worktree" --arg file "$source" --arg blob "$blob" --arg kind "$kind" --arg pr "$pr" --arg prhead "$prhead" --argjson revises "$revises" \
       '{id: $id, kind: $kind, repo: $repo, title: $title, headline: $title, created: $created,
         worktree: $worktree, file: $file, blob: $blob}
-       + (if $pr == "" then {} else {pr: $pr, prHead: $prhead} end)' \
+       + (if $pr == "" then {} else {pr: $pr, prHead: $prhead} end)
+       + (if $revises == null then {} else {revises: {item: $revises.item, revision: $revises.revision}} end)' \
       >"$item/item.json.tmp"
     mv "$item/item.json.tmp" "$item/item.json"
     ;;
@@ -609,6 +700,7 @@ if ! curl -sf "$base/item/$id" >/dev/null 2>&1; then
   echo "approval-queue: an app on $port does not serve this state root; stop it with pkill -f '^node $app/build'" >&2
   exit 1
 fi
+echo "approval-queue: queued $id at $base/item/$id" >&2
 
 # One tab serves the whole queue. An open tab polls every 2 seconds and each poll touches tab.seen,
 # so a tab.seen under 5 seconds old marks a live tab, and a poll after item.json proves it holds
@@ -657,8 +749,13 @@ $pk[0] as $p
     + (if $bound[$e.part.ref] then {rule: $bound[$e.part.ref].rule} else {} end) + $extra;
   if ($dec | type) != "object" then error("shape")
   elif $dec.decision == "reject" then
-    if ($dec | keys) == ["decision", "note"] and ($dec.note | type) == "string" then
-      {out: {decision: "reject", note: $dec.note},
+    if (($dec | keys) == ["decision", "note"] or ($dec | keys) == ["calls", "decision", "note"]) and ($dec.note | type) == "string"
+      and (($dec | has("calls") | not) or ($dec.calls | type) == "array")
+      and all(($dec.calls // [])[]; type == "object" and
+        ((keys == ["ref", "verdict"] and (.ref | type) == "string" and (.verdict | type | IN("string", "null")))
+         or (keys == ["ask", "choice", "question"] and (.ask | type) == "number" and (.question | type) == "string" and (.choice | type | IN("string", "null")))))
+    then
+      {out: {decision: "reject", note: $dec.note, calls: ($dec.calls // [])},
        log: [$p.parts[] | partline(.; {verdict: "reject"} + ($fact[.part.ref] // {} | del(.changed)))]}
     else error("shape") end
   elif $dec.decision == "approve" and ($dec | keys) == ["asks", "decision", "parts"]
