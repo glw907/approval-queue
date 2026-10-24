@@ -4,6 +4,10 @@
 
 ## Medium
 
+- [ ] **#29** `tests/packet.test.sh` fails when another session logs a decision mid-gate `#bug` `#approval-queue` `#initiative:approval-queue` *(2026-10-24)*
+  The test guards the live queue by comparing the size of `~/.local/state/approval-queue/decisions.jsonl` before and after the run, so any real decision logged during the gate reads as a leak. It failed three times this way in the send-back revisions pass. Assert instead that no line the test wrote (its packet ids or refs) appears in the live log.
+  Record: `~/Projects/initiatives/approval-queue/plans/2026-10-24-sendback-revisions.md`
+
 - [ ] **#28** A packet send-back marks every part sent back, so each reads as a revision `#improvement` `#approval-queue` `#initiative:approval-queue` *(2026-10-24)*
   The revision lookup takes the latest reject line per ref, and a packet send-back logs one reject line per part, so a resend of one fixed part and one unchanged part needs `## What changed` for both and gives both a since diff when their heads moved. A send-back verdict on one part inside an approve is not counted at all (the plan's "Later"). Decide whether a revision should count only the parts Geoff set to send back.
   Record: `~/Projects/initiatives/approval-queue/plans/2026-10-24-sendback-revisions.md`
