@@ -85,7 +85,7 @@
   `marked`'s inline lexer leaves `&amp;` undecoded, so a heading holding an entity can slug differently from the page's `rehype-slug` (T2 report).
 
 - [ ] **#33** `tests/lifecycle.test.sh`'s defer case hung past its 5-second finish limit once `#bug` `#approval-queue` `#initiative:approval-queue` *(2026-10-24)*
-  Seen by a diff-reviewer rerun in the docs friction pass; it passed on the next run. A timing-sensitive wait in the defer path or in `finish()`. Not reproduced.
+  Seen three times in the docs friction pass (a diff-reviewer rerun and two fix-chain gate runs, each while other work loaded the machine); it passed on the next run and in three solo runs. A timing-sensitive wait in the defer path or in `finish()`. Not reproduced on demand.
 
 - [ ] **#32** The live-log leak check only sees ids still in the test's temp log `#improvement` `#approval-queue` `#initiative:approval-queue` *(2026-10-24)*
   `tests/packet.test.sh` removes or overwrites the temp log between sections, so ids from earlier sections are never checked, and a command that wrote only to the live log never puts its id in the temp log. Collect every id a test queued instead (task-scope diff-reviewer, docs friction).
