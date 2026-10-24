@@ -20,4 +20,15 @@ describe('nextItem', () => {
 	it('returns the oldest when the current is not in the queue', () => {
 		expect(nextItem(queue, 'zz')?.id).toBe('a');
 	});
+
+	it('skips a deferred item, after the current one and when wrapping to the oldest', () => {
+		const deferred = [{ id: 'a' }, { id: 'b', deferred: true }, { id: 'c' }, { id: 'd', deferred: true }];
+		expect(nextItem(deferred, 'a')?.id).toBe('c');
+		expect(nextItem(deferred, 'c')?.id).toBe('a');
+		expect(nextItem([{ id: 'a', deferred: true }, { id: 'b' }], 'b')).toBeNull();
+	});
+
+	it('returns null when every other item is deferred', () => {
+		expect(nextItem([{ id: 'a' }, { id: 'b', deferred: true }], 'a')).toBeNull();
+	});
 });

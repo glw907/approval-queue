@@ -32,7 +32,7 @@ const board = (sort?: string) =>
 	load({ depends() {}, cookies: { get: () => sort } } as never) as Promise<{
 		empty: false;
 		sort: string;
-		rows: Array<{ id: string; group: string; asks: number; rules: string[]; repos: number; irreversible: boolean; single?: string }>;
+		rows: Array<{ id: string; group: string; asks: number; rules: string[]; repos: number; irreversible: boolean; single?: string; deferred: boolean; orphaned: boolean }>;
 	}>;
 
 describe('/', () => {
@@ -73,6 +73,16 @@ describe('/', () => {
 		]);
 	});
 
+	it('carries whether Geoff deferred a row and whether its session is gone', async () => {
+		await seed('a', '2026-10-11T10:00:00Z');
+		await seed('b', '2026-10-11T11:00:00Z');
+		await seed('c', '2026-10-11T12:00:00Z');
+		await writeFile(join(state.root, 'items', 'b', 'deferred.json'), '{}');
+		await writeFile(join(state.root, 'items', 'c', 'item.json'), JSON.stringify({ id: 'c', kind: 'design', repo: 'o/r', title: 'c', created: '2026-10-11T12:00:00Z', pid: 2 ** 22 + 1, pidStart: 1 }));
+		const { rows } = await board();
+		expect(Object.fromEntries(rows.map((r) => [r.id, [r.deferred, r.orphaned]]))).toEqual({ a: [false, false], b: [true, false], c: [false, true] });
+	});
+
 	it('reads the sort from the cookie, asks first by default', async () => {
 		await seed('a', '2026-10-11T10:00:00Z');
 		expect((await board()).sort).toBe('asks');
@@ -104,11 +114,44 @@ describe('layout', () => {
 		expect(keys).toEqual(['desk:queue']);
 	});
 
-	it('touches tab.seen on a poll from a running page, never on a server render', async () => {
-		const seen = join(state.root, 'tab.seen');
-		await layoutLoad({ depends() {}, isDataRequest: false } as never);
-		await expect(access(seen)).rejects.toThrow();
-		await layoutLoad({ depends() {}, isDataRequest: true } as never);
-		await expect(access(seen)).resolves.toBeUndefined();
+	describe('the claim', () => {
+		const TOKEN = 'a'.repeat(64);
+		const seen = () => join(state.root, 'tab.seen');
+
+		/** Runs the layout load as a poll (or a server render) carrying `cookie`, and returns the cookie sets. */
+		async function poll(cookie: string | undefined, isDataRequest = true) {
+			const sets: Array<{ name: string; value: string; options: object }> = [];
+			const cookies = { get: () => cookie, set: (name: string, value: string, options: object) => sets.push({ name, value, options }) };
+			await layoutLoad({ depends() {}, isDataRequest, cookies } as never);
+			return sets;
+		}
+
+		it('touches tab.seen and sets the cookie again on a poll that carries the token', async () => {
+			await writeFile(join(state.root, 'claim.token'), TOKEN);
+			expect(await poll(TOKEN)).toEqual([
+				{
+					name: 'desk-claim',
+					value: TOKEN,
+					options: { path: '/', httpOnly: true, sameSite: 'lax', secure: false, maxAge: 34_560_000 }
+				}
+			]);
+			await expect(access(seen())).resolves.toBeUndefined();
+		});
+
+		it('touches nothing for a poll with another value, with no cookie, or with no token file', async () => {
+			await writeFile(join(state.root, 'claim.token'), TOKEN);
+			expect(await poll('b'.repeat(64))).toEqual([]);
+			expect(await poll(undefined)).toEqual([]);
+			await rm(join(state.root, 'claim.token'));
+			expect(await poll(TOKEN)).toEqual([]);
+			expect(await poll('')).toEqual([]);
+			await expect(access(seen())).rejects.toThrow();
+		});
+
+		it('never touches tab.seen on a server render, whatever the cookie', async () => {
+			await writeFile(join(state.root, 'claim.token'), TOKEN);
+			expect(await poll(TOKEN, false)).toEqual([]);
+			await expect(access(seen())).rejects.toThrow();
+		});
 	});
 });

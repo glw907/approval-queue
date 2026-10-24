@@ -1186,3 +1186,134 @@ describe('comments on a change', () => {
 		expect(JSON.parse(await readFile(join(state.root, 'items', two, 'decision.json'), 'utf8'))).toEqual({ decision: 'reject', note: 'n', comments, threads: [] });
 	});
 });
+
+describe('defer', () => {
+	const SECOND = '20261011T100100-2';
+	const THIRD = '20261011T100200-3';
+	const seedAt = (id: string, created: string, meta: object = {}) =>
+		seed(id, { kind: 'design', file: 'd.md', created, ...meta }, { 'doc.md': '# d' });
+	const deferredFile = (id = ID) => join(state.root, 'items', id, 'deferred.json');
+
+	it('writes deferred.json with the time, leaves item.json, and answers the next item', async () => {
+		await seedAt(ID, '2026-10-11T10:00:00Z');
+		await seedAt(SECOND, '2026-10-11T10:01:00Z');
+		expect(await call('defer')).toEqual({ next: `/item/${SECOND}` });
+		expect(JSON.parse(await readFile(deferredFile(), 'utf8')).at).toMatch(/^\d{4}-\d{2}-\d{2}T.*Z$/);
+		await expect(readFile(join(state.root, 'items', ID, 'item.json'), 'utf8')).resolves.toContain(ID);
+		await expect(readFile(join(state.root, 'items', ID, 'decision.json'), 'utf8')).rejects.toThrow();
+	});
+
+	it('is null when nothing else waits', async () => {
+		await seedAt(ID, '2026-10-11T10:00:00Z');
+		expect(await call('defer')).toEqual({ next: null });
+	});
+
+	it('refuses a triage with 400 and writes nothing', async () => {
+		await seedTriage();
+		expect(await call('defer')).toMatchObject({ status: 400 });
+		await expect(readFile(deferredFile(), 'utf8')).rejects.toThrow();
+	});
+
+	it('refuses a decided item with 409 ALREADY_DECIDED', async () => {
+		await seedAt(ID, '2026-10-11T10:00:00Z');
+		await call('approve', [['cards', '']]);
+		expect(await call('defer')).toMatchObject({ status: 409, data: { message: 'Already decided' } });
+		await expect(readFile(deferredFile(), 'utf8')).rejects.toThrow();
+	});
+
+	it('refuses an item already deferred with 409', async () => {
+		await seedAt(ID, '2026-10-11T10:00:00Z');
+		await call('defer');
+		const first = await readFile(deferredFile(), 'utf8');
+		expect(await call('defer')).toMatchObject({ status: 409, data: { message: 'Already deferred' } });
+		expect(await readFile(deferredFile(), 'utf8')).toBe(first);
+	});
+
+	it('404s an unknown id', async () => {
+		await expect(call('defer')).rejects.toMatchObject({ status: 404 });
+	});
+
+	it('never opens a deferred item next, from defer or from a decision', async () => {
+		await seedAt(ID, '2026-10-11T10:00:00Z');
+		await seedAt(SECOND, '2026-10-11T10:01:00Z');
+		await seedAt(THIRD, '2026-10-11T10:02:00Z');
+		await call('defer', [], SECOND);
+		expect(await call('approve', [['cards', '']])).toEqual({ next: `/item/${THIRD}` });
+	});
+
+	it('a later approve writes decision.json as for any item', async () => {
+		await seedAt(ID, '2026-10-11T10:00:00Z');
+		await call('defer');
+		await call('approve', [['cards', '']]);
+		expect(await decision()).toEqual({ decision: 'approve', choices: [] });
+	});
+
+	it('load carries deferred, orphaned, and canDefer for each state of the item', async () => {
+		const data = async () => (await load({ params: { id: ID } } as never)) as unknown as { meta: { deferred: boolean; orphaned: boolean }; canDefer: boolean };
+		await seedAt(ID, '2026-10-11T10:00:00Z');
+		expect(await data()).toMatchObject({ meta: { deferred: false, orphaned: false }, canDefer: true });
+		await call('defer');
+		expect(await data()).toMatchObject({ meta: { deferred: true, orphaned: false }, canDefer: false });
+		await rm(deferredFile());
+		await call('approve', [['cards', '']]);
+		expect(await data()).toMatchObject({ canDefer: false });
+		await rm(join(state.root, 'items', ID), { recursive: true });
+		await seedTriage();
+		expect(await data()).toMatchObject({ canDefer: false });
+		await rm(join(state.root, 'items', ID), { recursive: true });
+		await seedAt(ID, '2026-10-11T10:00:00Z', { pid: 2 ** 22 + 1, pidStart: 1 });
+		expect(await data()).toMatchObject({ meta: { deferred: false, orphaned: true }, canDefer: true });
+	});
+});
+
+describe('an amend', () => {
+	const seedBlueprint = (meta: object, files: Record<string, string>) =>
+		seed(ID, { kind: 'blueprint', worktree: join(state.root, 'gone'), file: 'blueprints/b.blueprint.md', blob: 'new', ...meta }, { 'doc.md': '---\npage: B\n---\n\nNow.\n', ...files });
+	const data = async () => (await load({ params: { id: ID } } as never)) as unknown as { amend?: { blob: string; original: string } };
+
+	it('carries the approved blob and text beside the document', async () => {
+		await seedBlueprint({ amends: 'abc123' }, { 'approved.md': '---\npage: B\n---\r\n\r\nBefore.\r\n' });
+		expect((await data()).amend).toEqual({ blob: 'abc123', original: '---\npage: B\n---\n\nBefore.\n' });
+	});
+
+	it('carries no amend for a full review', async () => {
+		await seedBlueprint({}, {});
+		expect(await data()).not.toHaveProperty('amend');
+	});
+});
+
+describe('a packet whose packet.json does not parse', () => {
+	const PACKET = fixture('packet-baseline.md').replace('glw907/drafter:docs/specs/notes-design.md', 'glw907/drafter#43');
+	const WITHDRAWN = 'This item was withdrawn by its session; nothing was recorded';
+	beforeEach(async () => {
+		await seedPacket(state.root, ID, PACKET);
+		await writeFile(join(state.root, 'items', ID, 'packet.json'), '{nope');
+	});
+
+	it('404s the load, as for a withdrawn item', async () => {
+		await expect(load({ params: { id: ID } } as never)).rejects.toMatchObject({ status: 404 });
+	});
+
+	it('answers a post from the open packet page 410 with the withdrawn message, and any other post 404', async () => {
+		expect(await call('approve', [['fingerprint', 'abc']])).toMatchObject({ status: 410, data: { message: WITHDRAWN, board: '/' } });
+		expect(await call('reject', [['fingerprint', 'abc']])).toMatchObject({ status: 410, data: { message: WITHDRAWN } });
+		await expect(call('approve')).rejects.toMatchObject({ status: 404 });
+	});
+});
+
+describe('a reject or submit that is not a form post', () => {
+	const notForm = () => new Request('http://127.0.0.1:7907/', { method: 'POST', body: '{}', headers: { 'content-type': 'application/json' } });
+	const noDecision = () => expect(readFile(join(state.root, 'items', ID, 'decision.json'), 'utf8')).rejects.toThrow();
+
+	it('answers a PR reject 400 and writes nothing', async () => {
+		await seedPr();
+		expect(await actions.reject({ request: notForm(), params: { id: ID } } as never)).toMatchObject({ status: 400, data: { message: 'Not a form post' } });
+		await noDecision();
+	});
+
+	it('answers a triage submit 400 and writes nothing', async () => {
+		await seedTriage();
+		expect(await actions.submit({ request: notForm(), params: { id: ID } } as never)).toMatchObject({ status: 400, data: { message: 'Not a form post' } });
+		await noDecision();
+	});
+});

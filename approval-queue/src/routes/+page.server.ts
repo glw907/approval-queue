@@ -10,7 +10,7 @@ import type { PageServerLoad } from './$types';
 const KINDS = { pr: 'PR', design: 'Design', triage: 'Triage', blueprint: 'Blueprint', page: 'Page', change: 'Change' };
 
 async function toRow(meta: ItemMeta): Promise<BoardRow> {
-	const base = { id: meta.id, headline: meta.headline ?? meta.title, created: meta.created };
+	const base = { id: meta.id, headline: meta.headline ?? meta.title, created: meta.created, deferred: meta.deferred, orphaned: meta.orphaned };
 	if (meta.kind !== 'packet') {
 		return { ...base, group: SINGLES, asks: 0, rules: [], repos: 1, irreversible: false, single: KINDS[meta.kind] };
 	}
