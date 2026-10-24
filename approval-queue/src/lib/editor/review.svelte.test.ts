@@ -147,6 +147,7 @@ describe('DocReview remembered choices', () => {
 		await r.flush();
 		expect(heldBySave(r, 'reject')).toBe('Not sent back: Not saved: refused');
 		expect(heldBySave(r, 'approve')).toBe('Not approved: Not saved: refused');
+		expect(heldBySave(r, 'defer')).toBe('Not deferred: Not saved: refused');
 	});
 
 	it('retries a refused save on the next flush, so a decision press is the retry', async () => {

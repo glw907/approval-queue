@@ -411,7 +411,7 @@ export async function writeDecision(root: string, id: string, decision: Decision
 /** Writes `deferred.json` through a temp file and `rename`, so the waiting command never reads a partial file. */
 export async function writeDeferred(root: string, id: string): Promise<void> {
 	const dir = join(root, 'items', id);
-	const tmp = join(dir, 'deferred.json.tmp');
+	const tmp = join(dir, `deferred.json.${randomUUID()}.tmp`);
 	await writeFile(tmp, JSON.stringify({ at: new Date().toISOString() }));
 	await rename(tmp, join(dir, 'deferred.json'));
 }

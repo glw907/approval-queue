@@ -1,7 +1,7 @@
 import { EditorState } from '@codemirror/state';
 import { getChunks, uncollapseUnchanged, unifiedMergeView } from '@codemirror/merge';
 import { describe, expect, it } from 'vitest';
-import { collapsedStart } from './setup.ts';
+import { collapsedStart, collapsedStarts } from './setup.ts';
 
 const lines = (n: number, edit?: [number, string]) =>
 	Array.from({ length: n }, (_, i) => (edit && edit[0] === i ? edit[1] : `line ${i + 1}`)).join('\n');
@@ -42,6 +42,14 @@ describe('the amend review', () => {
 		state = state.update({ effects: uncollapseUnchanged.of(start as number) }).state;
 		expect(collapsedStart(state, state.doc.line(5).from)).toBeNull();
 		expect(collapsedStart(state, state.doc.line(30).from)).not.toBeNull();
+	});
+
+	it('lists every fold, and opening them all leaves none', () => {
+		let state = amend(approved, current);
+		const starts = collapsedStarts(state);
+		expect(starts).toEqual([state.doc.line(1).from, state.doc.line(24).from]);
+		state = state.update({ effects: starts.map((s) => uncollapseUnchanged.of(s)) }).state;
+		expect(collapsedStarts(state)).toEqual([]);
 	});
 
 	it('folds nothing in a state with no merge view', () => {

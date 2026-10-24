@@ -1115,11 +1115,20 @@ a {
 	.bar {
 		display: grid;
 		grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+		align-items: stretch;
 		padding: 12px 16px;
+	}
+	/* Approve takes a row of its own under the status; Send back and Defer share the row below. */
+	.bar .btn-primary,
+	.bar > .btn:first-child:has(+ .state) {
+		grid-column: 1 / -1;
+	}
+	.bar .btn-primary {
+		order: -1;
 	}
 	.bar .state {
 		grid-column: 1 / -1;
-		order: -1;
+		order: -2;
 		text-align: left;
 		margin: 0;
 	}

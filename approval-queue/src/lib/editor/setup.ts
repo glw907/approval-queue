@@ -372,6 +372,7 @@ export function createEditor(parent: HTMLElement, opts: EditorOptions): EditorVi
 	if (Object.keys(opts.decided).length) view.dispatch({ effects: decidedEffect.of(opts.decided) });
 	const first = opts.amend === undefined ? undefined : getChunks(view.state)?.chunks[0];
 	if (first) view.dispatch({ selection: { anchor: first.fromB } });
+	if (opts.amend !== undefined) openableFolds(view);
 	return view;
 }
 
@@ -429,6 +430,47 @@ export function collapsedStart(state: EditorState, pos: number): number | null {
 		});
 	}
 	return start;
+}
+
+/** Every folded run's start, in document order. */
+export function collapsedStarts(state: EditorState): number[] {
+	const starts: number[] = [];
+	for (const source of state.facet(EditorView.decorations)) {
+		if (typeof source === 'function') continue;
+		source.between(0, state.doc.length, (from, _to, value) => {
+			if (value.spec.widget?.type === 'collapsed-unchanged-code') starts.push(from);
+		});
+	}
+	return starts.sort((a, b) => a - b);
+}
+
+/** Opens every folded run of unchanged lines. */
+export function uncollapseAll(view: EditorView) {
+	const starts = collapsedStarts(view.state);
+	if (starts.length) view.dispatch({ effects: starts.map((s) => uncollapseUnchanged.of(s)) });
+}
+
+/**
+ * The merge view draws a fold and a removed chunk as plain divs that only a click opens and that
+ * carry no name. This makes each fold a button that Enter and Space press, and each removed chunk
+ * a labelled group; it is idempotent, so it runs on every update for the widgets CodeMirror redraws.
+ */
+function openableFolds(view: EditorView) {
+	for (const fold of view.dom.querySelectorAll<HTMLElement>('.cm-collapsedLines:not([role])')) {
+		const count = fold.textContent?.match(/\d+/)?.[0];
+		fold.setAttribute('role', 'button');
+		fold.tabIndex = 0;
+		fold.setAttribute('aria-label', count ? `Show ${count} unchanged lines` : 'Show unchanged lines');
+		fold.addEventListener('keydown', (e) => {
+			if (e.key !== 'Enter' && e.key !== ' ') return;
+			e.preventDefault();
+			fold.click();
+		});
+	}
+	for (const gone of view.dom.querySelectorAll('.cm-deletedChunk:not([role])')) {
+		gone.setAttribute('role', 'group');
+		gone.setAttribute('aria-label', 'Removed in this version');
+	}
 }
 
 /**

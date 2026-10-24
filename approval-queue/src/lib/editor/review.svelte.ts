@@ -129,8 +129,9 @@ export function restoredDrafted(note: string, fresh: string): string {
 }
 
 /** The announcement for a decision a failed save holds back, or null when the last edit is saved. */
-export function heldBySave(review: Pick<DocReview, 'saveFailed' | 'saveStatus'>, outcome: 'approve' | 'reject'): string | null {
-	return review.saveFailed ? `${outcome === 'reject' ? 'Not sent back' : 'Not approved'}: ${review.saveStatus}` : null;
+export function heldBySave(review: Pick<DocReview, 'saveFailed' | 'saveStatus'>, outcome: 'approve' | 'reject' | 'defer'): string | null {
+	const refused = { approve: 'Not approved', reject: 'Not sent back', defer: 'Not deferred' }[outcome];
+	return review.saveFailed ? `${refused}: ${review.saveStatus}` : null;
 }
 
 const PAUSE_MS = 800;

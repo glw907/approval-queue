@@ -443,7 +443,7 @@ for that save first, and closing the tab then asks before leaving.
 			desk.toast = UNDONE;
 			desk.announce(UNDONE);
 			if (restored.outcome === 'reject') {
-				// The restored note is the reader's own text unless it is still the draft, which a later open rebuilds.
+				// Only matters when openNote refuses: the restored note is the reader's own text unless it is still the draft.
 				drafted = restoredDrafted(noteText, sendBackDraft(openCalls, review?.changedLines ?? 0, data.kind === 'page' ? 'page' : 'plan'));
 				void openNote();
 			}
@@ -632,7 +632,7 @@ for that save first, and closing the tab then asks before leaving.
 
 	// Undo's navigation was cancelled by the box above; once the box is saved or cancelled, it goes ahead.
 	$effect(() => {
-		if (held.restoreBlocked && !holdsText()) void held.resumeRestore();
+		if (held.restoreBlocked && !(boxes.open && docReviews.includes(boxes.open))) untrack(() => void held.resumeRestore());
 	});
 
 	beforeNavigate((navigation) => {
@@ -641,8 +641,11 @@ for that save first, and closing the tab then asks before leaving.
 			navigation.cancel();
 			if (!navigation.willUnload) {
 				// Undo's own navigation is the one the reader needs told about: it resumes once the box closes.
-				if (navigation.to && held.blockRestore(navigation.to.url.pathname)) desk.flash(RESTORE_BLOCKED);
-				else refuseOpenBox();
+				if (navigation.to && held.blockRestore(navigation.to.url.pathname)) {
+					desk.flash(RESTORE_BLOCKED);
+					// Undo's toast is gone by now, so focus goes to the box the reader has to finish.
+					void boxes.open?.focusBox();
+				} else refuseOpenBox();
 			}
 			return;
 		}
@@ -785,14 +788,15 @@ for that save first, and closing the tab then asks before leaving.
 			// the blob that save returned rather than the one the form rendered with.
 			if (review) {
 				await review.flush();
-				if (action.search !== '?/defer') {
-					const refusal = heldBySave(review, action.search === '?/reject' ? 'reject' : 'approve');
-					if (refusal) {
-						desk.announce(refusal);
-						return;
-					}
-					formData.set('blob', review.blob);
+				const refusal = heldBySave(
+					review,
+					action.search === '?/reject' ? 'reject' : action.search === '?/defer' ? 'defer' : 'approve'
+				);
+				if (refusal) {
+					desk.announce(refusal);
+					return;
 				}
+				if (action.search !== '?/defer') formData.set('blob', review.blob);
 			}
 			const outcome =
 				action.search === '?/approve'
@@ -806,7 +810,7 @@ for that save first, and closing the tab then asks before leaving.
 			const waiting = data.queue.filter((item) => item.id === data.meta.id || !held.ids.has(item.id));
 			const upNext = nextItem(waiting, data.meta.id);
 			const text = decisionText(action);
-			held.hold({
+			const accepted = held.hold({
 				id: data.meta.id,
 				title: data.meta.headline ?? data.meta.title,
 				kind: data.kind,
@@ -816,6 +820,10 @@ for that save first, and closing the tab then asks before leaving.
 				outcome,
 				toast: text
 			});
+			if (!accepted) {
+				desk.announce(COUNTING);
+				return;
+			}
 			desk.announce(`${text} ${desk.singleKeys ? 'Press z or the Undo button' : 'Press the Undo button'} to undo.`);
 			await goto(upNext ? `/item/${encodeURIComponent(upNext.id)}` : '/', { replace: true });
 		} finally {
@@ -1086,7 +1094,7 @@ for that save first, and closing the tab then asks before leaving.
 					{/snippet}
 					{#snippet defer()}
 						{#if data.canDefer && !desk.noteOpen}
-							<button type="submit" class="btn" formaction="?/defer">Defer</button>
+							<button type="submit" class="btn btn-outline" formaction="?/defer">Defer</button>
 						{/if}
 					{/snippet}
 					{#snippet status()}
