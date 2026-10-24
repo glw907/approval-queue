@@ -242,6 +242,7 @@ for that save first, and closing the tab then asks before leaving.
 		if (decision?.decision !== 'approve' && decision?.decision !== 'reject') return {};
 		const out: Record<string, number> = {};
 		for (const call of decision.calls ?? []) {
+			if (!('id' in call)) continue;
 			const at = notes.find((n) => n.id === call.id)?.choices?.findIndex((c) => c.label === call.choice) ?? -1;
 			if (at >= 0) out[call.id] = at;
 		}

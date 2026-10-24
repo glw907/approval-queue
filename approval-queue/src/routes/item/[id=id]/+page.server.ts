@@ -18,7 +18,7 @@ import {
 	queuedItem,
 	sentBackCalls
 } from '#lib/server/blueprint.ts';
-import { buildApprove, isIrreversible, packetFingerprint } from '#lib/server/packet-decision.ts';
+import { buildApprove, buildSentBackCalls, isIrreversible, packetFingerprint } from '#lib/server/packet-decision.ts';
 import {
 	carried,
 	listWaiting,
@@ -441,7 +441,11 @@ export const actions: Actions = {
 			const form = await request.formData().catch(() => null);
 			if (!form) return fail(400, { message: 'Not a form post' });
 			const note = form.get('note');
-			return decideOnce(params.id, { decision: 'reject', note: typeof note === 'string' ? note : '' });
+			return decideOnce(params.id, {
+				decision: 'reject',
+				note: typeof note === 'string' ? note : '',
+				calls: buildSentBackCalls(found.content, form)
+			});
 		}
 		if (found.content.kind === 'blueprint' || found.content.kind === 'page' || found.content.kind === 'change') {
 			if (found.decided) return fail(409, ALREADY_DECIDED);

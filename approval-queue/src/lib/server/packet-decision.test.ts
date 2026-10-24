@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { seedPacket } from '#lib/fixtures/seed-packet.ts';
 import { readItem } from './items.ts';
-import { buildApprove, packetFingerprint } from './packet-decision.ts';
+import { buildApprove, buildSentBackCalls, packetFingerprint } from './packet-decision.ts';
 
 const BASE = readFileSync(new URL('../fixtures/packet-baseline.md', import.meta.url), 'utf8').replace(
 	'glw907/drafter:docs/specs/notes-design.md',
@@ -118,5 +118,43 @@ describe('buildApprove', () => {
 		const ruled = REVERSIBLE.replace('Rule: owner-call', 'Rule: irreversible');
 		expect(await build({ irreversible: null }, ruled)).toMatchObject({ ok: false });
 		expect(await build({}, ruled)).toMatchObject({ ok: true });
+	});
+});
+
+describe('buildSentBackCalls', () => {
+	async function calls(over: Record<string, string | null> = {}) {
+		const c = await content();
+		return buildSentBackCalls(c, answers('ignored', over));
+	}
+
+	it('lists every part in packet order, then every ask, as the screen held them', async () => {
+		expect(await calls({ 'part:glw907/drafter#42': 'send-back' })).toEqual([
+			{ ref: 'glw907/drafter#41', verdict: 'approve' },
+			{ ref: 'glw907/drafter#42', verdict: 'send-back' },
+			{ ref: 'glw907/drafter#43', verdict: 'approve' },
+			{ ref: 'step:1', verdict: 'session' },
+			{ ask: 1, question: expect.any(String), choice: 'Merge anyway' },
+			{ ask: 2, question: expect.any(String), choice: 'Beta' }
+		]);
+	});
+
+	it('takes an ask-bound part’s verdict from the picked choice’s tag', async () => {
+		expect(await calls({ 'ask:1': 'Hold' })).toContainEqual({ ref: 'glw907/drafter#41', verdict: 'hold' });
+	});
+
+	it('leaves an unanswered ask and the part it binds null', async () => {
+		const out = await calls({ 'ask:1': null });
+		expect(out).toContainEqual({ ref: 'glw907/drafter#41', verdict: null });
+		expect(out).toContainEqual({ ask: 1, question: expect.any(String), choice: null });
+	});
+
+	it('leaves a label the ask does not hold null', async () => {
+		expect((await calls({ 'ask:2': 'Merge anyway' })).at(-1)).toMatchObject({ ask: 2, choice: null });
+	});
+
+	it('leaves a missing routine field and a verdict outside the part’s kind null', async () => {
+		const out = await calls({ 'part:glw907/drafter#43': null, 'part:step:1': 'approve' });
+		expect(out).toContainEqual({ ref: 'glw907/drafter#43', verdict: null });
+		expect(out).toContainEqual({ ref: 'step:1', verdict: null });
 	});
 });

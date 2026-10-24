@@ -117,6 +117,11 @@ export interface Carried {
 	threads?: Array<{ id: string; reply: string }>;
 }
 
+/** One entry of a packet send-back's `calls`; `null` is a field the post lacked or a value the packet does not hold. */
+export type PacketCall =
+	| { ref: string; verdict: string | null }
+	| { ask: number; question: string; choice: string | null };
+
 export type Decision =
 	| ({
 			decision: 'approve';
@@ -135,8 +140,11 @@ export type Decision =
 	| ({
 			decision: 'reject';
 			note: string;
-			/** A document review's calls made before it was sent back, so the decided item shows them. */
-			calls?: Array<{ id: string; choice: string }>;
+			/**
+			 * A document review's calls made before it was sent back, so the decided item shows them. A
+			 * packet's are its parts' verdicts and its asks' picks as the screen held them.
+			 */
+			calls?: Array<{ id: string; choice: string } | PacketCall>;
 	  } & Carried)
 	| { decision: 'submit'; rows: SubmittedRow[] };
 

@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { VERDICTS, type PacketAsk } from '#lib/packet.ts';
-import type { Decision, PacketPart } from './items.ts';
+import type { Decision, PacketCall, PacketPart } from './items.ts';
 
 /** The form fields of a post; `FormData` and `URLSearchParams` both fit. */
 export interface Fields {
@@ -71,4 +71,26 @@ export function buildApprove(
 		out.push({ ref: part.ref, verdict });
 	}
 	return { ok: true, decision: { decision: 'approve', parts: out, asks } };
+}
+
+/**
+ * Builds a packet send-back's `calls` from the packet the server rebuilt and the post: one verdict
+ * per part, then one pick per ask. A field the post lacks, or a value the packet does not hold, is
+ * `null`. Nothing is refused, since a send-back authorizes nothing.
+ */
+export function buildSentBackCalls(
+	content: { packet: { asks: PacketAsk[] }; parts: PacketPart[] },
+	form: Fields
+): PacketCall[] {
+	const { asks } = content.packet;
+	const picked = asks.map((ask, i) => {
+		const label = form.get(`ask:${i + 1}`);
+		return ask.choices.find((c) => c.label === label);
+	});
+	const bound = new Map(asks.flatMap((ask, i) => (ask.part ? [[ask.part.ref, picked[i]?.verdict] as const] : [])));
+	const parts = content.parts.map(({ ref, kind, lane }): PacketCall => {
+		const verdict = lane === 'ask' ? bound.get(ref) : form.get(`part:${ref}`);
+		return { ref, verdict: typeof verdict === 'string' && VERDICTS[kind].includes(verdict) ? verdict : null };
+	});
+	return [...parts, ...asks.map((ask, i): PacketCall => ({ ask: i + 1, question: ask.question, choice: picked[i]?.label ?? null }))];
 }

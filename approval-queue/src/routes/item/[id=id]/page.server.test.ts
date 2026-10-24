@@ -527,10 +527,24 @@ describe('a packet', () => {
 		expect(results.map((r) => (r as { status?: number }).status ?? 200).sort()).toEqual([200, 409]);
 	});
 
-	it('a reject carries no parts and no asks', async () => {
-		await call('reject', [['note', 'not now'], ['fingerprint', await fingerprint()]]);
-		expect(await decision()).toEqual({ decision: 'reject', note: 'not now' });
+	it('a reject carries the screen’s calls, and refuses nothing for its fields', async () => {
+		await call('reject', [...(await fields({ 'part:glw907/drafter#42': 'send-back', 'ask:2': null, fingerprint: 'stale' })), ['note', 'not now']]);
+		const sent = await decision();
+		expect(sent).toMatchObject({ decision: 'reject', note: 'not now' });
+		expect(sent.calls).toEqual([
+			{ ref: 'glw907/drafter#41', verdict: 'approve' },
+			{ ref: 'glw907/drafter#42', verdict: 'send-back' },
+			{ ref: 'glw907/drafter#43', verdict: 'approve' },
+			{ ref: 'step:1', verdict: 'session' },
+			{ ask: 1, question: expect.any(String), choice: 'Merge anyway' },
+			{ ask: 2, question: expect.any(String), choice: null }
+		]);
 		expect(await call('reject', [['note', 'again']])).toMatchObject({ status: 409 });
+	});
+
+	it('a reject with only a note still writes every call, each null', async () => {
+		await call('reject', [['note', 'not now']]);
+		expect((await decision()).calls.every((c: any) => ('verdict' in c ? c.verdict : c.choice) === null)).toBe(true);
 	});
 
 	describe('a withdrawn item', () => {
