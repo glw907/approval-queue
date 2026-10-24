@@ -105,6 +105,26 @@ export function refuseOpenBox(): boolean {
 	return true;
 }
 
+/** What a document review's send-back note starts with: each call still open, and how much was edited. */
+export function sendBackDraft(openCalls: PlacedNote[], changedLines: number, what: string): string {
+	const lines = openCalls.map((n) => `- Still open: ${n.title}`);
+	if (changedLines) lines.push(`- ${changedLines} ${changedLines === 1 ? 'line' : 'lines'} changed in the ${what}`);
+	return lines.length ? `${lines.join('\n')}\n` : '';
+}
+
+/**
+ * The text the send-back note opens with. A draft the reader left untouched is rebuilt, since the
+ * calls it listed may have been answered while the note was closed; anything they typed stays.
+ */
+export function noteStart(text: string, drafted: string, fresh: string): string {
+	return text === '' || text === drafted ? fresh : text;
+}
+
+/** The announcement for a decision a failed save holds back, or null when the last edit is saved. */
+export function heldBySave(review: Pick<DocReview, 'saveFailed' | 'saveStatus'>, outcome: 'approve' | 'reject'): string | null {
+	return review.saveFailed ? `${outcome === 'reject' ? 'Not sent back' : 'Not approved'}: ${review.saveStatus}` : null;
+}
+
 const PAUSE_MS = 800;
 
 const wide = () => matchMedia(WIDE_MARGIN).matches;

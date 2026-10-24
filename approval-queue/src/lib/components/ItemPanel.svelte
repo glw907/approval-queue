@@ -31,7 +31,7 @@ for that save first, and closing the tab then asks before leaving.
 	import { changedCount, seedRows, type Row } from '#lib/triage.ts';
 	import { VERDICT_LOOK } from '#lib/packet-view.ts';
 	import type { PlacedNote } from '#lib/editor/notes.ts';
-	import { boxes, DocReview, refuseOpenBox, type CommentAnswer, type SaveResult } from '#lib/editor/review.svelte.ts';
+	import { boxes, DocReview, heldBySave, noteStart, refuseOpenBox, sendBackDraft, type CommentAnswer, type SaveResult } from '#lib/editor/review.svelte.ts';
 	import type { PageData } from '../../routes/item/[id=id]/$types';
 	import BlueprintView from './BlueprintView.svelte';
 	import BriefBlock from './BriefBlock.svelte';
@@ -686,30 +686,29 @@ for that save first, and closing the tab then asks before leaving.
 		for (const r of docReviews) await r.settled();
 		if (review) {
 			await review.flush();
-			if (review.saveFailed) {
-				desk.announce(`Not approved: ${review.saveStatus}`);
+			const held = heldBySave(review, 'approve');
+			if (held) {
+				desk.announce(held);
 				return;
 			}
 		}
 		form?.requestSubmit(approveButton);
 	}
 
-	/** What a document review's send-back starts with: each call still open, and how much was edited. */
-	function prefill() {
-		const lines = openCalls.map((n) => `- Still open: ${n.title}`);
-		if (review?.changedLines) {
-			const n = review.changedLines;
-			lines.push(`- ${n} ${n === 1 ? 'line' : 'lines'} changed in the ${data.kind === 'page' ? 'page' : 'plan'}`);
-		}
-		return lines.length ? `${lines.join('\n')}\n` : '';
-	}
+	// The last draft the note was given, so reopening it can tell an untouched one from the reader's text.
+	let drafted = '';
 
 	async function openNote() {
 		if (refuseOpenBox()) return;
-		if (docReviews.length && !noteText) noteText = prefill();
+		if (docReviews.length) {
+			const fresh = sendBackDraft(openCalls, review?.changedLines ?? 0, data.kind === 'page' ? 'page' : 'plan');
+			noteText = noteStart(noteText, drafted, fresh);
+			drafted = fresh;
+		}
 		desk.noteOpen = true;
 		await tick();
-		noteField?.focus();
+		// The bar is sticky, so the note is in view as soon as it renders and focusing it needs no scroll.
+		noteField?.focus({ preventScroll: true });
 		noteField?.setSelectionRange(noteText.length, noteText.length);
 	}
 
@@ -762,6 +761,11 @@ for that save first, and closing the tab then asks before leaving.
 			// the blob that save returned rather than the one the form rendered with.
 			if (review) {
 				await review.flush();
+				const held = heldBySave(review, action.search === '?/reject' ? 'reject' : 'approve');
+				if (held) {
+					desk.announce(held);
+					return;
+				}
 				formData.set('blob', review.blob);
 			}
 			const outcome = action.search === '?/approve' ? 'approve' : action.search === '?/reject' ? 'reject' : 'submit';
@@ -1035,7 +1039,7 @@ for that save first, and closing the tab then asks before leaving.
 						{/if}
 					{/snippet}
 					{#snippet reject()}
-						{#if data.kind !== 'triage'}
+						{#if data.kind !== 'triage' && !desk.noteOpen}
 							<button
 								type="button"
 								class={['btn', decided.sendBack && !packet ? 'btn-primary' : 'btn-outline']}
