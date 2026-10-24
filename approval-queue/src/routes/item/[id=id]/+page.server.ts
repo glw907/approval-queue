@@ -29,6 +29,7 @@ import {
 	writeComments,
 	writeDecision,
 	writeDecisionOnce,
+	writeDeferred,
 	type CommentStore,
 	type Decision,
 	type Disposition,
@@ -181,7 +182,16 @@ function applyOp(store: CommentStore, replies: readonly Thread[], op: Op, id: st
 	return { ok: true, id, store: { comments, threads: kept, next } };
 }
 
-export const load: PageServerLoad = async ({ params }) => {
+/**
+ * Loads the item and adds `canDefer`: false for a triage (it has no session to wait on it), a decided
+ * item, and one already deferred.
+ */
+export const load: PageServerLoad = async (event) => {
+	const data = await loadItem(event.params);
+	return { ...data, canDefer: data.kind !== 'triage' && !data.decided && !data.meta.deferred };
+};
+
+async function loadItem(params: { id: string }) {
 	const item = await readItem(APPROVAL_QUEUE_STATE, params.id);
 	if (!item) error(404, 'Not found');
 	const { meta, decided, content, decision } = item;
@@ -298,6 +308,7 @@ export const load: PageServerLoad = async ({ params }) => {
 			pr: pr ? { ref: content.pr ?? '', url: `https://github.com/${pr[1]}/pull/${pr[2]}`, head: content.prHead ?? '' } : null,
 			doc: content.doc,
 			...(content.description && { description: content.description }),
+			...(content.amend && { amend: content.amend }),
 			...(meta.revises && { revision: meta.revises.revision }),
 			original: content.original,
 			blob: content.blob,
@@ -376,7 +387,7 @@ export const load: PageServerLoad = async ({ params }) => {
 			detail: row.detail === undefined ? null : renderInline(row.detail)
 		}))
 	};
-};
+}
 
 export const actions: Actions = {
 	approve: async ({ params, request }) => {
@@ -475,8 +486,24 @@ export const actions: Actions = {
 		}
 		const item = await readWaiting(params.id);
 		if (item.content.kind === 'triage') return fail(400, { message: 'Nothing to reject' });
-		const note = (await request.formData()).get('note');
+		const form = await request.formData().catch(() => null);
+		if (!form) return fail(400, { message: 'Not a form post' });
+		const note = form.get('note');
 		return decide(params.id, { decision: 'reject', note: typeof note === 'string' ? note : '' });
+	},
+	/**
+	 * Sets an item aside: the waiting command prints the defer line and exits, and the item stays on the
+	 * board under Deferred. A triage has no session to free, and a decided or deferred item has nothing to defer.
+	 */
+	defer: async ({ params }) => {
+		const item = await readItem(APPROVAL_QUEUE_STATE, params.id);
+		if (!item) error(404, 'Not found');
+		if (item.content.kind === 'triage') return fail(400, { message: 'A triage cannot be deferred' });
+		if (item.decided) return fail(409, ALREADY_DECIDED);
+		if (item.meta.deferred) return fail(409, { message: 'Already deferred' });
+		const next = nextItem(await listWaiting(APPROVAL_QUEUE_STATE), params.id);
+		await writeDeferred(APPROVAL_QUEUE_STATE, params.id);
+		return { next: next ? `/item/${next.id}` : null };
 	},
 	/** Writes a blueprint's or page's text and commits it in its worktree, checked against the blob the page last saved. */
 	save: async ({ params, request }) => {
@@ -539,7 +566,8 @@ export const actions: Actions = {
 	submit: async ({ params, request }) => {
 		const item = await readWaiting(params.id);
 		if (item.content.kind !== 'triage') return fail(400, { message: 'Not a triage item' });
-		const form = await request.formData();
+		const form = await request.formData().catch(() => null);
+		if (!form) return fail(400, { message: 'Not a form post' });
 		const dispositions = form.getAll('disposition');
 		const notes = form.getAll('note');
 		const source = item.content.rows;

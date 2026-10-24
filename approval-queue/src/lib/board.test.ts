@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { age, boardGroups, SINGLES, type BoardRow } from './board.ts';
+import { age, boardGroups, DEFERRED, SINGLES, type BoardRow } from './board.ts';
 
 const row = (id: string, group: string, created: string, asks = 0): BoardRow => ({
 	id,
@@ -9,7 +9,9 @@ const row = (id: string, group: string, created: string, asks = 0): BoardRow => 
 	asks,
 	headline: id,
 	rules: [],
-	repos: 1
+	repos: 1,
+	deferred: false,
+	orphaned: false
 });
 
 const rows = [
@@ -30,6 +32,20 @@ describe('boardGroups', () => {
 		const groups = boardGroups(rows, 'oldest');
 		expect(groups.map((g) => g.title)).toEqual(['Old', 'Busy', SINGLES]);
 		expect(groups[1].rows.map((r) => r.id)).toEqual(['c', 'b']);
+	});
+});
+
+describe('boardGroups with deferred rows', () => {
+	it('moves a deferred row under Deferred, after Single items, whatever its own group', () => {
+		const deferred = [
+			...rows,
+			{ ...row('e', 'Busy', '2026-10-11T08:00:00Z', 3), deferred: true },
+			{ ...row('f', SINGLES, '2026-10-11T08:30:00Z'), deferred: true }
+		];
+		const groups = boardGroups(deferred, 'asks');
+		expect(groups.map((g) => g.title)).toEqual(['Busy', 'Old', SINGLES, DEFERRED]);
+		expect(groups[0].rows.map((r) => r.id)).toEqual(['b', 'c']);
+		expect(groups[3].rows.map((r) => r.id)).toEqual(['e', 'f']);
 	});
 });
 
