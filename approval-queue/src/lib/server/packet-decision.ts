@@ -12,13 +12,13 @@ export type Approve = { ok: true; decision: Decision } | { ok: false; message: s
 
 /**
  * Names the parts and asks a page showed, so a post made against a different packet is refused. It
- * covers every part's preselected verdict and head or hash, and every ask's choice labels and
- * tags, since those decide what an approve authorizes.
+ * covers every part's lane, preselected verdict, and head or hash, and every ask's rule, bound part,
+ * choice labels, and tags, since those decide what an approve authorizes.
  */
 export function packetFingerprint(parts: readonly PacketPart[], asks: readonly PacketAsk[]): string {
 	const shown = {
-		parts: parts.map((p) => [p.ref, p.kind, p.verdict, p.head ?? p.sha256 ?? '']),
-		asks: asks.map((a) => [a.question, a.choices.map((c) => [c.label, c.verdict ?? ''])])
+		parts: parts.map((p) => [p.ref, p.kind, p.lane, p.verdict, p.head ?? p.sha256 ?? '']),
+		asks: asks.map((a) => [a.question, a.rule, a.part?.ref ?? '', a.choices.map((c) => [c.label, c.verdict ?? ''])])
 	};
 	return createHash('sha256').update(JSON.stringify(shown)).digest('hex');
 }

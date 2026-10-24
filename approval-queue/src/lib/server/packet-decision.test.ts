@@ -59,6 +59,19 @@ describe('packetFingerprint', () => {
 		retagged[0].choices[0].verdict = 'hold';
 		expect(packetFingerprint(c.parts, retagged)).not.toBe(fp);
 	});
+
+	it('changes with a part\'s lane, an ask\'s rule, and the part an ask binds', async () => {
+		const c = await content();
+		const fp = packetFingerprint(c.parts, c.packet.asks);
+		const relaned = c.parts.map((p) => (p.ref === 'glw907/drafter#42' ? { ...p, lane: 'ask' as const } : p));
+		expect(packetFingerprint(relaned, c.packet.asks)).not.toBe(fp);
+		const reruled = structuredClone(c.packet.asks);
+		reruled[1].rule = 'gate-failed';
+		expect(packetFingerprint(c.parts, reruled)).not.toBe(fp);
+		const rebound = structuredClone(c.packet.asks);
+		rebound[1].part = { ...rebound[0].part!, ref: 'glw907/drafter#43' };
+		expect(packetFingerprint(c.parts, rebound)).not.toBe(fp);
+	});
 });
 
 describe('buildApprove', () => {
