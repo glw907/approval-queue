@@ -19,9 +19,11 @@ readable pull request ref shows no PR line.
 		pr: { ref: string; url: string; head: string } | null;
 		/** The sticky place bar, which sits between the rows and the editor. */
 		place: Snippet;
+		/** The approved text this file amends; set, the editor shows the diff since it. */
+		amend?: string;
 	}
 
-	let { review, file, pr, place }: Props = $props();
+	let { review, file, pr, place, amend }: Props = $props();
 	const name = $derived(file.split('/').pop() ?? file);
 </script>
 
@@ -65,7 +67,7 @@ readable pull request ref shows no PR line.
 
 {@render place()}
 
-<DocEditor {review} file={name} label="Page {name}, markdown" kindWord="page" />
+<DocEditor {review} {amend} file={name} label="Page {name}, markdown" kindWord="page" />
 
 <style>
 	code {

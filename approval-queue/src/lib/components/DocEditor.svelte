@@ -32,9 +32,11 @@ text drops a box left empty. Below 1260px a tap on a highlight opens the drawer 
 		kindWord: string;
 		/** A YAML file, set in the monospace face with each wrapped line hanging at its indentation. */
 		yaml?: boolean;
+		/** The approved text this file amends. Set, the editor shows the diff since it, unchanged runs folded. */
+		amend?: string;
 	}
 
-	let { review, file, label, kindWord, yaml = false }: Props = $props();
+	let { review, file, label, kindWord, yaml = false, amend }: Props = $props();
 
 	let host = $state<HTMLDivElement>();
 	let view = $state<EditorView | null>(null);
@@ -52,6 +54,7 @@ text drops a box left empty. Below 1260px a tap on a highlight opens the drawer 
 			readonly: review.readonly,
 			commentable: review.canComment,
 			yaml,
+			amend,
 			hooks: review.hooks
 		});
 		review.attach(v);

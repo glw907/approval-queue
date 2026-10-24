@@ -6,6 +6,7 @@
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
 import { HighlightStyle, syntaxHighlighting } from '@codemirror/language';
+import { getChunks, uncollapseUnchanged, unifiedMergeView } from '@codemirror/merge';
 import { Compartment, EditorState, RangeSetBuilder, StateEffect, StateField, type Extension, type StateEffectType } from '@codemirror/state';
 import {
 	Decoration,
@@ -57,6 +58,11 @@ export interface EditorOptions {
 	 * wrapped line hangs at its own indentation so the nesting stays readable.
 	 */
 	yaml?: boolean;
+	/**
+	 * The approved text of the file this review amends. Set, the editor shows the changes since it with
+	 * the approved lines above the new ones, folds the unchanged runs, and opens on the first change.
+	 */
+	amend?: string;
 	hooks: EditorHooks;
 }
 
@@ -351,6 +357,9 @@ export function createEditor(parent: HTMLElement, opts: EditorOptions): EditorVi
 			highlightsExtension(opts),
 			commentTip(opts),
 			editable.of(editableExt(opts.readonly)),
+			opts.amend === undefined
+				? []
+				: unifiedMergeView({ original: opts.amend, mergeControls: false, collapseUnchanged: { margin: 3, minSize: 4 } }),
 			EditorView.scrollMargins.of(() => ({ top: 56, bottom: 140 })),
 			EditorView.contentAttributes.of({ 'aria-label': opts.label }),
 			EditorView.updateListener.of((u) => {
@@ -361,6 +370,8 @@ export function createEditor(parent: HTMLElement, opts: EditorOptions): EditorVi
 		]
 	});
 	if (Object.keys(opts.decided).length) view.dispatch({ effects: decidedEffect.of(opts.decided) });
+	const first = opts.amend === undefined ? undefined : getChunks(view.state)?.chunks[0];
+	if (first) view.dispatch({ selection: { anchor: first.fromB } });
 	return view;
 }
 
@@ -402,12 +413,33 @@ export function replaceNoteText(view: EditorView, id: string, text: string) {
 }
 
 /**
+ * The start of the folded run of unchanged lines that hides `pos`, or null. `uncollapseUnchanged`
+ * names a run by its exact start and the package exports no lookup, so this reads the fold from the
+ * decorations the merge view provides (a plain set, not a view-dependent function).
+ */
+export function collapsedStart(state: EditorState, pos: number): number | null {
+	let start: number | null = null;
+	for (const source of state.facet(EditorView.decorations)) {
+		if (typeof source === 'function') continue;
+		source.between(pos, pos, (from, to, value) => {
+			if (from <= pos && pos <= to && value.spec.widget?.type === 'collapsed-unchanged-code') {
+				start = from;
+				return false;
+			}
+		});
+	}
+	return start;
+}
+
+/**
  * Scrolls the window so `pos` sits below the sticky header, then puts the caret there or selects `to`.
  * `lineBlockAt` is exact only for a line inside the rendered viewport and an estimate beyond it, so a
  * line outside it is reached by a scroll target, which makes CodeMirror render and measure the lines
  * first. That scroll is instant, which is the price of landing in the right place.
  */
 export function jumpTo(view: EditorView, pos: number, to = pos) {
+	const folded = collapsedStart(view.state, pos);
+	if (folded !== null) view.dispatch({ effects: uncollapseUnchanged.of(folded) });
 	const rendered = pos >= view.viewport.from && pos <= view.viewport.to;
 	if (rendered) {
 		const top = window.scrollY + view.documentTop + view.lineBlockAt(pos).top - 140;
