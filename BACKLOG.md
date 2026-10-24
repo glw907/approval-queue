@@ -4,9 +4,21 @@
 
 ## Medium
 
+- [ ] **#26** Print a blueprint's anchors and document the slug rule `#improvement` `#approval-queue` `#initiative:docs-system` *(2026-10-24)*
+  The README's slug rule turns an apostrophe into a hyphen (`set-a-section-s-starting-state`), easy to get wrong by hand, and no tool prints a blueprint's anchors; the session wrote a script (record 39).
+  Record: `~/Projects/initiatives/docs-system/research/2026-10-22-extend-blueprints-batch-2-friction.md`
+
+- [ ] **#25** Add `approval-queue withdraw` `#feature` `#approval-queue` `#initiative:docs-system` *(2026-10-24)*
+  Withdrawing a queued item means killing the blueprint process and relying on its exit trap (record 38).
+  Record: `~/Projects/initiatives/docs-system/research/2026-10-22-extend-blueprints-batch-2-friction.md`
+
+- [ ] **#24** Stop prefixing "Still open:" on a send-back note Geoff answered `#bug` `#approval-queue` `#initiative:docs-system` *(2026-10-24)*
+  A send-back note auto-prefixes "Still open: <title>" even for a question Geoff answered; the sidebar's figure note carried his call, "Keep the fixture as is", and still came back as open (record 37).
+  Record: `~/Projects/initiatives/docs-system/research/2026-10-22-extend-blueprints-batch-2-friction.md`
 - [ ] **#23** Make note anchors survive edits and address reader-block lines `#improvement` `#approval-queue` `#initiative:docs-system` *(2026-10-22)*
   Anchors are positional (`<slug>.p<n>`), so splitting a bullet renumbers every later note; the grammar has no anchor for a line in `:::reader`. Key anchors on the line's text or fact ids (record 19, 20).
   Record: `~/Projects/initiatives/docs-system/research/2026-10-22-extend-blueprints-pilot-friction.md`
+  Batch 2: reader-block lines still have no anchor (record 39).
 - [ ] **#22** Carry a ruling across items, or offer an amend review of an approved document `#feature` `#approval-queue` `#initiative:docs-system` *(2026-10-22)*
   A decide ruling on the architecture blueprint reached the approved Access blueprint; a one-clause deletion sent it back through a full review (record 21).
   Record: `~/Projects/initiatives/docs-system/research/2026-10-22-extend-blueprints-pilot-friction.md`
@@ -48,6 +60,7 @@
 - [ ] **#21** Print the queued item's id or URL from `approval-queue blueprint` `#improvement` `#approval-queue` `#initiative:docs-system` *(2026-10-22)*
   A successful queue prints nothing; the author learns it is queued only from `pgrep` (record 22).
   Record: `~/Projects/initiatives/docs-system/research/2026-10-22-extend-blueprints-pilot-friction.md`
+  Batch 2: still prints nothing on a successful queue; the session confirmed each queue with `pgrep` (record 36).
 - [ ] **#20** The comments pass's review suggestions not taken `#improvement` `#approval-queue` `#initiative:docs-system` *(2026-10-21)*
   The delete toast's Undo lasts 6 s, which may be short for a screen-reader user (a11y W9); the highlight fills are a spec colour under 3:1 against the page (a11y W5); the comment chords match `e.code`, so on Dvorak or AZERTY they follow the QWERTY key position; `settled()` is awaited once before a decision's flush, so a comment op started during the flush is not awaited; `review.svelte.test.ts` has no case for `restore`, the gone-text path, `focusAfterRemoving`, or `cancelBox` during an op, which need a CodeMirror view the store tests do not build.
 
