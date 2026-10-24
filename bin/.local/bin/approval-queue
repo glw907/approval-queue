@@ -12,7 +12,8 @@ usage="usage: approval-queue <pr|design|triage> <repo> <title> <source>
        approval-queue change <owner/repo#n> <title> [--notes <notes.json>] [--replies <replies.json>]
        approval-queue approved [--kind blueprint|page] <file> <blob>
        approval-queue withdraw <id>
-       approval-queue collect <id>"
+       approval-queue collect <id>
+       approval-queue anchors <file>"
 root="${XDG_STATE_HOME:-$HOME/.local/state}/approval-queue"
 id_pattern='^[0-9]{8}T[0-9]{6}-[0-9]+$'
 
@@ -119,6 +120,10 @@ elif [ "${1:-}" = collect ]; then
   if [[ ! $1 =~ $id_pattern ]]; then echo "approval-queue: $1 is not an item id" >&2; exit 2; fi
   if [ ! -e "$root/items/$1/item.json" ]; then echo "approval-queue: no item $1 is queued" >&2; exit 2; fi
   kind=collect collecting=$1
+elif [ "${1:-}" = anchors ]; then
+  shift
+  if [ $# -ne 1 ]; then echo "$usage" >&2; exit 2; fi
+  kind=anchors source=$1
 elif [ "${1:-}" = packet ]; then
   shift
   if [ "${1:-}" = --check ]; then check=1; shift; fi
@@ -153,6 +158,12 @@ app=$(realpath "$(dirname "$(realpath "$0")")/../../../approval-queue")
 # One pair per invocation: a PR hand-over and a triage hand-over run side by side.
 check_body="$root/check-$id.md"
 check_err="$root/check-$id.err"
+
+# anchors <file>: prints the file's heading anchors, slugged as cairn's pages are. The entry needs the app's
+# node_modules.
+if [ "${kind:-}" = anchors ]; then
+  exec node "$app/src/anchors.ts" "$source"
+fi
 
 # check_brief <file>: refuses (exit 2) an item whose brief is missing or incomplete, before any
 # item directory exists, and sets headline. Anything else that fails is a tool failure (exit 1).

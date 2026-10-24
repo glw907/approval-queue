@@ -286,6 +286,10 @@ queue blueprint "$repo" T "$FILE" --description "$DESC"
 decide "{\"decision\":\"approve\",\"commit\":\"$(git -C "$repo" rev-parse HEAD)\"}"
 assert_eq "$(jq -r '.amends' "$root/out")" "$prev_blob" "amend: the printed approve names the amended blob"
 
+# `anchors` prints a file's heading anchors by cairn's slug rule.
+printf '## Set a section'"'"'s starting state\n\n- A bullet.\n' >"$root/heading.md"
+assert_eq "$(bash "$SCRIPT" anchors "$root/heading.md")" "$(printf 'set-a-sections-starting-state.heading\tSet a section'"'"'s starting state')" "anchors: the apostrophe example"
+
 live_leak
 [ "$fail" -eq 0 ] && echo "blueprint.test.sh: ok"
 exit "$fail"
