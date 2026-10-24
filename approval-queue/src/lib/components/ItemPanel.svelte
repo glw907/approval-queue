@@ -26,12 +26,12 @@ for that save first, and closing the tab then asks before leaving.
 	import { fingerprint, gate } from '#lib/cards.ts';
 	import { setDrawer } from '#lib/components/frame/drawers.ts';
 	import { desk, type OutlineEntry } from '#lib/desk.svelte.ts';
-	import { held, seedFrom, UNDONE } from '#lib/held.svelte.ts';
+	import { COUNTING, held, RESTORE_BLOCKED, seedFrom, UNDONE } from '#lib/held.svelte.ts';
 	import { nextItem } from '#lib/queue.ts';
 	import { changedCount, seedRows, type Row } from '#lib/triage.ts';
 	import { VERDICT_LOOK } from '#lib/packet-view.ts';
 	import type { PlacedNote } from '#lib/editor/notes.ts';
-	import { boxes, DocReview, heldBySave, noteStart, refuseOpenBox, sendBackDraft, type CommentAnswer, type SaveResult } from '#lib/editor/review.svelte.ts';
+	import { boxes, DocReview, heldBySave, noteStart, refuseOpenBox, restoredDrafted, sendBackDraft, type CommentAnswer, type SaveResult } from '#lib/editor/review.svelte.ts';
 	import type { PageData } from '../../routes/item/[id=id]/$types';
 	import BlueprintView from './BlueprintView.svelte';
 	import BriefBlock from './BriefBlock.svelte';
@@ -442,7 +442,11 @@ for that save first, and closing the tab then asks before leaving.
 		untrack(() => {
 			desk.toast = UNDONE;
 			desk.announce(UNDONE);
-			if (restored.outcome === 'reject') void openNote();
+			if (restored.outcome === 'reject') {
+				// The restored note is the reader's own text unless it is still the draft, which a later open rebuilds.
+				drafted = restoredDrafted(noteText, sendBackDraft(openCalls, review?.changedLines ?? 0, data.kind === 'page' ? 'page' : 'plan'));
+				void openNote();
+			}
 			else {
 				const main = document.getElementById('main');
 				if (main && !main.contains(document.activeElement)) main.focus();
@@ -623,11 +627,23 @@ for that save first, and closing the tab then asks before leaving.
 	/** Where the reader goes once the save that held a navigation lands; null while none is held. */
 	let leaveAfterSave: (() => void) | null = null;
 
+	/** Whether an open comment box holds text that leaving would drop. */
+	const holdsText = () => !!boxes.open && docReviews.includes(boxes.open) && !!boxes.open.box?.text.trim();
+
+	// Undo's navigation was cancelled by the box above; once the box is saved or cancelled, it goes ahead.
+	$effect(() => {
+		if (held.restoreBlocked && !holdsText()) void held.resumeRestore();
+	});
+
 	beforeNavigate((navigation) => {
 		// A comment box holding text would be dropped unsaved, so leaving waits until it is saved or cancelled.
-		if (boxes.open && docReviews.includes(boxes.open) && boxes.open.box?.text.trim()) {
+		if (holdsText()) {
 			navigation.cancel();
-			if (!navigation.willUnload) refuseOpenBox();
+			if (!navigation.willUnload) {
+				// Undo's own navigation is the one the reader needs told about: it resumes once the box closes.
+				if (navigation.to && held.blockRestore(navigation.to.url.pathname)) desk.flash(RESTORE_BLOCKED);
+				else refuseOpenBox();
+			}
 			return;
 		}
 		if (!review?.pending) return;
@@ -756,6 +772,10 @@ for that save first, and closing the tab then asks before leaving.
 	const decide: SubmitFunction = async ({ cancel, action, formData }) => {
 		cancel();
 		if (deciding || refuseOpenBox()) return;
+		if (held.ids.has(data.meta.id)) {
+			desk.announce(COUNTING);
+			return;
+		}
 		deciding = true;
 		try {
 			// A comment op on its way lands before the decision, so the decision reads it.

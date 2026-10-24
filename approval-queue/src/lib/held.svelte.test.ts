@@ -92,6 +92,38 @@ describe('Held', () => {
 		expect(post).toHaveBeenLastCalledWith(first.href, first.form);
 	});
 
+	it('refuses a second decision on a held item, so the panel can say the first is counting down', () => {
+		const { store } = setup();
+		const first = decision('a');
+		expect(store.hold(first)).toBe(true);
+		expect(store.hold(decision('a', 'reject'))).toBe(false);
+		expect(store.current).toBe(first);
+		expect(store.hold(decision('b'))).toBe(true);
+	});
+
+	it('keeps an Undo cancelled by an open comment box, and opens the item once the box closes', async () => {
+		const { store, post, open } = setup();
+		const d = decision('a');
+		store.hold(d);
+		open.mockImplementationOnce(async () => {
+			expect(store.blockRestore('/item/b')).toBe(false);
+			expect(store.blockRestore('/item/a')).toBe(true);
+		});
+		await store.undo();
+		expect(store.restoreBlocked).toBe(true);
+		expect(store.current).toBeNull();
+		await vi.advanceTimersByTimeAsync(HOLD_MS * 2);
+		expect(post).not.toHaveBeenCalled();
+		expect(open).toHaveBeenCalledTimes(1);
+		await store.resumeRestore();
+		expect(open).toHaveBeenCalledTimes(2);
+		expect(open).toHaveBeenLastCalledWith('/item/a');
+		expect(store.restoreBlocked).toBe(false);
+		expect(store.take('a')).toBe(d);
+		await store.resumeRestore();
+		expect(open).toHaveBeenCalledTimes(2);
+	});
+
 	it('keeps a second decision paused while the pointer stays on the toast', async () => {
 		const { store, post } = setup();
 		store.hold(decision('a'));
