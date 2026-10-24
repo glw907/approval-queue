@@ -93,7 +93,21 @@ approval-queue blueprint <worktree> <title> <file> --description <file> [--notes
 
 `<worktree>` is the top of a git worktree, and `<file>` is relative to it. The command refuses a file that is not a regular file committed at HEAD (a directory or a symlink is refused), a file with uncommitted changes, and a notes file that is not a JSON array of notes in the shape `{id, kind, anchor, title, body}`: `kind` is `info`, `decide`, or `question`, `body` is an array of paragraphs, and a note may add `was` and `now`, `sides` (`[{who, text}]`), and `choices` (`[{label, text?, done, edit?}]`). A `decide` or `question` note must carry choices. Each refusal names the problem and exits 2 before anything is queued.
 
-A note's `anchor` names a place in the file: `<slug>.heading` for a heading, `<slug>.p<n>` for the nth bullet, numbered step, or `:::row` block under that heading, and `<slug>.p<n>.symptom`, `.cause`, or `.fix` for one part of a row. The slug is the heading with backticks dropped, lowercased, each run of characters outside a-z and 0-9 turned into one hyphen, and hyphens trimmed from the ends. A note whose anchor names no place shows at the top of the file.
+A note's `anchor` is a name or a quote.
+
+A name is a string: `<slug>.heading` for a heading, `<slug>.p<n>` for the nth bullet, numbered step, or `:::row` block under that heading, counting from 0, and `<slug>.p<n>.symptom`, `.cause`, or `.fix` for one part of a row. A name counts items, so it moves when an item above it is added or removed.
+
+A quote is an object, `{"quote": "...", "prefix": "...", "suffix": "..."}`, with `quote` required and `prefix` and `suffix` optional strings. It can sit on any line, including a line inside a `:::reader` block, and it stays on its text when items move. The screen places it by the steps a comment uses, minus the offsets:
+
+1. The one place where `prefix + quote + suffix` occurs.
+2. The first occurrence of `quote`.
+3. Nowhere: the note shows at the top of the file.
+
+Quote text that occurs once, or add a `prefix` or `suffix` that settles it. A quote that repeats, with no context, takes its first occurrence.
+
+The slug is the heading's text as the page renders it (inline Markdown dropped), run through `github-slugger`, the rule cairn's pages use for heading ids: lowercased, punctuation deleted, each space turned into a hyphen. An apostrophe is deleted, not turned into a hyphen, so `Set a section's starting state` is `set-a-sections-starting-state`. A heading that repeats an earlier slug takes `-1`, then `-2`, and a blueprint's `page` title takes the first slug, so a heading that repeats the title takes `-1`. The first version of this tool turned each run of characters outside a-z and 0-9 into one hyphen (`set-a-section-s-starting-state`); notes written with that spelling still resolve, unless a heading's current slug holds the name. A note whose anchor names no place shows at the top of the file.
+
+`approval-queue anchors <file>` prints a file's heading anchors, one per line, as `<slug>.heading`, a tab, and the heading's text, skipping front matter, code, and directive containers. A file ending in `.blueprint.md` is slugged as a blueprint; any other file as a page. It needs the app's `node_modules` (run `npm ci` in the app directory), which the other subcommands do not.
 
 `--replies` takes the author's answers to the comments of an earlier send-back, in the shape "Comments and replies" sets.
 
@@ -127,7 +141,7 @@ A page is a drafted page Geoff reads and edits in place, riding with a pull requ
 approval-queue page <worktree> <title> <file> --pr <owner/repo#n> --description <file> [--notes <notes.json>] [--replies <replies.json>]
 ```
 
-The refusals and `--replies` are the blueprint's, plus a `--pr` that is not `owner/repo#n`; a PR whose head `gh pr view <n> -R <owner/repo> --json headRefOid` cannot read exits 1. A page's notes anchor with `<slug>.heading` for a heading and `<slug>.p<n>` for the nth paragraph, list item, or table under that heading, counting from 0 (a list item runs through its indented continuation; front matter, blank lines, code blocks, directive containers, and rules count for nothing). An approve prints the PR head read at approval:
+The refusals and `--replies` are the blueprint's, plus a `--pr` that is not `owner/repo#n`; a PR whose head `gh pr view <n> -R <owner/repo> --json headRefOid` cannot read exits 1. A page's notes anchor by a name or a quote, as a blueprint's do (the slug rule, the alias, the quote steps, and `approval-queue anchors` are the same, except that a page's slugs take no title seed). A name is `<slug>.heading` for a heading or `<slug>.p<n>` for the nth paragraph, list item, or table under that heading, counting from 0 (a list item runs through its indented continuation; front matter, blank lines, code blocks, directive containers, and rules count for nothing). An approve prints the PR head read at approval:
 
 ```json
 {"decision":"approve","file":"<file>","commit":"<HEAD at approval>","blob":"<blob>","pr":"<owner/repo#n>","head":"<PR head at approval>","calls":[{"id":"D1","choice":"<label>"}],"comments":[],"threads":[]}
