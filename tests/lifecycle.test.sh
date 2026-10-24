@@ -164,6 +164,17 @@ wait "$cpid" 2>/dev/null
 assert_eq "$?" "143" "interrupted collect: exit code"
 [ -e "$dir/item.json" ] || { echo "FAIL: interrupted collect: item.json was removed"; fail=1; }
 
+# A collect of an item that is neither decided nor deferred also leaves item.json in place when interrupted;
+# only collect's own exit trap keeps it.
+fake_item 20260101T000006-$dead "$dead" 1
+bash "$SCRIPT" collect "20260101T000006-$dead" >"$root/c.out" 2>/dev/null &
+cpid=$!
+sleep 1.5
+kill -TERM "$cpid"
+wait "$cpid" 2>/dev/null
+assert_eq "$?" "143" "interrupted collect of an undecided item: exit code"
+[ -e "$state/items/20260101T000006-$dead/item.json" ] || { echo "FAIL: interrupted collect of an undecided item: item.json was removed"; fail=1; }
+
 # The decision lands after the deferral: collect prints and logs it, once.
 printf '{"decision":"approve"}\n' >"$dir/decision.json"
 assert_eq "$(bash "$SCRIPT" collect "$id" 2>/dev/null)" '{"decision":"approve"}' "collect after a defer: stdout"

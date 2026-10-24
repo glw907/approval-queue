@@ -151,7 +151,12 @@ mkdir -p "$root"
 
 # A command that leaves without a decision takes its item off the index, unless Geoff deferred it: a deferred
 # item stays on the board with no waiter.
-trap '[ -e "$item/decision.json" ] || [ -e "$item/deferred.json" ] || rm -f "$item/item.json" "$item/item.json.tmp"; rm -f "$check_body" "$check_err"; rm -rf "$fetch"' EXIT
+if [ -n "$collecting" ]; then
+  # A collect never takes the item off the board, however it ends.
+  trap 'rm -f "$check_body" "$check_err"; rm -rf "$fetch"' EXIT
+else
+  trap '[ -e "$item/decision.json" ] || [ -e "$item/deferred.json" ] || rm -f "$item/item.json" "$item/item.json.tmp"; rm -f "$check_body" "$check_err"; rm -rf "$fetch"' EXIT
+fi
 trap 'exit 143' TERM HUP INT
 
 app=$(realpath "$(dirname "$(realpath "$0")")/../../../approval-queue")
@@ -853,8 +858,6 @@ queue_item() {
 }
 
 if [ -n "$collecting" ]; then
-  # A collect never takes the item off the index, so an interrupted one withdraws nothing.
-  trap 'rm -f "$check_body" "$check_err"; rm -rf "$fetch"' EXIT
   load_collected
 else
   queue_item
