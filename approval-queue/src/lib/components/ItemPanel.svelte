@@ -190,7 +190,7 @@ for that save first, and closing the tab then asks before leaving.
 	const outline = $derived.by((): PaneItem[] => {
 		const sections: Array<Omit<PaneItem, 'n'>> = [];
 		if (data.kind === 'packet') {
-			if (data.whatChanged) sections.push({ href: '#what-changed', label: 'What changed' });
+			if (data.whatChanged || data.sentBack) sections.push({ href: '#what-changed', label: 'What changed' });
 			sections.push({ href: '#if-you-approve', label: 'If you approve' }, { href: '#not-checked', label: 'Not checked' });
 			if (data.asks.length) sections.push({ href: '#asks', label: 'Asks', mark: openAsks.length ? 'call' : undefined });
 			if (partRows.length) sections.push({ href: '#parts', label: 'Parts' });
@@ -717,7 +717,8 @@ for that save first, and closing the tab then asks before leaving.
 	async function closeNote() {
 		desk.noteOpen = false;
 		await tick();
-		rejectButton?.focus();
+		// The opener sits in the sticky bar, inside the scroll padding, so a plain focus() scrolls the document.
+		rejectButton?.focus({ preventScroll: true });
 	}
 
 	/** The repo's name with the item's number when it has one; a design reads as its title. */
@@ -763,9 +764,9 @@ for that save first, and closing the tab then asks before leaving.
 			// the blob that save returned rather than the one the form rendered with.
 			if (review) {
 				await review.flush();
-				const held = heldBySave(review, action.search === '?/reject' ? 'reject' : 'approve');
-				if (held) {
-					desk.announce(held);
+				const refusal = heldBySave(review, action.search === '?/reject' ? 'reject' : 'approve');
+				if (refusal) {
+					desk.announce(refusal);
 					return;
 				}
 				formData.set('blob', review.blob);
@@ -877,7 +878,7 @@ for that save first, and closing the tab then asks before leaving.
 			{#snippet paragraphs()}
 				{#each blueprint.description ?? [] as paragraph, i (i)}<p><Prose text={paragraph} /></p>{/each}
 			{/snippet}
-			<FrameHeader description={blueprint.description ? paragraphs : undefined}>
+			<FrameHeader description={blueprint.description?.length ? paragraphs : undefined}>
 				{#snippet crumb()}
 					<a href="/">Board</a><span aria-hidden="true">/</span><span>{blueprint.kind === 'page' ? 'Page' : 'Blueprint'}</span><span aria-hidden="true">/</span><span>{blueprint.meta.repo}</span>
 					{#if blueprint.revision}<span class="badge badge-sm badge-outline rule-badge tone-info">Revision {blueprint.revision}</span>{/if}
@@ -922,7 +923,7 @@ for that save first, and closing the tab then asks before leaving.
 
 
 	{#if packet}
-		{#if packet.whatChanged}<PacketWhatChanged bullets={packet.whatChanged} note={packet.sentBack?.note} />{/if}
+		{#if packet.whatChanged || packet.sentBack}<PacketWhatChanged bullets={packet.whatChanged ?? []} note={packet.sentBack?.note} />{/if}
 		<PacketBrief data={packet} bind:verdicts decided={packet.decided} />
 		<PacketAsks asks={packet.asks} parts={packet.parts} bind:answers decided={packet.decided} />
 		<PacketRoutine routine={packet.routine} parts={packet.parts} bind:verdicts decided={packet.decided} />

@@ -30,7 +30,9 @@ disclosure. Renders on a revising packet only; the caller passes nothing otherwi
 			<p class="sl">You sent it back without a note.</p>
 		{/if}
 	{/if}
-	<ul class="mt-3 list-disc space-y-1 pl-5">
-		{#each bullets as bullet, i (i)}<li><Prose text={bullet} /></li>{/each}
-	</ul>
+	{#if bullets.length}
+		<ul class="mt-3 list-disc space-y-1 pl-5">
+			{#each bullets as bullet, i (i)}<li><Prose text={bullet} /></li>{/each}
+		</ul>
+	{/if}
 </section>

@@ -464,6 +464,8 @@ export class DocReview {
 	async flush(): Promise<void> {
 		if (this.timer) clearTimeout(this.timer);
 		this.timer = null;
+		// A refused save is retried here, so pressing a decision control is itself the retry.
+		if (this.saveFailed) this.dirty = true;
 		while (this.inFlight || this.dirty) {
 			if (this.inFlight) {
 				await this.inFlight;
@@ -484,6 +486,7 @@ export class DocReview {
 		}
 		if (result.ok) {
 			this.blob = result.blob;
+			this.saveFailed = false;
 			if (!this.dirty && !this.timer) {
 				this.saveStatus = 'All edits saved';
 				// No edit came after this save's text, so the choices are stored against its blob.
@@ -496,7 +499,7 @@ export class DocReview {
 			this.saveFailed = true;
 			this.saveStatus = `Not saved: ${result.message}`;
 			desk.announce(this.saveStatus);
-			// A refused save is not retried on its own; the next edit tries again.
+			// A refused save is not retried on its own; the next edit or flush tries again.
 			this.dirty = false;
 		}
 	}

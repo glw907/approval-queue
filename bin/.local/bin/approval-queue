@@ -642,6 +642,8 @@ case "$kind" in
   packet) queue_packet ;;
   change) queue_change ;;
   blueprint | page)
+    # The log names a document as <repo>:<file>, so `./x` and `x` must read as the same ref across resends.
+    source=${source#./}
     check_blueprint
     if [ "$kind" = page ]; then
       check_origin
@@ -748,7 +750,7 @@ $pk[0] as $p
   if ($dec | type) != "object" then error("shape")
   elif $dec.decision == "reject" then
     if (($dec | keys) == ["decision", "note"] or ($dec | keys) == ["calls", "decision", "note"]) and ($dec.note | type) == "string"
-      and (($dec.calls // []) | type) == "array"
+      and (($dec | has("calls") | not) or ($dec.calls | type) == "array")
       and all(($dec.calls // [])[]; type == "object" and
         ((keys == ["ref", "verdict"] and (.ref | type) == "string" and (.verdict | type | IN("string", "null")))
          or (keys == ["ask", "choice", "question"] and (.ask | type) == "number" and (.question | type) == "string" and (.choice | type | IN("string", "null")))))

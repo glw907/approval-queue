@@ -131,6 +131,20 @@ describe('DocReview remembered choices', () => {
 		expect(heldBySave(r, 'reject')).toBe('Not sent back: Not saved: refused');
 		expect(heldBySave(r, 'approve')).toBe('Not approved: Not saved: refused');
 	});
+
+	it('retries a refused save on the next flush, so a decision press is the retry', async () => {
+		let accept = false;
+		const saver = vi.fn(async (): Promise<SaveResult> => (accept ? { ok: true, blob: 'b2' } : { ok: false, message: 'refused' }));
+		const r = review('b1', saver);
+		r.hooks.change(edited);
+		await r.flush();
+		expect(r.saveFailed).toBe(true);
+		accept = true;
+		await r.flush();
+		expect(saver).toHaveBeenCalledTimes(2);
+		expect(r.saveFailed).toBe(false);
+		expect(heldBySave(r, 'reject')).toBeNull();
+	});
 });
 
 describe('DocReview comments', () => {
