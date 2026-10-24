@@ -38,3 +38,38 @@ export async function seedPacket(root: string, id: string, markdown: string, met
 		JSON.stringify({ id, kind: 'packet', repo: 'glw907/drafter', title: 't', created: '2026-10-11T10:00:00Z', ...meta })
 	);
 }
+
+/** The patch a moved part carries since Geoff sent it back. */
+export const SINCE_PATCH = 'diff --git a/notes.md b/notes.md\n--- a/notes.md\n+++ b/notes.md\n@@ -1 +1 @@\n-old\n+new\n';
+
+/**
+ * Writes a packet that resends what `earlier` sent back, as the command lays it out: `revises` in
+ * `item.json`, a `since.patch` on glw907/drafter#41 (its head moved), and a `since.json` gone marker on
+ * glw907/drafter#42 (force-pushed). When `sentBack` is given the earlier item's `decision.json` holds it;
+ * with none, the earlier item has no decision on disk.
+ */
+export async function seedRevision(
+	root: string,
+	id: string,
+	markdown: string,
+	earlier: string,
+	sentBack?: { note: string; calls: object[] }
+) {
+	await seedPacket(root, id, markdown, {
+		revises: {
+			item: earlier,
+			revision: 2,
+			parts: [
+				{ ref: 'glw907/drafter#41', head: 'aaa000' },
+				{ ref: 'glw907/drafter#42', head: 'bbb000' }
+			]
+		}
+	});
+	await writeFile(join(root, 'items', id, 'parts', '0', 'since.patch'), SINCE_PATCH);
+	await writeFile(join(root, 'items', id, 'parts', '1', 'since.json'), JSON.stringify({ gone: true }));
+	if (sentBack) {
+		const dir = join(root, 'items', earlier);
+		await mkdir(dir, { recursive: true });
+		await writeFile(join(dir, 'decision.json'), JSON.stringify({ decision: 'reject', ...sentBack }));
+	}
+}

@@ -22,13 +22,15 @@ import {
 	SAMPLE_FILE,
 	seedBlueprintItem,
 	seedChangeItem,
+	seedDescription,
 	seedPageItem,
 	seedPageRepo,
 	seedRepo
 } from '#lib/fixtures/seed-blueprint.ts';
-import { seedPacket } from '#lib/fixtures/seed-packet.ts';
+import { seedPacket, seedRevision, SINCE_PATCH } from '#lib/fixtures/seed-packet.ts';
 import { anchorAt, type Thread } from '#lib/editor/comments.ts';
 import { queued } from '#lib/server/blueprint.ts';
+import { fileGroups } from '#lib/diff.ts';
 import { actions, load } from './+page.server.ts';
 
 const ID = '20261011T100000-1';
@@ -473,6 +475,54 @@ describe('a packet', () => {
 		]);
 	});
 
+	it('load leaves the revision fields out of a first packet', async () => {
+		const data = (await load({ params: { id: ID } } as never)) as Record<string, any>;
+		for (const field of ['revision', 'sentBack', 'whatChanged']) expect(field in data).toBe(false);
+		expect(data.parts.some((p: any) => 'since' in p)).toBe(false);
+	});
+
+	describe('a revision', () => {
+		const EARLIER = '20261010T100000-1';
+		const REVISION = PACKET.replace('## If you approve', '## What changed\n- Split the template change out of PR 41.\n\n## If you approve');
+		const SENT_BACK = {
+			note: 'Split this.',
+			calls: [
+				{ ref: 'glw907/drafter#41', verdict: 'hold' },
+				{ ask: 1, question: 'Merge the drafter PR whose lint check failed?', choice: 'Hold' }
+			]
+		};
+
+		it('load returns the round, Geoff’s earlier note and calls, the bullets, and each part’s since', async () => {
+			await rm(join(state.root, 'items', ID), { recursive: true });
+			await seedRevision(state.root, ID, REVISION, EARLIER, SENT_BACK);
+			const data = (await load({ params: { id: ID } } as never)) as Record<string, any>;
+			expect(data.revision).toBe(2);
+			expect(data.sentBack).toEqual(SENT_BACK);
+			expect(data.whatChanged).toEqual(['Split the template change out of PR 41.']);
+			const since = (ref: string) => data.parts.find((p: any) => p.ref === ref).since;
+			expect(since('glw907/drafter#41').groups).toEqual(fileGroups(SINCE_PATCH));
+			expect(since('glw907/drafter#41').groups[0].files.map((f: any) => f.path)).toEqual(['notes.md']);
+			expect(since('glw907/drafter#42')).toEqual({ gone: true });
+			expect(data.parts.find((p: any) => p.ref === 'glw907/drafter#43')).not.toHaveProperty('since');
+		});
+
+		it('leaves sentBack out when the earlier item has no decision on disk', async () => {
+			await rm(join(state.root, 'items', ID), { recursive: true });
+			await seedRevision(state.root, ID, REVISION, EARLIER);
+			const data = (await load({ params: { id: ID } } as never)) as Record<string, any>;
+			expect(data.revision).toBe(2);
+			expect('sentBack' in data).toBe(false);
+		});
+
+		it('reads an earlier send-back that holds no calls as an empty list', async () => {
+			await rm(join(state.root, 'items', ID), { recursive: true });
+			await seedRevision(state.root, ID, REVISION, EARLIER, { note: '', calls: [] });
+			await writeFile(join(state.root, 'items', EARLIER, 'decision.json'), JSON.stringify({ decision: 'reject', note: '' }));
+			const data = (await load({ params: { id: ID } } as never)) as Record<string, any>;
+			expect(data.sentBack).toEqual({ note: '', calls: [] });
+		});
+	});
+
 	it('check 2: an approve with ask 2 unanswered returns 400 and writes nothing', async () => {
 		expect(await call('approve', await fields({ 'ask:2': null }))).toMatchObject({ status: 400 });
 		await noDecision();
@@ -624,6 +674,18 @@ describe('a blueprint', () => {
 		expect(data.notes.find((n: { id: string }) => n.id === 'X1').range).toBeNull();
 	});
 
+	it('load returns the description paragraphs and the round, and leaves both out of an older item', async () => {
+		const before = (await load({ params: { id: ID } } as never)) as Record<string, any>;
+		expect('description' in before).toBe(false);
+		expect('revision' in before).toBe(false);
+		await rm(join(state.root, 'items', ID), { recursive: true });
+		await seedBlueprintItem(state.root, ID, repo, base, undefined, { revises: { item: '20261010T100000-1', revision: 3 } });
+		await seedDescription(state.root, ID, 'The build is slow.\n\nThis plan caches the step.\nApproving it starts the work.\n');
+		const data = (await load({ params: { id: ID } } as never)) as Record<string, any>;
+		expect(data.description).toEqual(['The build is slow.', 'This plan caches the step. Approving it starts the work.']);
+		expect(data.revision).toBe(3);
+	});
+
 	it('save commits the text in the worktree and answers the new blob; a stale base answers 409', async () => {
 		const text = SAMPLE_DOC.replace('a minute', 'two minutes');
 		const saved = (await call('save', [['text', text], ['base', base]])) as { blob: string; commit: string };
@@ -723,6 +785,15 @@ describe('a page', () => {
 		['call:Q1', 'Keep it'],
 		['blob', blob]
 	];
+
+	it('load returns the description paragraphs and the round of a page', async () => {
+		await rm(join(state.root, 'items', ID), { recursive: true });
+		await seedPageItem(state.root, ID, repo, base, undefined, { revises: { item: '20261010T100000-1', revision: 2 } });
+		await seedDescription(state.root, ID, 'The page explains the build.\n\nApproving it merges the pull request.\n');
+		const data = (await load({ params: { id: ID } } as never)) as Record<string, any>;
+		expect(data.description).toEqual(['The page explains the build.', 'Approving it merges the pull request.']);
+		expect(data.revision).toBe(2);
+	});
 
 	it('load returns the page at HEAD, its pull request and head, and each note on its page anchor', async () => {
 		const data = (await load({ params: { id: ID } } as never)) as Record<string, any>;

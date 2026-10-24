@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import type { Proposed, Triage } from '#lib/brief.ts';
 import type { Comment, Thread } from '#lib/editor/comments.ts';
 import type { Note } from '#lib/editor/notes.ts';
-import type { Packet } from '#lib/packet.ts';
+import { descriptionParagraphs, type Packet } from '#lib/packet.ts';
 import { committed } from './blueprint.ts';
 
 export type Disposition = Proposed;
@@ -43,6 +43,11 @@ export interface ItemMeta {
 	initiative?: string;
 	/** The initiative record's title; empty for `none`. */
 	initiativeTitle?: string;
+	/**
+	 * Set when the item resends what Geoff sent back: the earlier item, this item's round (2 for the
+	 * first resend), and for a packet the head or hash of each part he sent back.
+	 */
+	revises?: { item: string; revision: number; parts?: Array<{ ref: string; head?: string; sha256?: string }> };
 }
 
 /** The `pr.json` fields: what `gh pr view` returns besides the body and head commit. */
@@ -71,6 +76,8 @@ export interface PacketPart {
 	diff?: string;
 	doc?: string;
 	pr?: PrMeta;
+	/** A PR the item resends: the diff since the head Geoff sent back, or a marker that head is gone. */
+	since?: { patch: string } | { gone: true };
 }
 
 /** One document a code PR changed, as the change review shows it. */
@@ -96,6 +103,8 @@ export interface DocContent {
 	file: string;
 	/** The worktree or the file is gone, so the review shows the queued copy and takes no edits. */
 	missing: boolean;
+	/** The description's paragraphs; absent on an item queued before descriptions. */
+	description?: string[];
 	/** A page's pull request as `owner/repo#n`, and its head when queued; a blueprint has neither. */
 	pr?: string;
 	prHead?: string;
@@ -268,12 +277,14 @@ async function readPacket(dir: string): Promise<ItemContent> {
 		const partDir = join(dir, 'parts', String(k));
 		if (part.kind === 'pr') {
 			const pr = await readJson<PrMeta>(join(partDir, 'pr.json'));
+			const since = await readSince(partDir);
 			parts.push({
 				...base,
 				head: pr?.head ?? '',
 				body: await readFile(join(partDir, 'body.md'), 'utf8'),
 				diff: await readFile(join(partDir, 'diff.patch'), 'utf8'),
-				...(pr && { pr })
+				...(pr && { pr }),
+				...(since && { since })
 			});
 		} else if (part.kind === 'design') {
 			const doc = await readFile(join(partDir, 'doc.md'));
@@ -281,6 +292,23 @@ async function readPacket(dir: string): Promise<ItemContent> {
 		} else parts.push(base);
 	}
 	return { kind: 'packet', packet, parts };
+}
+
+/** Reads a resent PR part's since-send-back files: the patch, a gone marker, or neither. */
+async function readSince(partDir: string): Promise<PacketPart['since']> {
+	const patch = await readFile(join(partDir, 'since.patch'), 'utf8').catch((err) => {
+		if (err.code === 'ENOENT') return undefined;
+		throw err;
+	});
+	if (patch !== undefined) return { patch };
+	return (await readJson<{ gone: true }>(join(partDir, 'since.json'))) ?? undefined;
+}
+
+/** The note and calls of the send-back an earlier item ended in; absent when that item has no reject on disk. */
+export async function readSentBack(root: string, id: string): Promise<{ note: string; calls: NonNullable<Extract<Decision, { decision: 'reject' }>['calls']> } | undefined> {
+	const decision = await readJson<Decision>(join(root, 'items', id, 'decision.json'));
+	if (decision?.decision !== 'reject') return undefined;
+	return { note: decision.note, calls: decision.calls ?? [] };
 }
 
 /** Reads a change item: the PR's body, diff, and metadata, and each changed document at the head and the base. */
@@ -314,11 +342,13 @@ async function readBlueprint(dir: string, meta: ItemMeta): Promise<ItemContent> 
 	const notes = (await readJson<Note[]>(join(dir, 'notes.json'))) ?? [];
 	const worktree = meta.worktree ?? '';
 	const file = meta.file ?? '';
+	const description = await readFile(join(dir, 'description.md'), 'utf8').then(descriptionParagraphs, () => undefined);
+	const extra = { ...prs, ...(description && { description }) };
 	try {
 		const now = await committed(worktree, file);
-		return { kind, doc: lf(now.text), blob: now.blob, commit: now.commit, original, notes, worktree, file, missing: false, ...prs };
+		return { kind, doc: lf(now.text), blob: now.blob, commit: now.commit, original, notes, worktree, file, missing: false, ...extra };
 	} catch {
-		return { kind, doc: original, blob: meta.blob ?? '', commit: '', original, notes, worktree, file, missing: true, ...prs };
+		return { kind, doc: original, blob: meta.blob ?? '', commit: '', original, notes, worktree, file, missing: true, ...extra };
 	}
 }
 

@@ -35,7 +35,7 @@ export async function seedRepo(dir: string, doc = SAMPLE_DOC): Promise<string> {
 }
 
 /** A waiting blueprint item under `root` for the repo at `worktree`, as the command queues one. */
-export async function seedBlueprintItem(root: string, id: string, worktree: string, blob: string, notes = SAMPLE_NOTES) {
+export async function seedBlueprintItem(root: string, id: string, worktree: string, blob: string, notes = SAMPLE_NOTES, meta: object = {}) {
 	const dir = join(root, 'items', id);
 	await mkdir(dir, { recursive: true });
 	await writeFile(join(dir, 'doc.md'), SAMPLE_DOC);
@@ -50,9 +50,15 @@ export async function seedBlueprintItem(root: string, id: string, worktree: stri
 			created: '2026-10-20T10:00:00Z',
 			worktree,
 			file: SAMPLE_FILE,
-			blob
+			blob,
+			...meta
 		})
 	);
+}
+
+/** Writes the item's `description.md`, the file the command copies from `--description`. */
+export async function seedDescription(root: string, id: string, text: string) {
+	await writeFile(join(root, 'items', id, 'description.md'), text);
 }
 
 export const PAGE_DOC = readFileSync(new URL('./sample.page.md', import.meta.url), 'utf8');
@@ -115,7 +121,7 @@ export async function seedChangeItem(root: string, id: string, notes = CHANGE_NO
 }
 
 /** A waiting page item under `root` for the repo at `worktree`, as the command queues one. */
-export async function seedPageItem(root: string, id: string, worktree: string, blob: string, notes = PAGE_NOTES) {
+export async function seedPageItem(root: string, id: string, worktree: string, blob: string, notes = PAGE_NOTES, meta: object = {}) {
 	const dir = join(root, 'items', id);
 	await mkdir(dir, { recursive: true });
 	await writeFile(join(dir, 'doc.md'), PAGE_DOC);
@@ -132,7 +138,8 @@ export async function seedPageItem(root: string, id: string, worktree: string, b
 			file: PAGE_FILE,
 			blob,
 			pr: PAGE_PR,
-			prHead: PAGE_HEAD
+			prHead: PAGE_HEAD,
+			...meta
 		})
 	);
 }
