@@ -19,7 +19,7 @@ text drops a box left empty. Below 1260px a tap on a highlight opens the drawer 
 	import { onMount } from 'svelte';
 	import { WIDE_MARGIN } from '#lib/editor/margin.ts';
 	import type { DocReview } from '#lib/editor/review.svelte.ts';
-	import { createEditor, setCommentable, setMarkChanges, setReadonly } from '#lib/editor/setup.ts';
+	import { createEditor, setCommentable, setMarkChanges, setReadonly, uncollapseAll } from '#lib/editor/setup.ts';
 	import Margin from './Margin.svelte';
 
 	interface Props {
@@ -127,6 +127,9 @@ text drops a box left empty. Below 1260px a tap on a highlight opens the drawer 
 				>
 					Comment <kbd>Ctrl</kbd><kbd>Alt</kbd><kbd>M</kbd>
 				</button>
+			{/if}
+			{#if amend !== undefined && view}
+				<button type="button" class="linkbtn addc" onclick={() => uncollapseAll(view!)}>Show all unchanged lines</button>
 			{/if}
 			{#if review.editable}
 				<label class="marks"><input type="checkbox" bind:checked={review.markChanges} /> Mark the lines you changed</label>
@@ -409,6 +412,33 @@ text drops a box left empty. Below 1260px a tap on a highlight opens the drawer 
 		top: 0;
 		font: 700 0.85rem/1.7 var(--font-mono);
 		color: var(--color-primary);
+	}
+	/* The amend view's folds and changes, on the theme's tokens so dark mode follows, with a left rule and a strikethrough so a removed line is not told from an added one by tint alone. */
+	.cm-host :global(.cm-collapsedLines) {
+		color: var(--color-muted);
+		background: var(--color-base-200);
+		border-radius: var(--radius-field);
+	}
+	.cm-host :global(.cm-collapsedLines:focus-visible) {
+		outline: 2px solid var(--color-primary);
+		outline-offset: 1px;
+	}
+	.cm-host :global(.cm-changedLine) {
+		background: color-mix(in oklab, var(--color-success) 10%, var(--color-base-100));
+		box-shadow: inset 3px 0 0 var(--color-success);
+	}
+	.cm-host :global(.cm-deletedChunk) {
+		background: color-mix(in oklab, var(--color-error) 10%, var(--color-base-100));
+		box-shadow: inset 3px 0 0 var(--color-error);
+	}
+	.cm-host :global(.cm-deletedChunk .cm-deletedLine) {
+		text-decoration: line-through;
+	}
+	.cm-host :global(.cm-changedText) {
+		background: linear-gradient(var(--color-success), var(--color-success)) bottom / 100% 2px no-repeat !important;
+	}
+	.cm-host :global(.cm-deletedChunk .cm-deletedText) {
+		background: linear-gradient(var(--color-error), var(--color-error)) bottom / 100% 2px no-repeat !important;
 	}
 	.cm-host.yaml :global(.cm-scroller),
 	.cm-host.yaml :global(.cm-content) {
