@@ -261,6 +261,13 @@ describe('deferred and orphaned', () => {
 		expect(JSON.parse(await readFile(join(root, 'items', 'later', 'deferred.json'), 'utf8')).at).toMatch(/^\d{4}-\d{2}-\d{2}T.*Z$/);
 		expect((await readItem(root, 'later'))?.meta).toMatchObject({ deferred: true, orphaned: false });
 	});
+
+	it('defers twice at once without a collision, leaving no temp file', async () => {
+		await seed('twice', meta, { 'doc.md': 'd' });
+		await Promise.all([writeDeferred(root, 'twice'), writeDeferred(root, 'twice')]);
+		expect((await readdir(join(root, 'items', 'twice'))).filter((f) => f.endsWith('.tmp'))).toEqual([]);
+		expect((await readItem(root, 'twice'))?.meta).toMatchObject({ deferred: true });
+	});
 });
 
 describe('a packet.json that does not parse', () => {
