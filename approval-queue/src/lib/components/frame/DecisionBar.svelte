@@ -1,9 +1,10 @@
 <!-- @component
 The decision bar every screen takes its decision in: "Send back with note" at the left, the state
-line, and the approval at the right, with the send-back note panel above it. It is markup only; the
-screen supplies the form around it and the buttons, so each screen names its own approval
-("Approve the packet", "Approve and merge") and keeps its own lock rules. A decision's Undo lives
-in the layout's toast, not here, since the screen is gone by the time it counts down.
+line, and the approval at the right, with the send-back note panel above it. "Defer" sits beside
+the send-back button when the screen passes it. It is markup only; the screen supplies the form
+around it and the buttons, so each screen names its own approval ("Approve the packet", "Approve
+and merge") and keeps its own lock rules. A decision's Undo lives in the layout's toast, not here,
+since the screen is gone by the time it counts down.
 -->
 <script lang="ts">
 	import type { Snippet } from 'svelte';
@@ -13,6 +14,8 @@ in the layout's toast, not here, since the screen is gone by the time it counts 
 		note?: Snippet;
 		/** The send-back button; omitted on a screen with nothing to send back. */
 		reject?: Snippet;
+		/** The defer button; omitted on an item that cannot be set aside. */
+		defer?: Snippet;
 		/**
 		 * The state line: a lead sentence and an optional second line. The screen puts `role="status"`
 		 * on the lead alone, so a count that changes as the reader types is not read aloud each time.
@@ -23,12 +26,13 @@ in the layout's toast, not here, since the screen is gone by the time it counts 
 		approve?: Snippet;
 	}
 
-	let { note, reject, status, statusId = 'bar-state', approve }: Props = $props();
+	let { note, reject, defer, status, statusId = 'bar-state', approve }: Props = $props();
 </script>
 
 {@render note?.()}
 <div class="bar">
 	{@render reject?.()}
+	{@render defer?.()}
 	<div id={statusId} class="state">{@render status()}</div>
 	{@render approve?.()}
 </div>

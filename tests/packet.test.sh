@@ -17,9 +17,16 @@ assert_eq() {
   [ "$1" = "$2" ] || { echo "FAIL: $3: got '$1', want '$2'"; fail=1; }
 }
 
-# The live log must come through the run untouched.
+# No packet id this test logged may appear in the live log. A leak fails by name; other sessions'
+# lines in the live log do not matter.
 live_log="$HOME/.local/state/approval-queue/decisions.jsonl"
-live_before=$(stat -c %s "$live_log" 2>/dev/null || echo none)
+live_leak() {
+  local pid
+  [ -e "$live_log" ] && [ -e "$log" ] || return 0
+  while IFS= read -r pid; do
+    if grep -qF "\"packet\":\"$pid\"" "$live_log"; then echo "FAIL: the test wrote packet $pid to the live log"; fail=1; fi
+  done < <(jq -r '.packet' "$log" | sort -u)
+}
 
 stubs="$root/stubs"
 mkdir -p "$stubs"
@@ -88,6 +95,7 @@ chmod +x "$stubs"/*
 export STUB_DIR="$root" XDG_STATE_HOME="$root/state" APPROVAL_QUEUE_PROJECTS="$root/projects" PATH="$stubs:$PATH"
 state="$XDG_STATE_HOME/approval-queue"
 log="$state/decisions.jsonl"
+source tests/collect-check.sh
 mkdir -p "$APPROVAL_QUEUE_PROJECTS/initiatives/drafter" "$APPROVAL_QUEUE_PROJECTS/drafter/docs/specs"
 printf 'title: Drafter release notes\nstatus: active\n' >"$APPROVAL_QUEUE_PROJECTS/initiatives/drafter/initiative.yaml"
 design="$APPROVAL_QUEUE_PROJECTS/drafter/docs/specs/x-design.md"
@@ -185,6 +193,8 @@ assert_eq "$(sed -n 5p "$log" | jq -c '[.recommended,.chosen,.overridden]')" '["
 assert_eq "$(jq -r '.initiative' "$log" | sort -u)" "drafter" "approve: log initiative"
 assert_eq "$(jq -r '.packet' "$log" | sort -u)" "$(basename "$dir")" "approve: log packet id"
 assert_eq "$(jq -r '.time' "$log" | grep -Ec '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$')" "5" "approve: log times"
+assert_eq "$(jq -r '[(.pid | type), (.pidStart | type), (.pid as $p | .id | endswith("-\($p)"))] | join(" ")' "$dir/item.json")" "number number true" "queue: pid and pidStart"
+collect_check packet "$dir"
 
 # A reject prints the note, no parts, and logs each part as rejected.
 before=$(log_lines)
@@ -513,8 +523,71 @@ requeue packet drafter "$REVISED"
 assert_eq "$(jq -c '.revises.revision' "$dir/item.json")" "2" "revision: earlier rounds do not count after an approve"
 decide '{"decision":"reject","note":""}'
 
-live_after=$(stat -c %s "$live_log" 2>/dev/null || echo none)
-assert_eq "$live_after" "$live_before" "live decisions.jsonl untouched"
+# ---- Only the parts Geoff sent back make a resend a revision ----
+# SOLO is the packet with PR 42 alone, so it holds a part Geoff marked approve in a rejected packet and no part he sent back.
+awk '/^## Ask:/{skip=1} /^## Routine/{skip=0} !skip && !/drafter#43 \|/' "$PACKET" >"$root/solo.md"
+sed 's/^## If you approve/## What changed\n- Split the template change out of PR 41.\n\n## If you approve/' "$root/solo.md" >"$root/solo-revised.md"
+mkpr 41 aaa111 OPEN fail
+mkpr 42 bbb222 OPEN pass
+mkpr 43 ccc333 OPEN pass
+MIXED='{"decision":"reject","note":"Fix 41.","calls":[{"ref":"glw907/drafter#41","verdict":"send-back"},{"ref":"glw907/drafter#42","verdict":"approve"},{"ref":"glw907/drafter#43","verdict":"approve"},{"ref":"step:1","verdict":"session"}]}'
+rm -f "$log"
+queue packet drafter "$PACKET"
+mixed_id=$(basename "$dir")
+decide "$MIXED"
+assert_eq "$(jq -c '[.ref,.sentBack]' "$log" | paste -sd' ')" \
+  '["glw907/drafter#41",true] ["glw907/drafter#42",false] ["glw907/drafter#43",false] ["step:1",false]' "sentBack: one part sent back, the rest marked approve"
+
+# Both heads move on, so an early return on an unmoved head cannot pass this alone: only the sent-back part is
+# a revision part and gets a since diff.
+mkpr 41 aaa222 OPEN fail
+mkpr 42 bbb888 OPEN pass
+printf '{"status":"ahead"}\n' >"$root/compare-aaa111.json"
+printf '{"status":"ahead"}\n' >"$root/compare-bbb222.json"
+printf 'diff --git a/n.md b/n.md\n+since\n' >"$root/compare-bbb222.diff"
+requeue packet drafter "$REVISED"
+assert_eq "$(jq -c '.revises' "$dir/item.json")" "{\"item\":\"$mixed_id\",\"revision\":2,\"parts\":[{\"ref\":\"glw907/drafter#41\",\"head\":\"aaa111\"}]}" "sentBack: revises names only the sent-back part"
+[ -e "$dir/parts/0/since.patch" ] || { echo "FAIL: sentBack: the sent-back part has no since.patch"; fail=1; }
+[ ! -e "$dir/parts/1/since.patch" ] && [ ! -e "$dir/parts/1/since.json" ] || { echo "FAIL: sentBack: the approve-marked part got a since file"; fail=1; }
+assert_eq "$(jq -r '.head' "$dir/parts/1/pr.json")" "bbb888" "sentBack: the approve-marked part's head moved"
+assert_eq "$(jq -r 'select(.ref == "glw907/drafter#42") | .head' "$log")" "bbb222" "sentBack: the approve-marked part's recorded head differs"
+decide '{"decision":"reject","note":""}'
+
+# A resend of only the approve-marked part is a fresh packet: it takes no section and has no revises.
+mkpr 42 bbb222 OPEN pass
+rm -f "$log"
+queue packet drafter "$PACKET"
+decide "$MIXED"
+refuse "section on a resend of an approve-marked part" "a part you marked approve inside a rejected packet" drafter drafter "$root/solo-revised.md"
+requeue packet drafter "$root/solo.md"
+assert_eq "$(jq -c 'has("revises")' "$dir/item.json")" "false" "sentBack: a resend of only the approve-marked part is a fresh packet"
+decide '{"decision":"reject","note":""}'
+
+# A note-only send-back sets no part to send back, so its resend is a revision naming every part.
+rm -f "$log"
+queue packet drafter "$PACKET"
+decide '{"decision":"reject","note":"All of it."}'
+assert_eq "$(jq -sc '[.[].sentBack] | unique' "$log")" "[false]" "sentBack: a note-only send-back flags no part"
+requeue packet drafter "$REVISED"
+assert_eq "$(jq -c '[.revises.parts[].ref]' "$dir/item.json")" '["glw907/drafter#41","glw907/drafter#42","glw907/drafter#43"]' "sentBack: a note-only send-back's resend names every part"
+decide '{"decision":"reject","note":""}'
+
+# The revision number counts the rounds in which the part was sent back, and skips one where it was marked
+# approve. A log written before the field reads as today: every reject counts.
+printf '%s\n' \
+  '{"packet":"aqtest-r1","ref":"glw907/drafter#42","kind":"pr","verdict":"reject","head":"bbb222"}' \
+  '{"packet":"aqtest-r2","ref":"glw907/drafter#41","kind":"pr","verdict":"reject","sentBack":true,"head":"aaa111"}' \
+  '{"packet":"aqtest-r2","ref":"glw907/drafter#42","kind":"pr","verdict":"reject","sentBack":false,"head":"bbb222"}' \
+  '{"packet":"aqtest-r3","ref":"glw907/drafter#42","kind":"pr","verdict":"reject","sentBack":true,"head":"bbb222"}' >"$log"
+requeue packet drafter "$root/solo-revised.md"
+assert_eq "$(jq -c '[.revises.item, .revises.revision]' "$dir/item.json")" '["aqtest-r3",3]' "sentBack: the revision number skips a round marked approve"
+decide '{"decision":"reject","note":""}'
+printf '%s\n' '{"packet":"aqtest-r1","ref":"glw907/drafter#42","kind":"pr","verdict":"reject","head":"bbb222"}' >"$log"
+requeue packet drafter "$root/solo-revised.md"
+assert_eq "$(jq -c '[.revises.item, .revises.revision]' "$dir/item.json")" '["aqtest-r1",2]' "sentBack: a log with no sentBack field counts every reject"
+decide '{"decision":"reject","note":""}'
+
+live_leak
 
 [ "$fail" = 0 ] && echo "packet: ok"
 exit "$fail"

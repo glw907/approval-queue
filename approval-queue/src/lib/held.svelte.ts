@@ -7,6 +7,8 @@ import { startHold } from '#lib/hold.ts';
 export const HOLD_MS = 5000;
 
 export const UNDONE = 'Decision undone. Nothing was sent.';
+export const COUNTING = 'This item’s decision is already counting down. Undo it first to decide again.';
+export const RESTORE_BLOCKED = 'Save or cancel your comment, then Undo opens the item again.';
 
 /** A decision taken on one item, waiting out its hold or posting. */
 export interface HeldDecision {
@@ -18,7 +20,7 @@ export interface HeldDecision {
 	/** The absolute form action `enhance` supplied, such as `http://127.0.0.1:7907/item/x?/approve`. */
 	href: string;
 	form: FormData;
-	outcome: 'approve' | 'reject' | 'submit';
+	outcome: 'approve' | 'reject' | 'submit' | 'defer';
 	toast: string;
 }
 
@@ -88,6 +90,8 @@ export class Held {
 	#timer: ReturnType<typeof startHold> | null = null;
 	#pausers = new Set<string>();
 	#restoring: HeldDecision | null = null;
+	/** Whether an open comment box stopped the navigation Undo started, so the item still has to open. */
+	restoreBlocked = $state(false);
 	#deps: HeldDeps;
 
 	constructor(deps: HeldDeps) {
@@ -99,9 +103,9 @@ export class Held {
 		return new Set([...(this.current ? [this.current.id] : []), ...this.sending.map((d) => d.id)]);
 	}
 
-	/** Holds `decision`, posting any decision already held; one for an item held or posting is ignored. */
-	hold(decision: HeldDecision) {
-		if (this.ids.has(decision.id)) return;
+	/** Holds `decision`, posting any decision already held; one for an item held or posting is refused with false. */
+	hold(decision: HeldDecision): boolean {
+		if (this.ids.has(decision.id)) return false;
 		// The toast stays mounted only when this replaces a decision still showing, so only then can a
 		// pointer or focus already on it hold the new clock; an unmounted toast never sent its leave.
 		const showing = this.current !== null;
@@ -112,6 +116,7 @@ export class Held {
 		// Only the queue reload after a sent decision can reject, and the layout's poll reloads it again.
 		this.#timer = startHold(HOLD_MS, { tick: () => {}, fire: () => void this.#send().catch(() => {}) });
 		if (this.#pausers.size) this.#timer.pause();
+		return true;
 	}
 
 	/** Stops the clock while the pointer or focus is on the toast; `by` names which, so each resumes only its own. */
@@ -134,7 +139,29 @@ export class Held {
 		this.ended = 'undone';
 		this.current = null;
 		this.#restoring = decision;
-		await this.#deps.open(`/item/${encodeURIComponent(decision.id)}`);
+		this.restoreBlocked = false;
+		await this.#deps.open(this.#restorePath(decision));
+	}
+
+	/**
+	 * Records that a guard cancelled a navigation to `pathname`, and whether that was the one Undo
+	 * started. The decision stays cancelled, and `resumeRestore` opens the item once the guard lets go.
+	 */
+	blockRestore(pathname: string): boolean {
+		const blocked = this.#restoring !== null && pathname === this.#restorePath(this.#restoring);
+		if (blocked) this.restoreBlocked = true;
+		return blocked;
+	}
+
+	/** Opens the item Undo is restoring after a guard held it back; does nothing when none is held back. */
+	async resumeRestore() {
+		if (!this.restoreBlocked || !this.#restoring) return;
+		this.restoreBlocked = false;
+		await this.#deps.open(this.#restorePath(this.#restoring));
+	}
+
+	#restorePath(decision: HeldDecision) {
+		return `/item/${encodeURIComponent(decision.id)}`;
 	}
 
 	/** The decision Undo handed back for item `id`, once; null for any other item or a second call. */
@@ -155,7 +182,8 @@ export class Held {
 		try {
 			const result = await this.#post(decision);
 			if (result.type === 'success') {
-				forget(decision.id);
+				// A deferred item comes back to the reader, so its draft and remembered calls stay.
+				if (decision.outcome !== 'defer') forget(decision.id);
 				await this.#deps.refresh();
 				return;
 			}

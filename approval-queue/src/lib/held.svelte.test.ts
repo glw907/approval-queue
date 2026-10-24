@@ -57,6 +57,16 @@ describe('Held', () => {
 		expect(store.ended).toBe('sent');
 	});
 
+	it('keeps the drafts of a deferred item, which comes back to the reader', async () => {
+		const { store, post, refresh } = setup();
+		desk.drafts.set('a', []);
+		store.hold(decision('a', 'defer'));
+		await vi.advanceTimersByTimeAsync(HOLD_MS);
+		expect(post).toHaveBeenCalledTimes(1);
+		expect(refresh).toHaveBeenCalledTimes(1);
+		expect(desk.drafts.has('a')).toBe(true);
+	});
+
 	it('sends nothing on Undo, opens the item again, and hands its decision back once', async () => {
 		const { store, post, open } = setup();
 		const d = decision('a');
@@ -90,6 +100,38 @@ describe('Held', () => {
 		await vi.advanceTimersByTimeAsync(HOLD_MS * 2);
 		expect(post).toHaveBeenCalledTimes(1);
 		expect(post).toHaveBeenLastCalledWith(first.href, first.form);
+	});
+
+	it('refuses a second decision on a held item, so the panel can say the first is counting down', () => {
+		const { store } = setup();
+		const first = decision('a');
+		expect(store.hold(first)).toBe(true);
+		expect(store.hold(decision('a', 'reject'))).toBe(false);
+		expect(store.current).toBe(first);
+		expect(store.hold(decision('b'))).toBe(true);
+	});
+
+	it('keeps an Undo cancelled by an open comment box, and opens the item once the box closes', async () => {
+		const { store, post, open } = setup();
+		const d = decision('a');
+		store.hold(d);
+		open.mockImplementationOnce(async () => {
+			expect(store.blockRestore('/item/b')).toBe(false);
+			expect(store.blockRestore('/item/a')).toBe(true);
+		});
+		await store.undo();
+		expect(store.restoreBlocked).toBe(true);
+		expect(store.current).toBeNull();
+		await vi.advanceTimersByTimeAsync(HOLD_MS * 2);
+		expect(post).not.toHaveBeenCalled();
+		expect(open).toHaveBeenCalledTimes(1);
+		await store.resumeRestore();
+		expect(open).toHaveBeenCalledTimes(2);
+		expect(open).toHaveBeenLastCalledWith('/item/a');
+		expect(store.restoreBlocked).toBe(false);
+		expect(store.take('a')).toBe(d);
+		await store.resumeRestore();
+		expect(open).toHaveBeenCalledTimes(2);
 	});
 
 	it('keeps a second decision paused while the pointer stays on the toast', async () => {

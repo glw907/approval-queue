@@ -48,6 +48,15 @@ export interface ItemMeta {
 	 * first resend), and for a packet the head or hash of each part he sent back.
 	 */
 	revises?: { item: string; revision: number; parts?: Array<{ ref: string; head?: string; sha256?: string }> };
+	/** The blob of the approve a blueprint or page amends; its `approved.md` holds that text. */
+	amends?: string;
+	/** The queuing command's pid and its start time in clock ticks since boot; absent on an item queued before withdraw. */
+	pid?: number;
+	pidStart?: number;
+	/** Geoff deferred the item: it stays on the board with no session waiting on it. */
+	deferred: boolean;
+	/** A pid is recorded and that process is gone, and the item is not deferred, so no session waits for the decision. */
+	orphaned: boolean;
 }
 
 /** The `pr.json` fields: what `gh pr view` returns besides the body and head commit. */
@@ -105,6 +114,8 @@ export interface DocContent {
 	missing: boolean;
 	/** The description's paragraphs; absent on an item queued before descriptions. */
 	description?: string[];
+	/** The approved text and blob this item amends, when the file was queued after an approve of it. */
+	amend?: { blob: string; original: string };
 	/** A page's pull request as `owner/repo#n`, and its head when queued; a blueprint has neither. */
 	pr?: string;
 	prHead?: string;
@@ -174,6 +185,30 @@ async function readJson<T>(path: string): Promise<T | undefined> {
 	}
 }
 
+/** The state letter and start time (clock ticks since boot) of a process, or undefined when it is gone. */
+export async function procStat(pid: number): Promise<{ state: string; start: number } | undefined> {
+	const text = await readFile(`/proc/${pid}/stat`, 'utf8').catch(() => undefined);
+	if (text === undefined) return undefined;
+	// The command name in field 2 can hold spaces and parentheses, so split after the last `)`.
+	const fields = text.slice(text.lastIndexOf(')') + 2).split(' ');
+	return { state: fields[0], start: Number(fields[19]) };
+}
+
+/** Whether the process is the one that started at `start`: a reused pid has another start time, and a zombie is gone. */
+async function isWaiter(pid: number, start: number | undefined): Promise<boolean> {
+	const found = await procStat(pid);
+	return found !== undefined && found.state !== 'Z' && found.start === start;
+}
+
+/** Reads `item.json` and adds the two flags the board shows, which the file never holds. */
+async function readMeta(dir: string): Promise<ItemMeta | undefined> {
+	const stored = await readJson<Omit<ItemMeta, 'deferred' | 'orphaned'>>(join(dir, 'item.json'));
+	if (!stored) return undefined;
+	const deferred = (await stat(join(dir, 'deferred.json')).catch(() => undefined)) !== undefined;
+	const orphaned = stored.pid !== undefined && !deferred && !(await isWaiter(stored.pid, stored.pidStart));
+	return { ...stored, deferred, orphaned };
+}
+
 async function itemIds(root: string): Promise<string[]> {
 	try {
 		return await readdir(join(root, 'items'));
@@ -183,14 +218,17 @@ async function itemIds(root: string): Promise<string[]> {
 	}
 }
 
-/** Items with an `item.json` and no `decision.json`, oldest first by `created`, then `id`. An item whose JSON does not parse is skipped. */
+/**
+ * Items with an `item.json` and no `decision.json`, oldest first by `created`, then `id`, each with
+ * whether Geoff deferred it and whether its session is gone. An item whose JSON does not parse is skipped.
+ */
 export async function listWaiting(root: string): Promise<ItemMeta[]> {
 	const waiting: ItemMeta[] = [];
 	for (const id of await itemIds(root)) {
 		const dir = join(root, 'items', id);
 		try {
 			if (await readJson(join(dir, 'decision.json'))) continue;
-			const meta = await readJson<ItemMeta>(join(dir, 'item.json'));
+			const meta = await readMeta(dir);
 			if (meta) waiting.push(meta);
 		} catch (err) {
 			if (!(err instanceof SyntaxError)) throw err;
@@ -209,7 +247,7 @@ export async function listDecided(
 		const dir = join(root, 'items', id);
 		try {
 			const decision = await readJson<Decision>(join(dir, 'decision.json'));
-			const meta = await readJson<ItemMeta>(join(dir, 'item.json'));
+			const meta = await readMeta(dir);
 			if (!decision || !meta) continue;
 			const at = (await stat(join(dir, 'decision.json'))).mtimeMs;
 			if (at >= since) decided.push({ meta, decision: decision.decision, at });
@@ -220,10 +258,13 @@ export async function listDecided(
 	return decided.sort((a, b) => b.at - a.at).map(({ meta, decision }) => ({ meta, decision }));
 }
 
-/** Reads one item, or returns undefined when `item.json` is absent. The id must already have passed the `id` matcher. */
+/**
+ * Reads one item, or returns undefined when `item.json` is absent or a packet's `packet.json` does not
+ * parse, as for a withdrawn item. The id must already have passed the `id` matcher.
+ */
 export async function readItem(root: string, id: string): Promise<Item | undefined> {
 	const dir = join(root, 'items', id);
-	const meta = await readJson<ItemMeta>(join(dir, 'item.json'));
+	const meta = await readMeta(dir);
 	if (!meta) return undefined;
 	const decision = await readJson<Decision>(join(dir, 'decision.json'));
 	let content: ItemContent;
@@ -238,7 +279,12 @@ export async function readItem(root: string, id: string): Promise<Item | undefin
 	} else if (meta.kind === 'design') {
 		content = { kind: 'design', doc: await readFile(join(dir, 'doc.md'), 'utf8') };
 	} else if (meta.kind === 'packet') {
-		content = await readPacket(dir);
+		try {
+			content = await readPacket(dir);
+		} catch (err) {
+			if (err instanceof SyntaxError) return undefined;
+			throw err;
+		}
 	} else if (meta.kind === 'blueprint' || meta.kind === 'page') {
 		content = await readBlueprint(dir, meta);
 	} else if (meta.kind === 'change') {
@@ -343,7 +389,9 @@ async function readBlueprint(dir: string, meta: ItemMeta): Promise<ItemContent> 
 	const worktree = meta.worktree ?? '';
 	const file = meta.file ?? '';
 	const description = await readFile(join(dir, 'description.md'), 'utf8').then(descriptionParagraphs, () => undefined);
-	const extra = { ...prs, ...(description && { description }) };
+	const approved = meta.amends ? await readFile(join(dir, 'approved.md'), 'utf8').catch(() => undefined) : undefined;
+	const amend = approved === undefined ? undefined : { blob: meta.amends ?? '', original: lf(approved) };
+	const extra = { ...prs, ...(description && { description }), ...(amend && { amend }) };
 	try {
 		const now = await committed(worktree, file);
 		return { kind, doc: lf(now.text), blob: now.blob, commit: now.commit, original, notes, worktree, file, missing: false, ...extra };
@@ -358,6 +406,14 @@ export async function writeDecision(root: string, id: string, decision: Decision
 	const tmp = join(dir, 'decision.json.tmp');
 	await writeFile(tmp, JSON.stringify(decision));
 	await rename(tmp, join(dir, 'decision.json'));
+}
+
+/** Writes `deferred.json` through a temp file and `rename`, so the waiting command never reads a partial file. */
+export async function writeDeferred(root: string, id: string): Promise<void> {
+	const dir = join(root, 'items', id);
+	const tmp = join(dir, `deferred.json.${randomUUID()}.tmp`);
+	await writeFile(tmp, JSON.stringify({ at: new Date().toISOString() }));
+	await rename(tmp, join(dir, 'deferred.json'));
 }
 
 /** Geoff's side of a document review's comments, as `comments.json` in the item directory holds it. */

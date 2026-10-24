@@ -26,12 +26,12 @@ for that save first, and closing the tab then asks before leaving.
 	import { fingerprint, gate } from '#lib/cards.ts';
 	import { setDrawer } from '#lib/components/frame/drawers.ts';
 	import { desk, type OutlineEntry } from '#lib/desk.svelte.ts';
-	import { held, seedFrom, UNDONE } from '#lib/held.svelte.ts';
+	import { COUNTING, held, RESTORE_BLOCKED, seedFrom, UNDONE } from '#lib/held.svelte.ts';
 	import { nextItem } from '#lib/queue.ts';
 	import { changedCount, seedRows, type Row } from '#lib/triage.ts';
 	import { VERDICT_LOOK } from '#lib/packet-view.ts';
 	import type { PlacedNote } from '#lib/editor/notes.ts';
-	import { boxes, DocReview, heldBySave, noteStart, refuseOpenBox, sendBackDraft, type CommentAnswer, type SaveResult } from '#lib/editor/review.svelte.ts';
+	import { boxes, DocReview, heldBySave, noteStart, refuseOpenBox, restoredDrafted, sendBackDraft, type CommentAnswer, type SaveResult } from '#lib/editor/review.svelte.ts';
 	import type { PageData } from '../../routes/item/[id=id]/$types';
 	import BlueprintView from './BlueprintView.svelte';
 	import BriefBlock from './BriefBlock.svelte';
@@ -442,7 +442,11 @@ for that save first, and closing the tab then asks before leaving.
 		untrack(() => {
 			desk.toast = UNDONE;
 			desk.announce(UNDONE);
-			if (restored.outcome === 'reject') void openNote();
+			if (restored.outcome === 'reject') {
+				// Only matters when openNote refuses: the restored note is the reader's own text unless it is still the draft.
+				drafted = restoredDrafted(noteText, sendBackDraft(openCalls, review?.changedLines ?? 0, data.kind === 'page' ? 'page' : 'plan'));
+				void openNote();
+			}
 			else {
 				const main = document.getElementById('main');
 				if (main && !main.contains(document.activeElement)) main.focus();
@@ -623,11 +627,26 @@ for that save first, and closing the tab then asks before leaving.
 	/** Where the reader goes once the save that held a navigation lands; null while none is held. */
 	let leaveAfterSave: (() => void) | null = null;
 
+	/** Whether an open comment box holds text that leaving would drop. */
+	const holdsText = () => !!boxes.open && docReviews.includes(boxes.open) && !!boxes.open.box?.text.trim();
+
+	// Undo's navigation was cancelled by the box above; once the box is saved or cancelled, it goes ahead.
+	$effect(() => {
+		if (held.restoreBlocked && !(boxes.open && docReviews.includes(boxes.open))) untrack(() => void held.resumeRestore());
+	});
+
 	beforeNavigate((navigation) => {
 		// A comment box holding text would be dropped unsaved, so leaving waits until it is saved or cancelled.
-		if (boxes.open && docReviews.includes(boxes.open) && boxes.open.box?.text.trim()) {
+		if (holdsText()) {
 			navigation.cancel();
-			if (!navigation.willUnload) refuseOpenBox();
+			if (!navigation.willUnload) {
+				// Undo's own navigation is the one the reader needs told about: it resumes once the box closes.
+				if (navigation.to && held.blockRestore(navigation.to.url.pathname)) {
+					desk.flash(RESTORE_BLOCKED);
+					// Undo's toast is gone by now, so focus goes to the box the reader has to finish.
+					void boxes.open?.focusBox();
+				} else refuseOpenBox();
+			}
 			return;
 		}
 		if (!review?.pending) return;
@@ -746,6 +765,7 @@ for that save first, and closing the tab then asks before leaving.
 			if (n) return `Sent back with ${plural(n, 'comment')}. The author will answer ${n === 1 ? 'it' : 'them'} and queue the ${docWord} again.`;
 			return noteText.trim() ? `Sent ${subject()} back with a note.` : `Sent ${subject()} back.`;
 		}
+		if (action.search === '?/defer') return `Deferred ${subject()}. It waits under Deferred.`;
 		return `Submitted ${rows.length} calls.`;
 	}
 
@@ -756,6 +776,10 @@ for that save first, and closing the tab then asks before leaving.
 	const decide: SubmitFunction = async ({ cancel, action, formData }) => {
 		cancel();
 		if (deciding || refuseOpenBox()) return;
+		if (held.ids.has(data.meta.id)) {
+			desk.announce(COUNTING);
+			return;
+		}
 		deciding = true;
 		try {
 			// A comment op on its way lands before the decision, so the decision reads it.
@@ -764,19 +788,29 @@ for that save first, and closing the tab then asks before leaving.
 			// the blob that save returned rather than the one the form rendered with.
 			if (review) {
 				await review.flush();
-				const refusal = heldBySave(review, action.search === '?/reject' ? 'reject' : 'approve');
+				const refusal = heldBySave(
+					review,
+					action.search === '?/reject' ? 'reject' : action.search === '?/defer' ? 'defer' : 'approve'
+				);
 				if (refusal) {
 					desk.announce(refusal);
 					return;
 				}
-				formData.set('blob', review.blob);
+				if (action.search !== '?/defer') formData.set('blob', review.blob);
 			}
-			const outcome = action.search === '?/approve' ? 'approve' : action.search === '?/reject' ? 'reject' : 'submit';
+			const outcome =
+				action.search === '?/approve'
+					? 'approve'
+					: action.search === '?/reject'
+						? 'reject'
+						: action.search === '?/defer'
+							? 'defer'
+							: 'submit';
 			// Every held item is left out, so the next one is never an item whose decision is still counting.
 			const waiting = data.queue.filter((item) => item.id === data.meta.id || !held.ids.has(item.id));
 			const upNext = nextItem(waiting, data.meta.id);
 			const text = decisionText(action);
-			held.hold({
+			const accepted = held.hold({
 				id: data.meta.id,
 				title: data.meta.headline ?? data.meta.title,
 				kind: data.kind,
@@ -786,6 +820,10 @@ for that save first, and closing the tab then asks before leaving.
 				outcome,
 				toast: text
 			});
+			if (!accepted) {
+				desk.announce(COUNTING);
+				return;
+			}
 			desk.announce(`${text} ${desk.singleKeys ? 'Press z or the Undo button' : 'Press the Undo button'} to undo.`);
 			await goto(upNext ? `/item/${encodeURIComponent(upNext.id)}` : '/', { replace: true });
 		} finally {
@@ -882,6 +920,7 @@ for that save first, and closing the tab then asks before leaving.
 				{#snippet crumb()}
 					<a href="/">Board</a><span aria-hidden="true">/</span><span>{blueprint.kind === 'page' ? 'Page' : 'Blueprint'}</span><span aria-hidden="true">/</span><span>{blueprint.meta.repo}</span>
 					{#if blueprint.revision}<span class="badge badge-sm badge-outline rule-badge tone-info">Revision {blueprint.revision}</span>{/if}
+					{#if blueprint.amend}<span class="badge badge-sm badge-outline rule-badge tone-info">Amends the approved version</span>{/if}
 				{/snippet}
 				{#snippet headline()}{blueprint.meta.title}{/snippet}
 				{#snippet lede()}{docLede}{/snippet}
@@ -932,9 +971,9 @@ for that save first, and closing the tab then asks before leaving.
 			<p class="bg bg-first bg-flat">The queue can no longer read <code>{blueprint.file}</code> from the worktree’s latest commit. The editor shows the copy that was queued, and you can’t edit it.</p>
 		{/if}
 		{#if blueprint.kind === 'page'}
-			<PageView {review} file={blueprint.file} pr={blueprint.pr} place={docPlace} />
+			<PageView {review} file={blueprint.file} pr={blueprint.pr} place={docPlace} amend={blueprint.amend?.original} />
 		{:else}
-			<BlueprintView {review} file={blueprint.file} place={docPlace} />
+			<BlueprintView {review} file={blueprint.file} place={docPlace} amend={blueprint.amend?.original} />
 		{/if}
 	{:else if change}
 		<ChangeView data={change} reviews={changeReviews} place={docPlace} />
@@ -1051,6 +1090,11 @@ for that save first, and closing the tab then asks before leaving.
 								bind:this={rejectButton} onclick={openNote}>
 								Send back with note
 							</button>
+						{/if}
+					{/snippet}
+					{#snippet defer()}
+						{#if data.canDefer && !desk.noteOpen}
+							<button type="submit" class="btn btn-outline" formaction="?/defer">Defer</button>
 						{/if}
 					{/snippet}
 					{#snippet status()}

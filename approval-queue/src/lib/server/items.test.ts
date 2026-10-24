@@ -2,10 +2,11 @@ import { mkdir, mkdtemp, readdir, readFile, rm, utimes, writeFile } from 'node:f
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { seedPacket } from '#lib/fixtures/seed-packet.ts';
-import { listDecided, listWaiting, readItem, writeDecision, writeDecisionOnce } from './items.ts';
+import { listDecided, listWaiting, procStat, readItem, writeDecision, writeDecisionOnce, writeDeferred } from './items.ts';
 
 let root: string;
 
@@ -187,6 +188,110 @@ describe('a damaged item.json', () => {
 		await writeFile(join(root, 'items', 'bad2', 'decision.json'), '{"decision": "approve"}');
 		expect((await listWaiting(root)).map((m) => m.title)).toEqual(['good']);
 		expect((await listDecided(root, 0)).map((d) => d.meta.title)).toEqual(['done']);
+	});
+});
+
+describe('deferred and orphaned', () => {
+	const meta = { kind: 'design', repo: 'r', title: 't', created: '2026-10-11T10:00:00Z' };
+	const flags = async (id: string) => {
+		const found = (await listWaiting(root)).find((m) => m.id === id);
+		return [found?.deferred, found?.orphaned];
+	};
+
+	it('reads a live pid with its own start time as a waiter', async () => {
+		const mine = await procStat(process.pid);
+		await seed('live', { ...meta, pid: process.pid, pidStart: mine?.start }, { 'doc.md': 'd' });
+		expect(await flags('live')).toEqual([false, false]);
+		expect((await readItem(root, 'live'))?.meta).toMatchObject({ deferred: false, orphaned: false });
+	});
+
+	it('marks a pid that has exited, and a pid with no process, as orphaned', async () => {
+		const done = spawn('true');
+		await new Promise((resolve) => done.once('exit', resolve));
+		await seed('dead', { ...meta, pid: done.pid, pidStart: 1 }, { 'doc.md': 'd' });
+		await seed('none', { ...meta, pid: 2 ** 22 + 1, pidStart: 1 });
+		expect(await flags('dead')).toEqual([false, true]);
+		expect(await flags('none')).toEqual([false, true]);
+		expect((await readItem(root, 'dead'))?.meta.orphaned).toBe(true);
+	});
+
+	it('marks a reused pid as orphaned: the pid runs, but not the process that queued the item', async () => {
+		const sleeper = spawn('sleep', ['30']);
+		try {
+			const real = await procStat(sleeper.pid ?? 0);
+			await seed('reused', { ...meta, pid: sleeper.pid, pidStart: (real?.start ?? 0) + 1 });
+			await seed('same', { ...meta, pid: sleeper.pid, pidStart: real?.start });
+			expect(await flags('reused')).toEqual([false, true]);
+			expect(await flags('same')).toEqual([false, false]);
+		} finally {
+			sleeper.kill();
+		}
+	});
+
+	it('marks a zombie as orphaned: a killed command its parent has not reaped keeps its stat', async () => {
+		// A parent that forks a child and never waits on it leaves the killed child a zombie.
+		const parent = spawn(
+			'python3',
+			['-I', '-c', "import os, time\np = os.fork()\nif p == 0:\n  os.execvp('sleep', ['sleep', '30'])\nprint(p, flush=True)\ntime.sleep(30)"],
+			{ stdio: ['ignore', 'pipe', 'ignore'] }
+		);
+		try {
+			const pid = Number(await new Promise<string>((resolve) => parent.stdout.once('data', (chunk) => resolve(String(chunk)))));
+			const real = await procStat(pid);
+			expect(real?.state).not.toBe('Z');
+			process.kill(pid, 'SIGKILL');
+			await new Promise((resolve) => setTimeout(resolve, 100));
+			expect((await procStat(pid))?.state).toBe('Z');
+			await seed('zombie', { ...meta, pid, pidStart: real?.start });
+			expect(await flags('zombie')).toEqual([false, true]);
+		} finally {
+			parent.kill();
+		}
+	});
+
+	it('reads an item with no pid as unknown: not orphaned', async () => {
+		await seed('old', meta);
+		expect(await flags('old')).toEqual([false, false]);
+	});
+
+	it('marks a deferred item deferred and never orphaned, even with a dead pid', async () => {
+		await seed('later', { ...meta, pid: 2 ** 22 + 1, pidStart: 1 }, { 'doc.md': 'd' });
+		await writeDeferred(root, 'later');
+		expect(await flags('later')).toEqual([true, false]);
+		expect(JSON.parse(await readFile(join(root, 'items', 'later', 'deferred.json'), 'utf8')).at).toMatch(/^\d{4}-\d{2}-\d{2}T.*Z$/);
+		expect((await readItem(root, 'later'))?.meta).toMatchObject({ deferred: true, orphaned: false });
+	});
+
+	it('defers twice at once without a collision, leaving no temp file', async () => {
+		await seed('twice', meta, { 'doc.md': 'd' });
+		await Promise.all([writeDeferred(root, 'twice'), writeDeferred(root, 'twice')]);
+		expect((await readdir(join(root, 'items', 'twice'))).filter((f) => f.endsWith('.tmp'))).toEqual([]);
+		expect((await readItem(root, 'twice'))?.meta).toMatchObject({ deferred: true });
+	});
+});
+
+describe('a packet.json that does not parse', () => {
+	it('reads as a withdrawn item: undefined, not a thrown SyntaxError', async () => {
+		await seedPacket(root, 'p', PACKET);
+		await writeFile(join(root, 'items', 'p', 'packet.json'), '{nope');
+		expect(await readItem(root, 'p')).toBeUndefined();
+	});
+});
+
+describe('an amend', () => {
+	const meta = { kind: 'blueprint', repo: 'r', title: 't', created: 'c', worktree: '/nonexistent', file: 'b.blueprint.md', blob: 'new' };
+
+	it('reads the approved text with CRLF turned to LF, and the blob it came from', async () => {
+		await seed('a', { ...meta, amends: 'abc123' }, { 'doc.md': 'now\n', 'approved.md': 'before\r\nthen\r\n' });
+		const item = await readItem(root, 'a');
+		expect(item?.content).toMatchObject({ kind: 'blueprint', amend: { blob: 'abc123', original: 'before\nthen\n' } });
+	});
+
+	it('has no amend without the field, or when approved.md is gone', async () => {
+		await seed('plain', meta, { 'doc.md': 'now\n' });
+		await seed('lost', { ...meta, amends: 'abc123' }, { 'doc.md': 'now\n' });
+		expect((await readItem(root, 'plain'))?.content).not.toHaveProperty('amend');
+		expect((await readItem(root, 'lost'))?.content).not.toHaveProperty('amend');
 	});
 });
 

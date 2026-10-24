@@ -18,8 +18,16 @@ assert_eq() {
   [ "$1" = "$2" ] || { echo "FAIL: $3: got '$1', want '$2'"; fail=1; }
 }
 
+# No packet id this test logged may appear in the live log. A leak fails by name; other sessions'
+# lines in the live log do not matter.
 live_log="$HOME/.local/state/approval-queue/decisions.jsonl"
-live_before=$(stat -c %s "$live_log" 2>/dev/null || echo none)
+live_leak() {
+  local pid
+  [ -e "$live_log" ] && [ -e "$log" ] || return 0
+  while IFS= read -r pid; do
+    if grep -qF "\"packet\":\"$pid\"" "$live_log"; then echo "FAIL: the test wrote packet $pid to the live log"; fail=1; fi
+  done < <(jq -r '.packet' "$log" | sort -u)
+}
 
 # Every blueprint and page takes a description of a background paragraph and one summary paragraph.
 DESC="$root/description.md"
@@ -36,6 +44,7 @@ export GIT_CONFIG_GLOBAL=/dev/null GIT_AUTHOR_NAME=Test GIT_AUTHOR_EMAIL=test@ex
   GIT_COMMITTER_NAME=Test GIT_COMMITTER_EMAIL=test@example.com
 state="$XDG_STATE_HOME/approval-queue"
 log="$state/decisions.jsonl"
+source tests/collect-check.sh
 
 repo="$root/sample"
 mkdir -p "$repo/blueprints"
@@ -116,6 +125,22 @@ for want in 'note 2 (D1) has kind "dispute"' 'note 1 (C1) has an unknown field e
 done
 refuse "usage" "usage:" "$repo" T --description "$DESC"
 
+# A note's anchor is a string, or an object with a non-empty quote and an optional string prefix and suffix.
+for case in 'quote: ""|an anchor quote that is a non-empty string' 'quote: "a", prefix: 3|an anchor prefix that is not a string' \
+  'quote: "a", suffix: null|an anchor suffix that is not a string' 'quote: "a", extra: 1|an unknown anchor key extra' 'prefix: "a"|an anchor quote that is a non-empty string'; do
+  jq "(.[0].anchor) = {${case%%|*}}" "$NOTES" >"$root/bad-anchor.json"
+  refuse "anchor {${case%%|*}}" "${case#*|}" "$repo" T "$FILE" --notes "$root/bad-anchor.json" --description "$DESC"
+done
+jq '.[0].anchor = ""' "$NOTES" >"$root/bad-anchor.json"
+refuse "empty anchor string" "needs an anchor string" "$repo" T "$FILE" --notes "$root/bad-anchor.json" --description "$DESC"
+jq '.[0].anchor = 5' "$NOTES" >"$root/bad-anchor.json"
+refuse "anchor not a string" "needs an anchor string" "$repo" T "$FILE" --notes "$root/bad-anchor.json" --description "$DESC"
+jq '.[0].anchor = {quote: "Sort the steps by time.", prefix: "Step", suffix: ""} | .[1].anchor = "sort-steps.heading"' "$NOTES" >"$root/quote-anchor.json"
+queue blueprint "$repo" T "$FILE" --notes "$root/quote-anchor.json" --description "$DESC"
+assert_eq "$(jq -c '.[0].anchor' "$dir/notes.json")" '{"quote":"Sort the steps by time.","prefix":"Step","suffix":""}' "quote anchor: queued with the notes"
+kill -TERM "$bgpid"; wait "$bgpid" 2>/dev/null; bgpid=""
+rm -rf "$state/items"
+
 # The description is required, is a file, and with the title follows the register: a background paragraph and
 # one or two summary paragraphs, and a heading title with no closing punctuation, at most 80 characters.
 refuse "no description" "needs --description <file>" "$repo" T "$FILE"
@@ -176,6 +201,10 @@ assert_eq "$(wc -l <"$log")" "1" "approve: one log line"
 assert_eq "$(jq -c '[.kind,.ref,.lane,.verdict,.blob,.commit,.waived[0].id,.waived[0].reason,.initiative]' "$log")" \
   "[\"blueprint\",\"sample:$FILE\",\"single\",\"approve\",\"$approved_blob\",\"$approved_commit\",\"D1\",\"Kept the author's wording\",null]" "approve: log line"
 assert_eq "$(jq -c '[.comments,.replies]' "$log")" "[1,0]" "approve: log counts"
+assert_eq "$(jq -r '[(.pid | type), (.pidStart | type), (.pid as $p | .id | endswith("-\($p)"))] | join(" ")' "$dir/item.json")" "number number true" "queue: pid and pidStart"
+assert_eq "$(jq -c 'has("amends")' "$dir/item.json")" "false" "queue: a first blueprint is no amend"
+[ ! -e "$dir/approved.md" ] || { echo "FAIL: queue: approved.md without an earlier approve"; fail=1; }
+collect_check blueprint "$dir"
 
 # approved answers 0 for the approved blob only, by the ref's file part.
 bash "$SCRIPT" approved "$FILE" "$approved_blob"; assert_eq "$?" "0" "approved: the approved blob"
@@ -193,20 +222,41 @@ echo '[]' >"$root/no-replies.json"
 queue blueprint "$repo" T "$FILE" --replies "$root/no-replies.json" --description "$DESC"
 assert_eq "$(cat "$dir/notes.json")" "[]" "no notes: empty notes.json"
 assert_eq "$(cat "$dir/replies.json")" "[]" "empty replies: replies.json"
+# Queued after an approve of the same file, it is an amend review: approved.md holds the approved text and
+# item.json names its blob.
+assert_eq "$(jq -c '.amends' "$dir/item.json")" "\"$approved_blob\"" "amend: item.json names the approved blob"
+assert_eq "$(git -C "$repo" cat-file blob "$approved_blob" | cmp - "$dir/approved.md"; echo $?)" "0" "amend: approved.md is the approved text"
 decide "{\"decision\":\"reject\",\"note\":\"Fold the event section in.\",\"calls\":[{\"id\":\"Q1\",\"choice\":\"Fold it in\"}],\"comments\":[$comment],\"threads\":[{\"id\":\"C0\",\"reply\":\"Not yet.\"}]}"
 assert_eq "$rc" "0" "reject: exit code"
 assert_eq "$(cat "$root/out")" \
   "$(jq -cn --argjson comment "$comment" '{decision: "reject", note: "Fold the event section in.", calls: [{id: "Q1", choice: "Fold it in"}],
-    comments: [$comment], threads: [{id: "C0", reply: "Not yet."}]}')" "reject: stdout"
+    comments: [$comment], threads: [{id: "C0", reply: "Not yet."}], amends: $b}' --arg b "$approved_blob")" "reject: stdout (an amend of the approved blob)"
 assert_eq "$(grep -v '^not json' "$log" | tail -n 1 | jq -c '[.comments,.replies]')" "[1,1]" "reject: log counts"
 
 queue blueprint "$repo" T "$FILE" --replies "$root/replies.json" --description "$DESC"
 assert_eq "$(jq -c '[.[].id]' "$dir/replies.json")" '["C1"]' "replies: replies.json"
 decide '{"decision":"reject","note":""}'
-assert_eq "$(cat "$root/out")" '{"decision":"reject","note":"","calls":[],"comments":[],"threads":[]}' "reject with nothing: stdout"
+assert_eq "$(cat "$root/out")" "{\"decision\":\"reject\",\"note\":\"\",\"calls\":[],\"comments\":[],\"threads\":[],\"amends\":\"$approved_blob\"}" "reject with nothing: stdout"
 head_blob=$(git -C "$repo" rev-parse "HEAD:$FILE")
 assert_eq "$(grep -v '^not json' "$log" | tail -n 1 | jq -c '[.verdict,.blob,.waived]')" "[\"reject\",\"$head_blob\",[]]" "reject: log line"
 bash "$SCRIPT" approved "$FILE" "$head_blob"; assert_eq "$?" "1" "approved: a rejected blob"
+
+# An approve of another file is no amend, and neither is an approve whose blob the worktree lacks.
+OTHER=blueprints/other.blueprint.md
+GHOST=blueprints/ghost.blueprint.md
+cp "$DOC" "$repo/$OTHER"
+cp "$DOC" "$repo/$GHOST"
+git -C "$repo" add "$OTHER" "$GHOST"
+git -C "$repo" commit -q -m "Add two more blueprints"
+queue blueprint "$repo" T "$OTHER" --description "$DESC"
+assert_eq "$(jq -c 'has("amends")' "$dir/item.json")" "false" "amend: an approve of another file is no amend"
+[ ! -e "$dir/approved.md" ] || { echo "FAIL: amend: approved.md for another file's approve"; fail=1; }
+decide '{"decision":"reject","note":"Other."}'
+jq -nc --arg r "sample:$GHOST" '{kind: "blueprint", ref: $r, verdict: "approve", blob: "0123456789abcdef0123456789abcdef01234567"}' >>"$log"
+queue blueprint "$repo" T "$GHOST" --description "$DESC"
+assert_eq "$(jq -c 'has("amends")' "$dir/item.json")" "false" "amend: a blob the worktree lacks queues a full review"
+[ ! -e "$dir/approved.md" ] || { echo "FAIL: amend: approved.md for a missing blob"; fail=1; }
+decide '{"decision":"reject","note":"Ghost."}'
 
 # A blueprint sent back and queued again is a revision, with no section: item.json names the earlier item and
 # the round, a third round reads 3, an approve ends the rounds, and a log with no file reads as none.
@@ -230,6 +280,16 @@ queue blueprint "$repo" T "$FILE" --description "$DESC"
 assert_eq "$(jq -c '.revises.revision' "$dir/item.json")" "2" "revision: rounds before an approve do not count"
 decide '{"decision":"reject","note":""}'
 
-assert_eq "$(stat -c %s "$live_log" 2>/dev/null || echo none)" "$live_before" "the live log is untouched"
+# An approve of an amend review prints the blob it amends.
+prev_blob=$(jq -r 'select(.verdict == "approve") | .blob' "$log" | tail -n 1)
+queue blueprint "$repo" T "$FILE" --description "$DESC"
+decide "{\"decision\":\"approve\",\"commit\":\"$(git -C "$repo" rev-parse HEAD)\"}"
+assert_eq "$(jq -r '.amends' "$root/out")" "$prev_blob" "amend: the printed approve names the amended blob"
+
+# `anchors` prints a file's heading anchors by cairn's slug rule.
+printf '## Set a section'"'"'s starting state\n\n- A bullet.\n' >"$root/heading.md"
+assert_eq "$(bash "$SCRIPT" anchors "$root/heading.md")" "$(printf 'set-a-sections-starting-state.heading\tSet a section'"'"'s starting state')" "anchors: the apostrophe example"
+
+live_leak
 [ "$fail" -eq 0 ] && echo "blueprint.test.sh: ok"
 exit "$fail"

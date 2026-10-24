@@ -1,7 +1,7 @@
 import type { EditorView } from '@codemirror/view';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PlacedNote } from './notes.ts';
-import { DocReview, heldBySave, noteStart, sendBackDraft, type CommentAnswer, type ReviewInit, type SaveResult } from './review.svelte.ts';
+import { DocReview, heldBySave, noteStart, restoredDrafted, sendBackDraft, type CommentAnswer, type ReviewInit, type SaveResult } from './review.svelte.ts';
 
 const KEY = 'desk.calls.test';
 
@@ -115,6 +115,23 @@ describe('DocReview remembered choices', () => {
 		expect(text).toBe('- Still open: Why\n');
 	});
 
+	it('treats a send-back draft Undo restored untouched as untouched, so a call answered since rebuilds it', () => {
+		const r = review('b1');
+		const draft = () => sendBackDraft(r.openCalls, r.changedLines, 'plan');
+		const restored = draft();
+		const drafted = restoredDrafted(restored, draft());
+		r.choose('Q1', 0);
+		expect(noteStart(restored, drafted, draft())).toBe('- Still open: Why\n');
+	});
+
+	it('treats a restored send-back note that differs from the rebuilt draft as typed', () => {
+		const r = review('b1');
+		const typed = `${sendBackDraft(r.openCalls, 0, 'plan')}Tighten the second section.`;
+		const drafted = restoredDrafted(typed, sendBackDraft(r.openCalls, 0, 'plan'));
+		r.choose('Q1', 0);
+		expect(noteStart(typed, drafted, sendBackDraft(r.openCalls, 0, 'plan'))).toBe(typed);
+	});
+
 	it('keeps a send-back note the reader has typed in', () => {
 		const r = review('b1');
 		const drafted = sendBackDraft(r.openCalls, 0, 'plan');
@@ -130,6 +147,7 @@ describe('DocReview remembered choices', () => {
 		await r.flush();
 		expect(heldBySave(r, 'reject')).toBe('Not sent back: Not saved: refused');
 		expect(heldBySave(r, 'approve')).toBe('Not approved: Not saved: refused');
+		expect(heldBySave(r, 'defer')).toBe('Not deferred: Not saved: refused');
 	});
 
 	it('retries a refused save on the next flush, so a decision press is the retry', async () => {

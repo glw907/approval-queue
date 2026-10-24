@@ -40,6 +40,8 @@ chmod +x "$stubs"/*
 
 export STUB_DIR="$root" XDG_STATE_HOME="$root/state" PATH="$stubs:$PATH"
 state="$XDG_STATE_HOME/approval-queue"
+log="$state/decisions.jsonl"
+source tests/collect-check.sh
 cat >"$root/body.md" <<'BRIEF'
 ## Brief
 
@@ -85,6 +87,7 @@ run_kind() {
   want_headline="The queue now refuses an item with no brief."
   [ "$kind" != triage ] || want_headline="One call needs you."
   assert_eq "$(jq -r .headline "$dir/item.json")" "$want_headline" "$kind: headline"
+  assert_eq "$(jq -r '[(.pid | type), (.pidStart | type), (.pid as $p | .id | endswith("-\($p)"))] | join(" ")' "$dir/item.json")" "number number true" "$kind: pid and pidStart"
   for f in $files; do [ -e "$dir/$f" ] || { echo "FAIL: $kind: missing $f"; fail=1; }; done
   if [ "$kind" = pr ]; then
     assert_eq "$(jq -r .head "$dir/item.json")" "abc123" "pr: head"
@@ -114,6 +117,8 @@ run_kind() {
   assert_eq "$(cat "$root/out")" "$want" "$kind: stdout"
   grep -Fxq "approval-queue: queued $id at http://127.0.0.1:7907/item/$id" "$root/err" \
     || { echo "FAIL: $kind: the queued link is not on stderr: $(cat "$root/err")"; fail=1; }
+  # A triage logs nothing, so there is nothing to log once.
+  [ "$kind" = triage ] || collect_check "$kind" "$dir"
 }
 
 run_kind pr 42 "body.md diff.patch pr.json"
