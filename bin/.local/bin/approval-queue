@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # approval-queue: put one item (a PR, a design, a triage list, a packet, a blueprint, a page, a change) in front
-# of Geoff in the Design & PR Approvals app and print his decision as JSON on stdout. Build, server, and browser
+# of Geoff in the Approval Queue and print his decision as JSON on stdout. Build, server, and browser
 # output go to server.log. `approval-queue approved [--kind page] <file> <blob>` answers whether the log holds
 # an approve of that blob.
 set -euo pipefail

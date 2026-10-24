@@ -261,7 +261,7 @@ this session" until the queue reload lists it there itself.
 		<button type="button" class="drawer-x" aria-label="Close the queue" onclick={closeDrawers}>
 			<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
 		</button>
-		<div class="title"><a href="/" data-sveltekit-replacestate>Design &amp; PR Approvals</a></div>
+		<div class="title"><a href="/" data-sveltekit-replacestate>Approval Queue</a></div>
 		<div class="sub" aria-live="polite">{waiting.length} waiting</div>
 		{#each sidebar as group, g (group.title)}
 			<h2 class="group" id="nav-{g}">{group.title}</h2>
@@ -342,7 +342,7 @@ this session" until the queue reload lists it there itself.
 				<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16" /></svg>
 				<span>Queue</span><span class="count">{waiting.length}</span>
 			</button>
-			<span class="appname">Design &amp; PR Approvals</span>
+			<span class="appname">Approval Queue</span>
 		</div>
 		{@render children()}
 	</div>

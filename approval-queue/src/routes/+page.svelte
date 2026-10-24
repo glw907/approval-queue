@@ -39,7 +39,7 @@ is left off, and the empty state shows once nothing else waits. A deferred row s
 </script>
 
 <svelte:head>
-	{#if !empty}<title>Waiting for you · Design & PR Approvals</title>{/if}
+	{#if !empty}<title>Waiting for you · Approval Queue</title>{/if}
 </svelte:head>
 
 {#if empty}

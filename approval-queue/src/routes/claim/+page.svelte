@@ -2,7 +2,7 @@
 The confirmation `/claim` shows after the server sets the claim cookie. The page holds no state: the
 cookie is the whole effect, and visiting again only renews it.
 -->
-<svelte:head><title>This browser is claimed · Design & PR Approvals</title></svelte:head>
+<svelte:head><title>This browser is claimed · Approval Queue</title></svelte:head>
 
 <main id="main" tabindex="-1" class="flex-1 px-5 pt-16 lg:px-8">
 	<div class="max-w-[60ch]">

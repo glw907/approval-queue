@@ -69,7 +69,7 @@ turns the count off. The page unmounts it when an item arrives, which cancels th
 	}
 </script>
 
-<svelte:head><title>Nothing waiting · Design & PR Approvals</title></svelte:head>
+<svelte:head><title>Nothing waiting · Approval Queue</title></svelte:head>
 <svelte:document onkeydown={onKeydown} />
 
 <main id="main" tabindex="-1" class="relative isolate flex flex-1 items-start px-5 pt-16 lg:px-8">
