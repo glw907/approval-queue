@@ -112,6 +112,8 @@ run_kind() {
   want='{"decision":"approve"}'
   [ "$kind" = pr ] && want='{"decision":"approve","head":"abc123"}'
   assert_eq "$(cat "$root/out")" "$want" "$kind: stdout"
+  grep -Fxq "approval-queue: queued $id at http://127.0.0.1:7907/item/$id" "$root/err" \
+    || { echo "FAIL: $kind: the queued link is not on stderr: $(cat "$root/err")"; fail=1; }
 }
 
 run_kind pr 42 "body.md diff.patch pr.json"
@@ -184,6 +186,7 @@ rm -rf "$state/items"
 STUB_ITEM_FAILS=1 bash "$SCRIPT" design owner/repo T "$root/design.md" >/dev/null 2>"$root/err"
 assert_eq "$?" "1" "item not served: exit code"
 grep -q 'does not serve this state root' "$root/err" || { echo "FAIL: item not served: message"; fail=1; }
+! grep -q 'queued' "$root/err" || { echo "FAIL: item not served: printed a queued link"; fail=1; }
 
 # A brief defect refuses before queuing: exit 2, the message, the register path, no item directory.
 refuse() {
@@ -205,38 +208,60 @@ refuse "design missing If you approve" 'If you approve' bash "$SCRIPT" design ow
 printf '[{"item":"a","disposition":"now","reason":"r"}]\n' >"$root/triage-old.json"
 refuse "old triage shape" 'old triage shape' bash "$SCRIPT" triage owner/repo T "$root/triage-old.json"
 
-# Every exemplar in the register passes the check, run with no approval-queue/node_modules in play.
-register="${REGISTER:-$HOME/.claude/docs/voice/approval-brief.md}"
-[ -r "$register" ] || { echo "FAIL: brief register not readable at $register (set REGISTER)"; exit 1; }
-n=0
-packets=0
-# A fence closes at a line of its opening width, so a packet's inner three-backtick Evidence fence stays inside it.
-while IFS=$'\t' read -r fence file; do
-  n=$((n + 1))
-  kind=design
-  [ "$fence" != brief-triage ] || kind=triage
-  [ "$fence" != packet ] || { kind=packet; packets=$((packets + 1)); }
-  node approval-queue/src/check-brief.ts "$kind" "$file" >"$root/out$n" 2>"$root/err" \
-    || { echo "FAIL: register exemplar $n ($fence) fails the check: $(cat "$root/err")"; fail=1; }
-  [ "$kind" != packet ] || cp "$root/out$n" "$root/packet$packets.json"
-done < <(awk -v dir="$root" '
-  !inblock && /^`+(brief|brief-triage|packet)$/ {
-    match($0, /^`+/); width = RLENGTH; fence = substr($0, width + 1)
-    n++; out = dir "/ex" n; inblock = 1; next }
-  inblock && /^`+$/ && length($0) == width { inblock = 0; close(out); print fence "\t" out; next }
-  inblock { print > out }' "$register")
-[ "$n" -ge 6 ] || { echo "FAIL: found only $n register exemplars"; fail=1; }
-# The three packet shapes, asserted from the parse: two asks, routine only, and a gate-failed ask.
-[ "$packets" = 3 ] || { echo "FAIL: found $packets packet exemplars, want 3"; fail=1; }
-shapes=$(for f in "$root"/packet*.json; do
-  node -e 'const p = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
-    const s = [];
-    if (p.asks.length === 2) s.push("two-asks");
-    if (p.asks.length === 0 && p.routine.length > 0) s.push("routine-only");
-    if (p.asks.some((a) => a.rule === "gate-failed")) s.push("gate-failed");
-    console.log(s.join("\n"))' "$f"
-done | sort | tr '\n' ' ')
-assert_eq "$shapes" "gate-failed routine-only two-asks " "register packet shapes"
+# check_register <register file> <label>: every exemplar in the register passes the check, run with no
+# approval-queue/node_modules in play. The register holds the three base packet shapes, and a fourth, a revision,
+# once the register describes one; a packet that carries whatChanged is that revision.
+check_register() {
+  local register=$1 label=$2 n=0 packets=0 revisions fence file kind d shapes f
+  [ -r "$register" ] || { echo "FAIL: brief register not readable at $register (set REGISTER)"; exit 1; }
+  d="$root/reg-$label"
+  mkdir -p "$d"
+  # A fence closes at a line of its opening width, so a packet's inner three-backtick Evidence fence stays inside it.
+  while IFS=$'\t' read -r fence file; do
+    n=$((n + 1))
+    kind=design
+    [ "$fence" != brief-triage ] || kind=triage
+    [ "$fence" != packet ] || { kind=packet; packets=$((packets + 1)); }
+    node approval-queue/src/check-brief.ts "$kind" "$file" >"$d/out$n" 2>"$root/err" \
+      || { echo "FAIL: $label: register exemplar $n ($fence) fails the check: $(cat "$root/err")"; fail=1; }
+    [ "$kind" != packet ] || cp "$d/out$n" "$d/packet$packets.json"
+  done < <(awk -v dir="$d" '
+    !inblock && /^`+(brief|brief-triage|packet)$/ {
+      match($0, /^`+/); width = RLENGTH; fence = substr($0, width + 1)
+      n++; out = dir "/ex" n; inblock = 1; next }
+    inblock && /^`+$/ && length($0) == width { inblock = 0; close(out); print fence "\t" out; next }
+    inblock { print > out }' "$register")
+  [ "$n" -ge 6 ] || { echo "FAIL: $label: found only $n register exemplars"; fail=1; }
+  # The base packet shapes, asserted from the parse: two asks, routine only, and a gate-failed ask.
+  shapes=$(for f in "$d"/packet*.json; do
+    node -e 'const p = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+      const s = [];
+      if (p.whatChanged) { console.log("revision"); process.exit(0); }
+      if (p.asks.length === 2) s.push("two-asks");
+      if (p.asks.length === 0 && p.routine.length > 0) s.push("routine-only");
+      if (p.asks.some((a) => a.rule === "gate-failed")) s.push("gate-failed");
+      console.log(s.join("\n"))' "$f"
+  done)
+  revisions=$(printf '%s\n' "$shapes" | grep -c '^revision$')
+  assert_eq "$(printf '%s\n' "$shapes" | grep -v '^revision$' | sort | tr '\n' ' ')" "gate-failed routine-only two-asks " "$label: register packet shapes"
+  assert_eq "$packets" "$((3 + revisions))" "$label: register packet exemplars"
+  revisions_seen=$revisions
+}
+check_register "${REGISTER:-$HOME/.claude/docs/voice/approval-brief.md}" live
+live_revisions=$revisions_seen
+
+# The same check against a copy of the register with a fourth exemplar, a revision, added: the base packet with
+# a What changed section.
+cp "${REGISTER:-$HOME/.claude/docs/voice/approval-brief.md}" "$root/register-revision.md"
+{
+  printf '\n````packet\n'
+  sed -e 's#glw907/drafter:docs/specs/notes-design.md#glw907/drafter\#43#' \
+    -e 's/^## If you approve/## What changed\n- Split the template change out of PR 41.\n\n## If you approve/' \
+    approval-queue/src/lib/fixtures/packet-baseline.md
+  printf '````\n'
+} >>"$root/register-revision.md"
+check_register "$root/register-revision.md" revision
+assert_eq "$revisions_seen" "$((live_revisions + 1))" "revision: the added exemplar reads as a revision"
 
 bash "$SCRIPT" bogus owner/repo T "$root/design.md" >/dev/null 2>&1
 assert_eq "$?" "2" "bad kind: exit code"
