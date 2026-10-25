@@ -68,3 +68,11 @@ export function age(created: string, now = Date.now()) {
 	if (minutes < 1440) return `${Math.round(minutes / 60)}h`;
 	return `${Math.round(minutes / 1440)}d`;
 }
+
+/** `age`, spelled out for a screen reader: "45 minutes", never "45m". */
+export function spokenAge(created: string, now = Date.now()) {
+	const short = age(created, now);
+	const n = Number.parseInt(short, 10);
+	const unit = { m: 'minute', h: 'hour', d: 'day' }[short.slice(-1)];
+	return `${n} ${unit}${n === 1 ? '' : 's'}`;
+}

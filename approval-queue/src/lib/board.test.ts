@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { age, boardGroups, DEFERRED, SINGLES, type BoardRow } from './board.ts';
+import { age, boardGroups, DEFERRED, SINGLES, spokenAge, type BoardRow } from './board.ts';
 
 const row = (id: string, group: string, created: string, asks = 0): BoardRow => ({
 	id,
@@ -55,5 +55,12 @@ describe('age', () => {
 		expect(age('2026-10-12T09:15:00Z', now)).toBe('45m');
 		expect(age('2026-10-12T07:00:00Z', now)).toBe('3h');
 		expect(age('2026-10-09T10:00:00Z', now)).toBe('3d');
+	});
+
+	it('spells the same age out for a screen reader', () => {
+		const now = Date.parse('2026-10-12T10:00:00Z');
+		expect(spokenAge('2026-10-12T09:15:00Z', now)).toBe('45 minutes');
+		expect(spokenAge('2026-10-12T09:00:00Z', now)).toBe('1 hour');
+		expect(spokenAge('2026-10-09T10:00:00Z', now)).toBe('3 days');
 	});
 });
