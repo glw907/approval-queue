@@ -53,11 +53,17 @@ async function readWaiting(id: string) {
  */
 async function decide(id: string, decision: Decision) {
 	const next = nextItem(await listWaiting(APPROVAL_QUEUE_STATE), id);
-	await writeDecision(APPROVAL_QUEUE_STATE, id, decision);
+	if (!(await writeDecision(APPROVAL_QUEUE_STATE, id, decision))) return withdrawn(false);
 	return { next: next ? `/item/${next.id}` : null };
 }
 
 const ALREADY_DECIDED = { message: 'Already decided' };
+
+/** The answer for an item its session withdrew: a packet page is offered the board, any other post gets a 404. */
+function withdrawn(packet: boolean) {
+	if (!packet) error(404, 'Not found');
+	return fail(410, { message: 'This item was withdrawn by its session; nothing was recorded', board: '/' });
+}
 
 /**
  * Answers a post whose item has gone. A post from a packet page carries its fingerprint, so that
@@ -65,14 +71,18 @@ const ALREADY_DECIDED = { message: 'Already decided' };
  */
 async function gone(request: Request) {
 	const form = await request.formData().catch(() => null);
-	if (!form?.has('fingerprint')) error(404, 'Not found');
-	return fail(410, { message: 'This item was withdrawn by its session; nothing was recorded', board: '/' });
+	return withdrawn(form?.has('fingerprint') === true);
 }
 
-/** Writes a packet's decision with `link`, so a second post answers 409 instead of replacing the first. */
-async function decideOnce(id: string, decision: Decision) {
+/**
+ * Writes a decision with `link`, so a second post answers 409 instead of replacing the first. `packet`
+ * is whether the post came from a packet page, which the withdrawn answer depends on.
+ */
+async function decideOnce(id: string, decision: Decision, packet = false) {
 	const next = nextItem(await listWaiting(APPROVAL_QUEUE_STATE), id);
-	if (!(await writeDecisionOnce(APPROVAL_QUEUE_STATE, id, decision))) return fail(409, ALREADY_DECIDED);
+	const written = await writeDecisionOnce(APPROVAL_QUEUE_STATE, id, decision);
+	if (written === 'exists') return fail(409, ALREADY_DECIDED);
+	if (written === 'gone') return withdrawn(packet);
 	return { next: next ? `/item/${next.id}` : null };
 }
 
@@ -399,7 +409,7 @@ export const actions: Actions = {
 			if (!form) return fail(400, { message: 'Not a form post' });
 			// The server rebuilt the parts and asks from the item's files; the post only answers them.
 			const built = buildApprove(found.content, form);
-			return built.ok ? decideOnce(params.id, built.decision) : fail(400, { message: built.message });
+			return built.ok ? decideOnce(params.id, built.decision, form.has('fingerprint')) : fail(400, { message: built.message });
 		}
 		if (found.content.kind === 'blueprint' || found.content.kind === 'page') {
 			if (found.decided) return fail(409, ALREADY_DECIDED);
@@ -460,11 +470,15 @@ export const actions: Actions = {
 			const form = await request.formData().catch(() => null);
 			if (!form) return fail(400, { message: 'Not a form post' });
 			const note = form.get('note');
-			return decideOnce(params.id, {
-				decision: 'reject',
-				note: typeof note === 'string' ? note : '',
-				calls: buildSentBackCalls(found.content, form)
-			});
+			return decideOnce(
+				params.id,
+				{
+					decision: 'reject',
+					note: typeof note === 'string' ? note : '',
+					calls: buildSentBackCalls(found.content, form)
+				},
+				form.has('fingerprint')
+			);
 		}
 		if (found.content.kind === 'blueprint' || found.content.kind === 'page' || found.content.kind === 'change') {
 			if (found.decided) return fail(409, ALREADY_DECIDED);

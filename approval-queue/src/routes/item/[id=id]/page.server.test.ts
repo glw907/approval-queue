@@ -4,12 +4,32 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const state = vi.hoisted(() => ({ root: '' }));
+const state = vi.hoisted(() => ({ root: '', vanish: false }));
 vi.mock('$app/env/private', () => ({
 	get APPROVAL_QUEUE_STATE() {
 		return state.root;
 	}
 }));
+// A test sets `vanish` to have the command's withdraw land between the route's read and its write.
+vi.mock('#lib/server/items.ts', async (importOriginal) => {
+	const real = await importOriginal<typeof import('#lib/server/items.ts')>();
+	const { rm } = await import('node:fs/promises');
+	const { join } = await import('node:path');
+	const withdraw = async (root: string, id: string) => {
+		if (state.vanish) await rm(join(root, 'items', id, 'item.json'));
+	};
+	return {
+		...real,
+		writeDecision: async (root: string, id: string, decision: Parameters<typeof real.writeDecision>[2]) => {
+			await withdraw(root, id);
+			return real.writeDecision(root, id, decision);
+		},
+		writeDecisionOnce: async (root: string, id: string, decision: Parameters<typeof real.writeDecisionOnce>[2]) => {
+			await withdraw(root, id);
+			return real.writeDecisionOnce(root, id, decision);
+		}
+	};
+});
 
 import {
 	CHANGE_DOCS,
@@ -614,6 +634,30 @@ describe('a packet', () => {
 
 		it('still 404s a post that never came from a packet page', async () => {
 			await expect(call('approve')).rejects.toMatchObject({ status: 404 });
+		});
+	});
+
+	describe('an item withdrawn between the read and the write', () => {
+		beforeEach(() => {
+			state.vanish = true;
+		});
+		afterEach(() => {
+			state.vanish = false;
+		});
+
+		it('answers a packet post 410 and leaves no decision', async () => {
+			expect(await call('reject', [...(await fields()), ['note', 'not now']])).toMatchObject({
+				status: 410,
+				data: { message: WITHDRAWN, board: '/' }
+			});
+			await noDecision();
+		});
+
+		it('answers a post that is not from a packet page 404', async () => {
+			await rm(join(state.root, 'items', ID), { recursive: true });
+			await seedTriage();
+			await expect(call('submit', [['disposition', 'now'], ['note', ''], ['disposition', 'defer'], ['note', ''], ['disposition', 'drop'], ['note', '']])).rejects.toMatchObject({ status: 404 });
+			await noDecision();
 		});
 	});
 

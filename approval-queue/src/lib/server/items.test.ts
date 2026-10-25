@@ -298,10 +298,21 @@ describe('an amend', () => {
 describe('writeDecisionOnce', () => {
 	it('links the decision into place and refuses a second one without replacing the first', async () => {
 		await seed('p', { kind: 'design', repo: 'r', title: 't', created: 'c' });
-		expect(await writeDecisionOnce(root, 'p', { decision: 'reject', note: 'first' })).toBe(true);
-		expect(await writeDecisionOnce(root, 'p', { decision: 'reject', note: 'second' })).toBe(false);
+		expect(await writeDecisionOnce(root, 'p', { decision: 'reject', note: 'first' })).toBe('written');
+		expect(await writeDecisionOnce(root, 'p', { decision: 'reject', note: 'second' })).toBe('exists');
 		const dir = join(root, 'items', 'p');
 		expect(JSON.parse(await readFile(join(dir, 'decision.json'), 'utf8'))).toEqual({ decision: 'reject', note: 'first' });
 		expect((await readdir(dir)).filter((f) => f.endsWith('.tmp'))).toEqual([]);
+	});
+});
+
+describe('a decision on a withdrawn item', () => {
+	// The command's retire_item removed item.json before the post reached the write.
+	it('leaves no decision.json beside a removed item.json and reports it gone', async () => {
+		await seed('w', { kind: 'design', repo: 'r', title: 't', created: 'c' });
+		await rm(join(root, 'items', 'w', 'item.json'));
+		expect(await writeDecision(root, 'w', { decision: 'approve' })).toBe(false);
+		expect(await writeDecisionOnce(root, 'w', { decision: 'approve' })).toBe('gone');
+		expect(await readdir(join(root, 'items', 'w'))).toEqual([]);
 	});
 });
