@@ -49,7 +49,8 @@ describe('heading slugs', () => {
 		['Q &amp; A', 'q--a'],
 		['Fish &amp; chips &lt; salt &copy;', 'fish--chips--salt-'],
 		['Tom &#38; Jerry', 'tom--jerry'],
-		['An &foo; entity', 'an-foo-entity']
+		['An &foo; entity', 'an-foo-entity'],
+		['The `&amp;` entity', 'the-amp-entity']
 	])('decodes the entities in %s to give %s', (text, want) => expect(slugs([text])).toEqual([want]));
 
 	it('gives a repeated old slug aliases to its first section only', () => {

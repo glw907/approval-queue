@@ -57,6 +57,7 @@ function plainText(tokens: Token[]): string {
 		.map((t) => {
 			if (t.type === 'image' || t.type === 'html' || t.type === 'br') return '';
 			if ('tokens' in t && t.tokens) return plainText(t.tokens);
+			if (t.type === 'codespan') return t.text;
 			return 'text' in t ? t.text.replace(/&(\w+);/g, (whole: string, name: string) => decodeNamedCharacterReference(name) || whole) : '';
 		})
 		.join('');

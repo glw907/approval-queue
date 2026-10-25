@@ -40,7 +40,7 @@ proc_running() {
 # written before it is seen and kept (item.json goes back, return 1); one written after it is the app's to
 # back off from, since the app looks for item.json again once decision.json is in place.
 retire_item() {
-  mv "$1/item.json" "$1/item.json.gone" 2>/dev/null || return 0
+  mv "$1/item.json" "$1/item.json.gone" 2>/dev/null || { rm -f "$1/item.json.tmp"; return 0; }
   if [ -e "$1/decision.json" ]; then
     mv "$1/item.json.gone" "$1/item.json"
     return 1
