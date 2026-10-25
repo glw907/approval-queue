@@ -12,6 +12,7 @@ usage="usage: approval-queue <pr|design|triage> <repo> <title> <source>
        approval-queue change <owner/repo#n> <title> [--notes <notes.json>] [--replies <replies.json>]
        approval-queue approved [--kind blueprint|page] <file> <blob>
        approval-queue withdraw <id>
+       approval-queue pending
        approval-queue collect <id>
        approval-queue anchors <file>"
 root="${XDG_STATE_HOME:-$HOME/.local/state}/approval-queue"
@@ -22,7 +23,7 @@ id_pattern='^[0-9]{8}T[0-9]{6}-[0-9]+$'
 # the text is split after the last `)`.
 proc_stat() {
   local s
-  read -r s <"/proc/$1/stat" 2>/dev/null || return 1
+  { read -r s <"/proc/$1/stat"; } 2>/dev/null || return 1
   s=${s##*) }
   set -- $s
   echo "$1 ${20}"
@@ -61,7 +62,7 @@ if [ "${1:-}" = withdraw ]; then
   wstart=$(jq -r '.pidStart // empty' "$wdir/item.json")
   if [ -z "$wpid" ]; then echo "approval-queue: $1 was queued before withdraw existed; stop its command" >&2; exit 2; fi
   if [ -e "$wdir/deferred.json" ] || ! proc_running "$wpid" "$wstart"; then
-    retire_item "$wdir" && exit 0
+    retire_item "$wdir" && { echo "withdrew $1"; exit 0; }
     echo "approval-queue: $1 was decided while withdrawing; run collect" >&2
     exit 1
   fi
@@ -71,19 +72,44 @@ if [ "${1:-}" = withdraw ]; then
     proc_running "$wpid" "$wstart" || break
     sleep 0.1
   done
-  [ -e "$wdir/item.json" ] || exit 0
+  [ -e "$wdir/item.json" ] || { echo "withdrew $1"; exit 0; }
   if [ -e "$wdir/decision.json" ]; then
     echo "approval-queue: $1 was decided while withdrawing; run collect" >&2
     exit 1
   fi
   # A defer that landed in the same instant made the waiter's trap keep item.json.
   if [ -e "$wdir/deferred.json" ]; then
-    retire_item "$wdir" && exit 0
+    retire_item "$wdir" && { echo "withdrew $1"; exit 0; }
     echo "approval-queue: $1 was decided while withdrawing; run collect" >&2
     exit 1
   fi
   echo "approval-queue: $1 is still queued after its command was told to stop" >&2
   exit 1
+fi
+
+# pending: prints one line per decided item no command is left to log: `<id>\t<kind>\t<decision>\t<title>`,
+# oldest first, for a session to `collect`. Skipped: an item with a live waiter, a logged decision (a log line
+# whose `packet` is the item's id), a refusal (it went to the command that wrote refused.json), a triage item
+# (its decision is never logged), and an item queued before pids existed, which cannot be told from a handled one.
+if [ "${1:-}" = pending ]; then
+  shift
+  if [ $# -ne 0 ]; then echo "$usage" >&2; exit 2; fi
+  logged=""
+  if [ -e "$root/decisions.jsonl" ]; then
+    logged=$(jq -R -r 'fromjson? | objects | .packet // empty | strings' "$root/decisions.jsonl")
+  fi
+  for pdir in "$root"/items/*/; do
+    pdir=${pdir%/}
+    [ -e "$pdir/item.json" ] && [ -e "$pdir/decision.json" ] && [ ! -e "$pdir/refused.json" ] || continue
+    IFS=$'\x1f' read -r ppid pstart pkind ptitle < <(jq -r '
+      [(.pid // "" | tostring), (.pidStart // "" | tostring), .kind, (.title | gsub("[\t\n]"; " "))] | join("\u001f")' "$pdir/item.json")
+    [ -n "$ppid" ] && [ "$pkind" != triage ] || continue
+    ! proc_running "$ppid" "$pstart" || continue
+    pitem=${pdir##*/}
+    ! grep -qxF -- "$pitem" <<<"$logged" || continue
+    printf '%s\t%s\t%s\t%s\n' "$pitem" "$pkind" "$(jq -r '.decision // empty' "$pdir/decision.json")" "$ptitle"
+  done
+  exit 0
 fi
 
 # approved [--kind blueprint|page] <file> <blob>: exit 0 when decisions.jsonl holds an approve of the given
@@ -621,15 +647,55 @@ pr_head() {
   return 1
 }
 
-# head_unmoved <queued head>: refuses an approve (exit 1, nothing logged) when the PR's head is no longer the
-# head the item was queued at and the screen showed, since the approval would name commits Geoff never saw.
+# refuse <reason> <stderr line>: records the refusal where the app's rail shows it, then prints the line and
+# exits 1 with nothing logged. refused.json goes through a temp file and mv, so the app never reads half of it.
+refuse() {
+  jq -nc --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg reason "$1" '{at: $at, reason: $reason}' >"$item/refused.json.tmp"
+  mv "$item/refused.json.tmp" "$item/refused.json"
+  echo "$2" >&2
+  exit 1
+}
+
+# head_unmoved <queued head>: refuses a change approve when the PR's head is no longer the head the item was
+# queued at and the screen showed, since the approval would name commits Geoff never saw.
 head_unmoved() {
   local now
   now=$(pr_head "$pr_repo" "$number") \
     || { echo "approval-queue: could not read the head of $pr to check it against $1; nothing was logged" >&2; exit 1; }
   if [ "$now" != "$1" ]; then
-    echo "approval-queue: $pr moved from $1 to $now while it waited, so the approval does not cover it; nothing was logged; queue it again" >&2
-    exit 1
+    refuse "The pull request moved after it was queued, so the approval wasn't recorded. The session will queue it again." \
+      "approval-queue: $pr moved from $1 to $now while it waited, so the approval does not cover it; nothing was logged; queue it again"
+  fi
+}
+
+# page_blob_at <head>: prints the page's blob id at that commit of the PR. Returns 3 when GitHub says the file is
+# not there, and 1 for any other failure. Each path segment is URI-encoded, as in gh_file.
+page_blob_at() {
+  local err enc out
+  enc=$(jq -rn --arg p "$source" --arg r "$1" '"\($p | split("/") | map(@uri) | join("/"))?ref=\($r | @uri)"')
+  if out=$(gh api "repos/$pr_repo/contents/$enc" --jq .sha 2>"$fetch.err" </dev/null); then
+    rm -f "$fetch.err"; printf '%s\n' "$out"; return 0
+  fi
+  err=$(cat "$fetch.err" 2>/dev/null); rm -f "$fetch.err"
+  case $err in *"404"*) return 3 ;; esac
+  return 1
+}
+
+# page_unchanged <queued blob>: sets prhead to the PR's head now and refuses a page approve (exit 1, nothing
+# logged) when the page's blob at that head is not the blob queued. Another page's commit moves the head and
+# leaves the blob, so it does not refuse. A gh failure other than a 404 exits 1 without a refusal, so the
+# item stays pending for a collect to retry.
+page_unchanged() {
+  local rc=0 now
+  prhead=$(pr_head "$pr_repo" "$number") \
+    || { echo "approval-queue: could not read the head of $pr to check $source against it; nothing was logged" >&2; exit 1; }
+  now=$(page_blob_at "$prhead") || rc=$?
+  if [ "$rc" -eq 1 ]; then
+    echo "approval-queue: could not read $source at $prhead on $pr; nothing was logged" >&2; exit 1
+  fi
+  if [ "$rc" -eq 3 ] || [ "$now" != "$1" ]; then
+    refuse "The page changed on its pull request after it was queued, so the approval wasn't recorded. The session will queue it again." \
+      "approval-queue: $source changed on $pr while it waited, so the approval does not cover it; nothing was logged; queue it again"
   fi
 }
 
@@ -753,9 +819,9 @@ head="" file="" revises=null amends=""
 # load_collected: reads the item a `collect` was asked for back into the variables the decision step reads.
 # A change's item.json has no pr, so its pull request is rebuilt from the repo and number, as head_unmoved reads it.
 load_collected() {
-  IFS=$'\x1f' read -r kind repo file worktree pr prhead number head initiative < <(jq -r '
+  IFS=$'\x1f' read -r kind repo file worktree pr prhead number head initiative blob < <(jq -r '
     [.kind, (.repo // ""), (.file // ""), (.worktree // ""), (.pr // ""), (.prHead // ""), (.number // "" | tostring), (.head // ""),
-     (.initiative // "")] | join("\u001f")' "$item/item.json")
+     (.initiative // ""), (.blob // "")] | join("\u001f")' "$item/item.json")
   source=$file
   if [ "$kind" = change ]; then
     pr="$repo#$number" pr_repo=$repo
@@ -1018,8 +1084,9 @@ sent_back='{decision: "reject", note: (.note // ""), calls: (.calls // [])} + '"
 # Geoff approved, and the blob is read from the worktree at that commit; a send-back names the HEAD it left.
 # Both log one line keyed to the blob, with each disputed note Geoff waived and its reason and the counts of his
 # comments and replies, and both print the comments and replies; a send-back also prints the calls. A page's approve
-# also names its pull request and the head it was queued at, the one the screen showed, and is refused when
-# the PR has moved since; its log line carries both.
+# also names its pull request and the head read at approval, and is refused when the page's blob at that head is
+# not the blob queued; its log line carries both. Another page's commit moving the head does not refuse it.
+# A refusal also writes refused.json, which a later approve that passes removes.
 doc_decision() {
   local d verdict commit bl h="" extra='{}' am
   d="$item/decision.json"
@@ -1036,7 +1103,7 @@ doc_decision() {
   if [ "$kind" = page ]; then
     extra=$(jq -nc --arg pr "$pr" '{pr: $pr}')
     if [ "$verdict" = approve ]; then
-      head_unmoved "$prhead"
+      page_unchanged "$blob"
       extra=$(jq -nc --arg pr "$pr" --arg head "$prhead" '{pr: $pr, head: $head}')
     fi
   fi
@@ -1044,6 +1111,7 @@ doc_decision() {
     --arg blob "$bl" --arg commit "$commit" --argjson extra "$extra" \
     '{time: $t, packet: $id, initiative: null, ref: $ref, kind: $kind, lane: "single", verdict: $v,
       blob: $blob, commit: $commit} + $extra + {waived: (.waived // [])} + '"$counts" "$d" | append_log
+  [ "$verdict" != approve ] || rm -f "$item/refused.json"
   # An amend review names the approved blob it was read against, in both printed shapes.
   am=$(jq -c 'if .amends then {amends: .amends} else {} end' "$item/item.json")
   if [ "$verdict" = approve ]; then
@@ -1069,6 +1137,7 @@ change_decision() {
   jq -c --arg t "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg id "$id" --arg ref "$repo#$number" --arg v "$verdict" --arg head "$h" \
     '{time: $t, packet: $id, initiative: null, ref: $ref, kind: "change", lane: "single", verdict: $v, head: $head}
      + (if $v == "approve" then {calls: (.calls // [])} else {} end) + '"$counts" "$d" | append_log
+  [ "$verdict" != approve ] || rm -f "$item/refused.json"
   if [ "$verdict" = approve ]; then
     jq -c --arg pr "$repo#$number" --arg head "$h" '{decision: "approve", pr: $pr, head: $head, calls: (.calls // [])} + '"$carried" "$d"
   else
