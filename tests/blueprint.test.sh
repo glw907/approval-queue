@@ -18,15 +18,17 @@ assert_eq() {
   [ "$1" = "$2" ] || { echo "FAIL: $3: got '$1', want '$2'"; fail=1; }
 }
 
-# No packet id this test logged may appear in the live log. A leak fails by name; other sessions'
-# lines in the live log do not matter.
+# No item id this test queued or logged may appear in the live log: queue() records each id in $root/ids,
+# so a write to the live log alone, with nothing in the temp log, still fails by name. Other sessions' lines
+# in the live log do not matter.
 live_log="$HOME/.local/state/approval-queue/decisions.jsonl"
 live_leak() {
   local pid
-  [ -e "$live_log" ] && [ -e "$log" ] || return 0
+  [ -e "$live_log" ] || return 0
   while IFS= read -r pid; do
+    [ -n "$pid" ] || continue
     if grep -qF "\"packet\":\"$pid\"" "$live_log"; then echo "FAIL: the test wrote packet $pid to the live log"; fail=1; fi
-  done < <(jq -r '.packet' "$log" | sort -u)
+  done < <({ jq -r '.packet' "$log" 2>/dev/null; cat "$root/ids" 2>/dev/null; } | sort -u)
 }
 
 # Every blueprint and page takes a description of a background paragraph and one summary paragraph.
@@ -69,6 +71,7 @@ queue() {
   dir=""
   wait_for "$state/items/*/item.json" || return 1
   dir=$(dirname "$(ls "$state"/items/*/item.json | head -1)")
+  basename "$dir" >>"$root/ids"
 }
 
 rc=""

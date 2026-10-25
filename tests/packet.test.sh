@@ -17,15 +17,17 @@ assert_eq() {
   [ "$1" = "$2" ] || { echo "FAIL: $3: got '$1', want '$2'"; fail=1; }
 }
 
-# No packet id this test logged may appear in the live log. A leak fails by name; other sessions'
-# lines in the live log do not matter.
+# No item id this test queued or logged may appear in the live log: queue() records each id in $root/ids,
+# so a write to the live log alone, with nothing in the temp log, still fails by name. Other sessions' lines
+# in the live log do not matter.
 live_log="$HOME/.local/state/approval-queue/decisions.jsonl"
 live_leak() {
   local pid
-  [ -e "$live_log" ] && [ -e "$log" ] || return 0
+  [ -e "$live_log" ] || return 0
   while IFS= read -r pid; do
+    [ -n "$pid" ] || continue
     if grep -qF "\"packet\":\"$pid\"" "$live_log"; then echo "FAIL: the test wrote packet $pid to the live log"; fail=1; fi
-  done < <(jq -r '.packet' "$log" | sort -u)
+  done < <({ jq -r '.packet' "$log" 2>/dev/null; cat "$root/ids" 2>/dev/null; } | sort -u)
 }
 
 stubs="$root/stubs"
@@ -135,6 +137,7 @@ queue() {
   dir=""
   wait_for "$state/items/*/item.json" || return 1
   dir=$(dirname "$(ls "$state"/items/*/item.json | head -1)")
+  basename "$dir" >>"$root/ids"
 }
 
 # decide <json>: hands the decision to the queued command and sets rc to its exit code.
@@ -440,7 +443,7 @@ requeue() {
     for f in "$state"/items/*/item.json; do
       [ -e "$f" ] && [ ! -e "$(dirname "$f")/decision.json" ] && dir=$(dirname "$f")
     done
-    [ -n "$dir" ] && return 0
+    [ -n "$dir" ] && { basename "$dir" >>"$root/ids"; return 0; }
     sleep 0.1
   done
   echo "FAIL: timed out waiting for a requeued item: $(cat "$root/err")"; fail=1

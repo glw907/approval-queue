@@ -36,8 +36,20 @@ proc_running() {
   [ "${st% *}" != Z ] && [ "${st#* }" = "$2" ]
 }
 
-# withdraw <id>: takes a waiting item off the board. A live waiter gets TERM, and its exit trap removes
-# item.json; a dead or deferred waiter leaves the file for withdraw to remove.
+# retire_item <dir>: takes an item off the board unless a decision landed. The rename is atomic, so a decision
+# written before it is seen and kept (item.json goes back, return 1); one written after it is the app's to
+# back off from, since the app looks for item.json again once decision.json is in place.
+retire_item() {
+  mv "$1/item.json" "$1/item.json.gone" 2>/dev/null || return 0
+  if [ -e "$1/decision.json" ]; then
+    mv "$1/item.json.gone" "$1/item.json"
+    return 1
+  fi
+  rm -f "$1/item.json.gone" "$1/item.json.tmp"
+}
+
+# withdraw <id>: takes a waiting item off the board. A live waiter gets TERM, and its exit trap retires
+# item.json; a dead or deferred waiter leaves the file for withdraw to retire.
 if [ "${1:-}" = withdraw ]; then
   shift
   if [ $# -ne 1 ]; then echo "$usage" >&2; exit 2; fi
@@ -49,19 +61,28 @@ if [ "${1:-}" = withdraw ]; then
   wstart=$(jq -r '.pidStart // empty' "$wdir/item.json")
   if [ -z "$wpid" ]; then echo "approval-queue: $1 was queued before withdraw existed; stop its command" >&2; exit 2; fi
   if [ -e "$wdir/deferred.json" ] || ! proc_running "$wpid" "$wstart"; then
-    rm -f "$wdir/item.json" "$wdir/item.json.tmp"
-    exit 0
+    retire_item "$wdir" && exit 0
+    echo "approval-queue: $1 was decided while withdrawing; run collect" >&2
+    exit 1
   fi
   kill -TERM "$wpid" 2>/dev/null || true
+  # Wait for the waiter to exit, not for item.json to vanish: retire_item's rename makes it vanish briefly.
   for _ in $(seq 50); do
-    [ -e "$wdir/item.json" ] || exit 0
+    proc_running "$wpid" "$wstart" || break
     sleep 0.1
   done
+  [ -e "$wdir/item.json" ] || exit 0
   if [ -e "$wdir/decision.json" ]; then
     echo "approval-queue: $1 was decided while withdrawing; run collect" >&2
-  else
-    echo "approval-queue: $1 is still queued after its command was told to stop" >&2
+    exit 1
   fi
+  # A defer that landed in the same instant made the waiter's trap keep item.json.
+  if [ -e "$wdir/deferred.json" ]; then
+    retire_item "$wdir" && exit 0
+    echo "approval-queue: $1 was decided while withdrawing; run collect" >&2
+    exit 1
+  fi
+  echo "approval-queue: $1 is still queued after its command was told to stop" >&2
   exit 1
 fi
 
@@ -149,20 +170,23 @@ projects="${APPROVAL_QUEUE_PROJECTS:-$HOME/Projects}"
 mkdir -p "$root"
 : >>"$log"
 
+# One pair per invocation: a PR hand-over and a triage hand-over run side by side. Assigned before the traps
+# so a TERM in between does not meet an unbound variable.
+check_body="$root/check-$id.md"
+check_err="$root/check-$id.err"
+
 # A command that leaves without a decision takes its item off the index, unless Geoff deferred it: a deferred
-# item stays on the board with no waiter.
+# item stays on the board with no waiter. The trap never fails: under set -e a failing last command would
+# turn the exit status to 1.
 if [ -n "$collecting" ]; then
   # A collect never takes the item off the board, however it ends.
   trap 'rm -f "$check_body" "$check_err"; rm -rf "$fetch"' EXIT
 else
-  trap '[ -e "$item/decision.json" ] || [ -e "$item/deferred.json" ] || rm -f "$item/item.json" "$item/item.json.tmp"; rm -f "$check_body" "$check_err"; rm -rf "$fetch"' EXIT
+  trap '[ -e "$item/decision.json" ] || [ -e "$item/deferred.json" ] || retire_item "$item" || true; rm -f "$check_body" "$check_err"; rm -rf "$fetch"' EXIT
 fi
 trap 'exit 143' TERM HUP INT
 
 app=$(realpath "$(dirname "$(realpath "$0")")/../../../approval-queue")
-# One pair per invocation: a PR hand-over and a triage hand-over run side by side.
-check_body="$root/check-$id.md"
-check_err="$root/check-$id.err"
 
 # anchors <file>: prints the file's heading anchors, slugged as cairn's pages are. The entry needs the app's
 # node_modules.
@@ -1053,8 +1077,13 @@ change_decision() {
 }
 
 # A decision ends the wait first. A deferral ends the queuing command's wait only, since a collect waits for the decision.
-while [ ! -e "$item/decision.json" ] && { [ -n "$collecting" ] || [ ! -e "$item/deferred.json" ]; }; do sleep 1; done
+# So does item.json going away: a withdraw has taken the item off the board, and nothing will decide it.
+while [ ! -e "$item/decision.json" ] && [ -e "$item/item.json" ] && { [ -n "$collecting" ] || [ ! -e "$item/deferred.json" ]; }; do sleep 1; done
 if [ ! -e "$item/decision.json" ]; then
+  if [ ! -e "$item/item.json" ]; then
+    echo "approval-queue: $id was withdrawn; nothing to collect" >&2
+    exit 1
+  fi
   jq -nc --arg id "$id" '{decision: "defer", id: $id}'
   exit 0
 fi

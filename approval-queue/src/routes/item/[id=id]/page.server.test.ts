@@ -4,12 +4,32 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const state = vi.hoisted(() => ({ root: '' }));
+const state = vi.hoisted(() => ({ root: '', vanish: false }));
 vi.mock('$app/env/private', () => ({
 	get APPROVAL_QUEUE_STATE() {
 		return state.root;
 	}
 }));
+// A test sets `vanish` to have the command's withdraw land between the route's read and its write.
+vi.mock('#lib/server/items.ts', async (importOriginal) => {
+	const real = await importOriginal<typeof import('#lib/server/items.ts')>();
+	const { rm } = await import('node:fs/promises');
+	const { join } = await import('node:path');
+	const withdraw = async (root: string, id: string) => {
+		if (state.vanish) await rm(join(root, 'items', id, 'item.json'));
+	};
+	return {
+		...real,
+		writeDecision: async (root: string, id: string, decision: Parameters<typeof real.writeDecision>[2]) => {
+			await withdraw(root, id);
+			return real.writeDecision(root, id, decision);
+		},
+		writeDecisionOnce: async (root: string, id: string, decision: Parameters<typeof real.writeDecisionOnce>[2]) => {
+			await withdraw(root, id);
+			return real.writeDecisionOnce(root, id, decision);
+		}
+	};
+});
 
 import {
 	CHANGE_DOCS,
@@ -475,6 +495,21 @@ describe('a packet', () => {
 		]);
 	});
 
+	it('load gives a PR part its totals and a design part its rendered document', async () => {
+		const patch = 'diff --git a/a.md b/a.md\n--- a/a.md\n+++ b/a.md\n@@ -1 +1,2 @@\n-old\n+new\n+more\ndiff --git a/b.md b/b.md\n--- a/b.md\n+++ b/b.md\n@@ -1 +1,2 @@\n x\n+y\n';
+		await rm(join(state.root, 'items', ID), { recursive: true });
+		// The baseline packet, whose third PR is a design part.
+		await seedPacket(state.root, ID, fixture('packet-baseline.md'));
+		await writeFile(join(state.root, 'items', ID, 'parts', '0', 'diff.patch'), patch);
+		const data = (await load({ params: { id: ID } } as never)) as Record<string, any>;
+		const pr = data.parts.find((p: any) => p.ref === 'glw907/drafter#41');
+		expect(pr.totals).toEqual({ files: 2, adds: 3, dels: 1 });
+		const design = data.parts.find((p: any) => p.kind === 'design');
+		expect(design.docHtml).toContain('<h1');
+		expect(design.docHtml).toContain('Design');
+		expect(data.parts.filter((p: any) => p.kind === 'step').every((p: any) => !('totals' in p) && !('docHtml' in p))).toBe(true);
+	});
+
 	it('load leaves the revision fields out of a first packet', async () => {
 		const data = (await load({ params: { id: ID } } as never)) as Record<string, any>;
 		for (const field of ['revision', 'sentBack', 'whatChanged']) expect(field in data).toBe(false);
@@ -614,6 +649,30 @@ describe('a packet', () => {
 
 		it('still 404s a post that never came from a packet page', async () => {
 			await expect(call('approve')).rejects.toMatchObject({ status: 404 });
+		});
+	});
+
+	describe('an item withdrawn between the read and the write', () => {
+		beforeEach(() => {
+			state.vanish = true;
+		});
+		afterEach(() => {
+			state.vanish = false;
+		});
+
+		it('answers a packet post 410 and leaves no decision', async () => {
+			expect(await call('reject', [...(await fields()), ['note', 'not now']])).toMatchObject({
+				status: 410,
+				data: { message: WITHDRAWN, board: '/' }
+			});
+			await noDecision();
+		});
+
+		it('answers a post that is not from a packet page 404', async () => {
+			await rm(join(state.root, 'items', ID), { recursive: true });
+			await seedTriage();
+			await expect(call('submit', [['disposition', 'now'], ['note', ''], ['disposition', 'defer'], ['note', ''], ['disposition', 'drop'], ['note', '']])).rejects.toMatchObject({ status: 404 });
+			await noDecision();
 		});
 	});
 

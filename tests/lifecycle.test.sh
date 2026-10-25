@@ -50,10 +50,11 @@ wait_for() {
   return 1
 }
 
-# queue_design: starts a design in the background and sets dir and id to its item.
+# queue_design: starts a design in the background and sets dir and id to its item. It clears tab.seen too: a
+# queue that finds a fresh one waits up to 5 seconds for a tab poll that never comes, which is all of finish().
 dir="" id=""
 queue_design() {
-  rm -rf "$state/items"
+  rm -rf "$state/items" "$state/tab.seen"
   bash "$SCRIPT" design owner/repo T "$root/design.md" >"$root/out" 2>"$root/err" &
   bgpid=$!
   wait_for "$state/items/*/item.json" || return 1
@@ -196,6 +197,47 @@ wait "$cpid"
 assert_eq "$?" "0" "racing collect: exit code"
 assert_eq "$(cat "$root/c.out")" "$(cat "$root/out")" "racing collect: the same line as the queuing command"
 assert_eq "$(wc -l <"$log")" "1" "racing collect: one line in the log"
+
+# collect_after_withdraw <label> <id>: a collect started now, then a withdraw, must end with exit 1 and the
+# withdrawn message inside 4 seconds, and print nothing on stdout.
+collect_after_withdraw() {
+  local label=$1 cid=$2 i
+  bash "$SCRIPT" collect "$cid" >"$root/c.out" 2>"$root/c.err" &
+  cpid=$!
+  sleep 0.5
+  bash "$SCRIPT" withdraw "$cid" 2>/dev/null
+  assert_eq "$?" "0" "$label: withdraw exit code"
+  for i in $(seq 40); do kill -0 "$cpid" 2>/dev/null || break; sleep 0.1; done
+  if kill -0 "$cpid" 2>/dev/null; then
+    echo "FAIL: $label: collect did not exit after the withdraw"; fail=1
+    kill -KILL "$cpid"; wait "$cpid" 2>/dev/null
+    return
+  fi
+  wait "$cpid"
+  assert_eq "$?" "1" "$label: collect exit code"
+  assert_eq "$(wc -c <"$root/c.out")" "0" "$label: collect stdout"
+  grep -q "$cid was withdrawn; nothing to collect" "$root/c.err" || { echo "FAIL: $label: message '$(cat "$root/c.err")'"; fail=1; }
+}
+
+# A collect on a deferred item ends when the item is withdrawn.
+rm -rf "$state/items"
+queue_design
+echo '{"at":"2026-01-01T00:00:00Z"}' >"$dir/deferred.json"
+finish
+collect_after_withdraw "collect on a withdrawn deferred item" "$id"
+
+# So does a collect on an undecided item whose recorded pid is dead.
+fake_item 20260101T000007-$dead "$dead" 1
+collect_after_withdraw "collect on a withdrawn item with a dead pid" "20260101T000007-$dead"
+
+# Regression guard (not a #31 fix; today's trap already does this): a TERM after decision.json lands leaves
+# item.json in place, so the decision can still be collected.
+rm -rf "$state/items"
+queue_design
+printf '{"decision":"approve"}\n' >"$dir/decision.json"
+kill -TERM "$bgpid"
+finish
+[ -e "$dir/item.json" ] || { echo "FAIL: TERM after a decision: item.json was removed"; fail=1; }
 
 [ "$fail" = 0 ] && echo "lifecycle: ok"
 exit "$fail"
