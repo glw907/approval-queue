@@ -259,7 +259,7 @@ A PR whose body has no brief shows its title and the rows it still has.
 	}
 	.desk-md :global(p),
 	.desk-md :global(li) {
-		max-width: 72ch;
+		max-width: 56ch;
 	}
 	.desk-md :global(ul) {
 		list-style: disc;

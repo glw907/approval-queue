@@ -59,7 +59,7 @@ No text is saved: the PR's author edits, and the comments and a send-back note g
 </script>
 
 <p class="bg bg-first bg-flat prline">
-	<span class="lead">Pull request {#if data.link}<a href={data.link.url} target="_blank" rel="noopener noreferrer">{data.ref}</a>{:else}{data.ref}{/if}.</span>
+	<span class="lead">Pull request {#if data.link}<a href={data.link.url} target="_blank" rel="noopener noreferrer">{data.ref}<span class="sr-only"> (opens in a new tab)</span></a>{:else}{data.ref}{/if}.</span>
 	{#if data.head}It was at commit <code>{data.head.slice(0, 9)}</code> when this change was queued.{/if} {checks}
 </p>
 <details class="bg">
@@ -120,7 +120,7 @@ No text is saved: the PR's author edits, and the comments and a send-back note g
 		overflow-wrap: anywhere;
 	}
 	.prline {
-		max-width: 58ch;
+		max-width: 56ch;
 	}
 	.prline a {
 		color: var(--color-primary);

@@ -13,6 +13,7 @@ and refuses a post that leaves one unanswered. Renders nothing for a packet with
 	import { RULE_LOOK, refKind } from '#lib/packet-view.ts';
 	import { splitLead } from '#lib/prose.ts';
 	import type { PageData } from '../../routes/item/[id=id]/$types';
+	import FilesDiff from './FilesDiff.svelte';
 	import PacketIcon from './PacketIcon.svelte';
 	import PartFiles from './PartFiles.svelte';
 	import Prose from './Prose.svelte';
@@ -21,7 +22,7 @@ and refuses a post that leaves one unanswered. Renders nothing for a packet with
 
 	interface Props {
 		asks: Ask[];
-		/** Every part, which carries the files an ask's bound part changed since the send-back. */
+		/** Every part, which carries the diff an ask's bound PR shows as evidence. */
 		parts: Extract<PageData, { kind: 'packet' }>['parts'];
 		/** The label picked for each ask, by the ask's number counting from 1. */
 		answers: Record<number, string | undefined>;
@@ -56,8 +57,11 @@ and refuses a post that leaves one unanswered. Renders nothing for a packet with
 					{#if ask.part}
 						<p class="ask-part">{refKind(ask.part)} · <code>{ask.part}</code></p>
 						{@const bound = parts.find((p) => p.ref === ask.part)}
-						{#if bound?.kind === 'pr' && bound.since}
-							<PartFiles groups={bound.groups ?? []} since={bound.since} />
+						{#if bound?.kind === 'pr'}
+							<PartFiles since={bound.since} />
+							{#if bound.totals}
+								<div class="mt-2"><FilesDiff groups={bound.groups ?? []} totals={bound.totals} focusKey={false} /></div>
+							{/if}
 						{/if}
 					{/if}
 					<p class="summary"><Prose text={ask.summary} /></p>
