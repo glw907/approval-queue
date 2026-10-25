@@ -786,6 +786,11 @@ a {
 .frame .ask .nh .kind {
 	margin-right: 0;
 }
+/* The question shares the icon's row and the chip wraps below, as the prototype's phone render has it. */
+.frame .ask .nh > span:first-of-type {
+	flex: 1 1 0;
+	min-width: 0;
+}
 .frame .note p {
 	margin: 0 0 6px;
 }
@@ -1042,6 +1047,8 @@ a {
    2.2:1 on the ink fill in light and 1.1:1 on the warning fill in dark. */
 .frame .seg .btn:checked:focus-visible {
 	outline-color: var(--color-base-100);
+	/* Four pixels in, so the light ring has ink on both sides; at -2px it sat against the surround's own colour. */
+	outline-offset: -4px;
 }
 .frame .seg.changed .btn:checked:focus-visible {
 	outline-color: var(--color-warning-content);
