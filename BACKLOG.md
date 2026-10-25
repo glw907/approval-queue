@@ -11,6 +11,9 @@
 
 ## Medium
 
+- [ ] **#48** Keep one PR's page approvals from voiding each other `#bug` `#approval-queue` `#initiative:docs-system` *(2026-10-25)*
+  Three `page` items queued on glw907/cairn-cms#140 were all approved around 08:30, and all three were refused with "moved ... while it waited, so the approval does not cover it". The first two moved because the later pages' commits rode the same PR. The third moved because `pr_head` read GitHub about five seconds after a push, before the head updated. An approval cost three re-reviews. For a `page` item, check that the page's blob is unchanged instead of the PR head, or check the head against the local commit given at queue time, and show the refusal on the screen, not only on stderr.
+  Record: ~/Projects/initiatives/docs-system/research/2026-10-24-extend-blueprints-batch-4/friction.md (P12)
 - [ ] **#47** Add a notes check before queueing `#improvement` `#approval-queue` `#initiative:docs-system` *(2026-10-24)*
   No `approval-queue notes --check <file>` exists; a malformed note, or a quote anchor matching more than once, shows up only at queue time or in the review. One theme note quoted `cairn-audit`, which occurs many times; caught by hand.
   Record: ~/Projects/initiatives/docs-system/research/2026-10-24-extend-blueprints-batch-4-friction.md (approval-queue 5)
