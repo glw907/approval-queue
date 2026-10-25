@@ -104,7 +104,7 @@ if [ "${1:-}" = pending ]; then
     pdir=${pdir%/}
     [ -e "$pdir/item.json" ] && [ -e "$pdir/decision.json" ] && [ ! -e "$pdir/refused.json" ] || continue
     IFS=$'\x1f' read -r ppid pstart pkind ptitle < <(jq -r '
-      [(.pid // "" | tostring), (.pidStart // "" | tostring), .kind, (.title | gsub("[\t\n]"; " "))] | join("\u001f")' "$pdir/item.json")
+      [(.pid // "" | tostring), (.pidStart // "" | tostring), .kind, (.title | gsub("[\t\n]"; " "))] | join("\u001f")' "$pdir/item.json") || continue
     [ -n "$ppid" ] && [ "$pkind" != triage ] || continue
     ! proc_running "$ppid" "$pstart" || continue
     pitem=${pdir##*/}
@@ -866,6 +866,7 @@ if [ "$kind" = notes ]; then
         quote_file="$fetch.doc"
       fi
       check_notes
+      rm -f "$fetch.doc"
       ;;
     change)
       change_notes=true

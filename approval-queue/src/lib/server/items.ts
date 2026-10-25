@@ -256,7 +256,7 @@ export async function listDecided(
 			const at = (await stat(join(dir, 'decision.json'))).mtimeMs;
 			if (at < since) continue;
 			const refused = await readJson<{ reason: string }>(join(dir, 'refused.json'));
-			decided.push({ meta, decision: decision.decision, ...(refused && { refused: refused.reason }), at });
+			decided.push({ meta, decision: decision.decision, ...(refused && { refused: refused.reason ?? '' }), at });
 		} catch (err) {
 			if (!(err instanceof SyntaxError)) throw err;
 		}

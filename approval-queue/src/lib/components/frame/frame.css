@@ -214,12 +214,12 @@ html {
 	font-size: 0.9rem;
 	color: var(--color-muted);
 }
-.rail .dq span:last-child {
+.rail .dq span:nth-child(2) {
 	color: var(--cairn-success-ink);
 	flex: none;
 }
 /* A deferred item is set aside, not done: its outcome takes the warning ink, not the approved green. */
-.rail .dq.deferred span:last-child {
+.rail .dq.deferred span:nth-child(2) {
 	color: var(--cairn-warning-ink);
 }
 /* A refused approval was not recorded: its outcome takes the warning ink, and the reason wraps to a second line. */
@@ -228,10 +228,11 @@ html {
 }
 .rail .dq.refused span:nth-child(2) {
 	color: var(--cairn-warning-ink);
-	flex: none;
 }
 .rail .dq span.why {
 	flex-basis: 100%;
+	min-width: 0;
+	overflow-wrap: anywhere;
 	color: var(--color-muted);
 	font-size: 0.85rem;
 }
