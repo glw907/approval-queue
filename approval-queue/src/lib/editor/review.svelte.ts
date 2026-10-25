@@ -334,9 +334,12 @@ export class DocReview {
 		return this.dirty || this.timer !== null || this.inFlight !== null;
 	}
 
-	/** Resolves once the comment op on its way, if any, has its answer, so a decision never reads the comments before it lands. */
+	/**
+	 * Resolves once no comment op is on its way, including one started while this waited, so a decision
+	 * never reads the comments before the last answer lands.
+	 */
 	async settled(): Promise<void> {
-		await this.op?.catch(() => {});
+		while (this.op) await this.op.catch(() => {});
 	}
 
 	/**

@@ -185,10 +185,15 @@ describe('keyAction', () => {
 		expect(keyAction('m', { ...none, ctrl: true, code: 'KeyM' }, t)).toBeNull();
 	});
 
-	it('matches the comment chords by physical key, whatever character the layout gives them', () => {
+	it('follows the letter the layout types, and falls back to the physical key for any other character', () => {
 		const t = ctx({ page: 'blueprint', typing: true });
 		// Option+M on macOS gives "µ", and AltGr layouts give their own characters.
 		expect(keyAction('µ', { ...none, ctrl: true, alt: true, code: 'KeyM' }, t)).toBe('comment');
-		expect(keyAction('m', { ...none, ctrl: true, alt: true, code: 'Semicolon' }, t)).toBeNull();
+		// A Dvorak-style layout types these letters from other physical keys.
+		expect(keyAction('m', { ...none, ctrl: true, alt: true, code: 'Semicolon' }, t)).toBe('comment');
+		expect(keyAction('n', { ...none, ctrl: true, alt: true, code: 'KeyB' }, t)).toBe('next-comment');
+		expect(keyAction('p', { ...none, ctrl: true, alt: true, code: 'KeyR' }, t)).toBe('prev-comment');
+		// A letter that is not a comment chord is not rescued by the key under it.
+		expect(keyAction('x', { ...none, ctrl: true, alt: true, code: 'KeyM' }, t)).toBeNull();
 	});
 });

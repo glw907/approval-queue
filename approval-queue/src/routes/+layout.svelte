@@ -491,7 +491,19 @@ this session" until the queue reload lists it there itself.
 		</div>
 	</div>
 {:else if desk.toast !== null}
-	<div class="toast toast-center desk-toast z-40" out:fade={toastOut(true)} onoutrostart={(e) => (e.currentTarget.inert = true)}>
+	<div
+		class="toast toast-center desk-toast z-40"
+		role="group"
+		aria-label="Notice"
+		out:fade={toastOut(true)}
+		onoutrostart={(e) => (e.currentTarget.inert = true)}
+		onpointermove={(e) => {
+			if (e.movementX || e.movementY) desk.pauseFlash('pointer');
+		}}
+		onpointerleave={() => desk.resumeFlash('pointer')}
+		onfocusin={() => desk.pauseFlash('focus')}
+		onfocusout={() => desk.resumeFlash('focus')}
+	>
 		<div class="alert alert-info border border-base-300 text-sm">
 			<span>{desk.toast}</span>
 			{#if desk.toastUndo}
