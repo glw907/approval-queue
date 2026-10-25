@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { anchorAt, CONTEXT, place } from './comments.ts';
+import { ambiguousQuote, anchorAt, CONTEXT, place } from './comments.ts';
 
 const DOC = readFileSync(new URL('../fixtures/comments/comments.blueprint.md', import.meta.url), 'utf8');
 const LINE = 'Dry soil at that depth means the plant needs water.';
@@ -78,5 +78,31 @@ describe('place', () => {
 		const raw = place(crlf, anchor)!;
 		expect(crlf.slice(raw.from, raw.to)).toBe(LINE);
 		expect(raw.from).not.toBe(from);
+	});
+});
+
+describe('ambiguousQuote', () => {
+	const text = 'A red cat. A blue cat. A red cat.';
+
+	it('passes a unique quote and an absent one', () => {
+		expect(ambiguousQuote(text, 'blue')).toBe(0);
+		expect(ambiguousQuote(text, 'green')).toBe(0);
+	});
+
+	it('fails a repeated quote with no context, returning its count', () => {
+		expect(ambiguousQuote(text, 'cat')).toBe(3);
+	});
+
+	it('passes a repeated quote whose context occurs once', () => {
+		expect(ambiguousQuote(text, 'cat', 'blue ')).toBe(0);
+		expect(ambiguousQuote(text, 'cat', '', '. A blue')).toBe(0);
+	});
+
+	it('fails a repeated context', () => {
+		expect(ambiguousQuote(text, 'cat', 'red ')).toBe(3);
+	});
+
+	it('counts overlapping occurrences, as place() does', () => {
+		expect(ambiguousQuote('aaa', 'aa')).toBe(2);
 	});
 });

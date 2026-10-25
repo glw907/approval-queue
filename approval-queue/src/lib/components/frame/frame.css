@@ -222,6 +222,19 @@ html {
 .rail .dq.deferred span:last-child {
 	color: var(--cairn-warning-ink);
 }
+/* A refused approval was not recorded: its outcome takes the warning ink, and the reason wraps to a second line. */
+.rail .dq.refused {
+	flex-wrap: wrap;
+}
+.rail .dq.refused span:nth-child(2) {
+	color: var(--cairn-warning-ink);
+	flex: none;
+}
+.rail .dq span.why {
+	flex-basis: 100%;
+	color: var(--color-muted);
+	font-size: 0.85rem;
+}
 .rail li.dq span:first-child {
 	min-width: 0;
 	overflow-wrap: anywhere;
