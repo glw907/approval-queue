@@ -2,6 +2,10 @@ export type KeyAction =
 	| 'toggle-sheet'
 	| 'queue-next'
 	| 'queue-prev'
+	| 'board'
+	| 'pick-1'
+	| 'pick-2'
+	| 'pick-3'
 	| 'undo'
 	| 'approve'
 	| 'open-note'
@@ -53,6 +57,8 @@ export interface KeyMods {
 }
 
 const MOVES: Record<string, KeyAction> = { '1': 'move-now', '2': 'move-defer', '3': 'move-drop' };
+/** On a packet, a digit picks that option of the ask holding focus; the layout finds the ask. */
+const PICKS: Record<string, KeyAction> = { '1': 'pick-1', '2': 'pick-2', '3': 'pick-3' };
 const DOCS: ReadonlyArray<KeyContext['page']> = ['blueprint', 'page', 'change'];
 const COMMENT_KEYS: Record<string, KeyAction> = { KeyM: 'comment', KeyN: 'next-comment', KeyP: 'prev-comment' };
 
@@ -97,10 +103,12 @@ export function keyAction(key: string, mods: KeyMods, context: KeyContext): KeyA
 	if (key === '?') return 'toggle-sheet';
 	if (key === 'j') return 'queue-next';
 	if (key === 'k') return 'queue-prev';
+	if (key === 'b') return 'board';
 	if (key === 'z') return held ? 'undo' : null;
 	if ((page === 'pr' || page === 'design') && key === 'a') return noteOpen || approveLocked ? null : 'approve';
 	if (page !== 'triage' && key === 'r') return 'open-note';
 	if ((page === 'pr' || page === 'change') && key === '/') return 'focus-filter';
 	if (page === 'triage' && key in MOVES) return MOVES[key];
+	if (page === 'packet' && !held && key in PICKS) return PICKS[key];
 	return null;
 }
