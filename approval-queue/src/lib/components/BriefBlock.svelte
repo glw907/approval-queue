@@ -54,7 +54,7 @@ screen.
 		margin: 8px 0 0;
 		padding-inline-start: 1.1rem;
 		list-style: disc;
-		max-width: 64ch;
+		max-width: 56ch;
 		line-height: 1.5;
 	}
 	.changes li + li {
@@ -62,6 +62,6 @@ screen.
 	}
 	#worth-knowing {
 		margin-top: 26px;
-		max-width: 64ch;
+		max-width: 56ch;
 	}
 </style>

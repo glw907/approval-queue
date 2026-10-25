@@ -2,7 +2,7 @@
 The code diff of a PR as the PR screen's Files row shows it: a filter on the path, groups by top
 folder, and each file's diff behind its own row, all closed until opened. `groups` and `totals`
 come from the item's `load`; a filter that matches nothing says so. Registers the `/` key to focus
-the filter for as long as it is mounted.
+the filter for as long as it is mounted, unless `focusKey` is false.
 -->
 <script lang="ts">
 	import { tick } from 'svelte';
@@ -14,9 +14,11 @@ the filter for as long as it is mounted.
 	interface Props {
 		groups: Array<{ name: string; files: DiffFile[] }>;
 		totals: { files: number; adds: number; dels: number };
+		/** False inside a packet, where several diffs share the screen and `/` does nothing. */
+		focusKey?: boolean;
 	}
 
-	let { groups, totals }: Props = $props();
+	let { groups, totals, focusKey = true }: Props = $props();
 
 	const count = (n: number) => n.toLocaleString('en-US');
 	const plural = (n: number, one: string, many: string) => (n === 1 ? one : many);
@@ -43,15 +45,16 @@ the filter for as long as it is mounted.
 		`${totals.files} ${plural(totals.files, 'file', 'files')}, +${count(totals.adds)} −${count(totals.dels)}.`
 	);
 
-	$effect(() =>
-		desk.register({
+	$effect(() => {
+		if (!focusKey) return;
+		return desk.register({
 			'focus-filter': async () => {
 				filesOpen = true;
 				await tick();
 				filter?.focus();
 			}
-		})
-	);
+		});
+	});
 
 	function toggleAll() {
 		for (const g of shown) groupOpen[g.name] = !allOpen;

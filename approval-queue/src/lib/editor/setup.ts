@@ -475,24 +475,29 @@ function openableFolds(view: EditorView) {
 
 /**
  * Scrolls the window so `pos` sits below the sticky header, then puts the caret there or selects `to`.
- * `lineBlockAt` is exact only for a line inside the rendered viewport and an estimate beyond it, so a
- * line outside it is reached by a scroll target, which makes CodeMirror render and measure the lines
- * first. That scroll is instant, which is the price of landing in the right place.
+ * `lineBlockAt` is exact only for a line inside the rendered viewport and an estimate beyond it. A
+ * line outside the viewport is scrolled toward by that estimate, smoothly like a near one; once the
+ * scroll ends the editor has rendered and measured the lines on the way, and `requestMeasure` reads
+ * the line's real top and corrects any difference.
  */
 export function jumpTo(view: EditorView, pos: number, to = pos) {
 	const folded = collapsedStart(view.state, pos);
 	if (folded !== null) view.dispatch({ effects: uncollapseUnchanged.of(folded) });
+	const smooth = !matchMedia('(prefers-reduced-motion: reduce)').matches;
 	const rendered = pos >= view.viewport.from && pos <= view.viewport.to;
-	if (rendered) {
-		const top = window.scrollY + view.documentTop + view.lineBlockAt(pos).top - 140;
-		const smooth = !matchMedia('(prefers-reduced-motion: reduce)').matches;
-		window.scrollTo({ top, behavior: smooth ? 'smooth' : 'auto' });
-		view.dispatch({ selection: { anchor: pos, head: to } });
-	} else {
-		view.dispatch({
-			selection: { anchor: pos, head: to },
-			effects: EditorView.scrollIntoView(pos, { y: 'start', yMargin: 140 })
-		});
+	const top = window.scrollY + view.documentTop + view.lineBlockAt(pos).top - 140;
+	window.scrollTo({ top, behavior: smooth ? 'smooth' : 'auto' });
+	view.dispatch({ selection: { anchor: pos, head: to } });
+	if (!rendered) {
+		const correct = () =>
+			view.requestMeasure({
+				read: () => view.documentTop + view.lineBlockAt(pos).top - 140,
+				write: (off) => {
+					if (Math.abs(off) > 4) window.scrollTo({ top: window.scrollY + off, behavior: 'auto' });
+				}
+			});
+		if (smooth) window.addEventListener('scrollend', correct, { once: true });
+		else correct();
 	}
 	view.focus();
 }

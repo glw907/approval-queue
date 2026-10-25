@@ -1,22 +1,27 @@
 <!-- @component
 A design document as the last section of the screen, set in the frame's own body type with its
 headings one step under the section's, as the packet and page screens read. The document's own `h1`
-is hidden because the Survey header already carries the title.
+is hidden because the Survey header already carries the title. `embedded` drops the section id and
+its "The design" heading, for a packet part's detail where several designs repeat them.
 -->
 <script lang="ts">
-	let { docHtml }: { docHtml: string } = $props();
+	let { docHtml, embedded = false }: { docHtml: string; embedded?: boolean } = $props();
 </script>
 
-<section class="sec" id="design" aria-labelledby="design-h">
-	<h2 id="design-h">The design</h2>
+{#if embedded}
 	<article class="desk-read">{@html docHtml}</article>
-</section>
+{:else}
+	<section class="sec" id="design" aria-labelledby="design-h">
+		<h2 id="design-h">The design</h2>
+		<article class="desk-read">{@html docHtml}</article>
+	</section>
+{/if}
 
 <style>
 	.desk-read {
 		font-size: 1rem;
 		line-height: 1.6;
-		max-width: 64ch;
+		max-width: 56ch;
 		margin-top: 10px;
 		overflow-wrap: anywhere;
 	}

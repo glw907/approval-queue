@@ -1,7 +1,7 @@
 <!-- @component
 The Survey header every screen opens with: crumb, benchmark triangle, headline, lede, and the
 contour texture behind them. The screen passes its own crumb, headline, and lede as snippets, so
-rendered inline Markdown works. A headline over about 120 characters takes the `long` size. A
+rendered inline Markdown works. `headlineText` is the headline's source text; one over 90 characters takes the `long` size. A
 packet, blueprint, or page passes `description`, its paragraphs each in a `<p>`; a `lede` passed
 beside it follows as a smaller status line, and one passed alone is the one-paragraph lede.
 -->
@@ -13,10 +13,12 @@ beside it follows as a smaller status line, and one passed alone is the one-para
 		headline: Snippet;
 		lede?: Snippet;
 		description?: Snippet;
-		long?: boolean;
+		headlineText: string;
 	}
 
-	let { crumb, headline, lede, description, long = false }: Props = $props();
+	let { crumb, headline, lede, description, headlineText }: Props = $props();
+
+	const long = $derived(headlineText.length > 90);
 </script>
 
 <header class="sheethead">

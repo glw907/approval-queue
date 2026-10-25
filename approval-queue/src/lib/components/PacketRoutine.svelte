@@ -1,7 +1,7 @@
 <!-- @component
 The packet's routine parts: one row per PR or design no ask binds, each with the session's verdict
-preselected in a segment and a Why that opens the detail (a PR's checks and files, or the design
-doc). A failing or unchecked PR keeps that fact outside the disclosure. A plan step's verdict sits
+preselected in a segment and a Why that opens the detail (a PR's checks and full diff, or the design
+rendered). A failing or unchecked PR keeps that fact outside the disclosure. A plan step's verdict sits
 on its step in `PacketBrief`, so steps are not listed here.
 
 The segment's radios belong to the decision form and post as `part:<ref>`; `verdicts` is bound up so
@@ -11,6 +11,8 @@ omits one. Renders nothing for a packet with no routine parts.
 <script lang="ts">
 	import { refKind } from '#lib/packet-view.ts';
 	import type { PageData } from '../../routes/item/[id=id]/$types';
+	import DesignView from './DesignView.svelte';
+	import FilesDiff from './FilesDiff.svelte';
 	import PacketIcon from './PacketIcon.svelte';
 	import PartFiles from './PartFiles.svelte';
 	import PacketSeg from './PacketSeg.svelte';
@@ -75,7 +77,7 @@ omits one. Renders nothing for a packet with no routine parts.
 									{#if part.link}
 										<p>
 											{part.link.head} → {part.link.base} ·
-											<a class="link" href={part.link.url} target="_blank" rel="noopener noreferrer">GitHub</a>
+											<a class="link" href={part.link.url} target="_blank" rel="noopener noreferrer">GitHub<span class="sr-only"> (opens in a new tab)</span></a>
 										</p>
 									{/if}
 									<dl class="mt-1 grid grid-cols-[5.5rem_1fr] gap-x-3 gap-y-0.5 text-[0.85rem]">
@@ -84,10 +86,12 @@ omits one. Renders nothing for a packet with no routine parts.
 										<dt>Review</dt>
 										<dd>{part.review ?? 'Not stated.'}</dd>
 									</dl>
-									<PartFiles groups={part.groups ?? []} since={part.since} />
-								{:else if part?.kind === 'design' && part.doc}
-									<!-- svelte-ignore a11y_no_noninteractive_tabindex: a sideways-scrolling excerpt needs the keyboard to reach it -->
-									<pre class="evidence-code" role="region" tabindex="0" aria-label="The design, scrolls sideways"><code>{part.doc}</code></pre>
+									<PartFiles since={part.since} />
+									{#if part.totals}
+										<div class="mt-2"><FilesDiff groups={part.groups ?? []} totals={part.totals} focusKey={false} /></div>
+									{/if}
+								{:else if part?.kind === 'design' && part.docHtml}
+									<DesignView docHtml={part.docHtml} embedded />
 								{/if}
 							</div>
 						</details>

@@ -184,9 +184,9 @@ function recalledResolved(key: string | undefined, notes: PlacedNote[]): string[
 export class DocReview {
 	text = $state('');
 	/** The chosen choice's index, by note id. */
-	decided = $state<Record<string, number>>({});
+	decided = $state.raw<Record<string, number>>({});
 	/** Each note's start after the edits so far, for the margin and the outline's marks. */
-	starts = $state<Record<string, number | null>>({});
+	starts = $state.raw<Record<string, number | null>>({});
 	/** Each comment's and thread's range after the edits so far, keyed as the editor keys them. */
 	ranges = $state<Record<string, Range>>({});
 	blob = $state('');
@@ -229,7 +229,6 @@ export class DocReview {
 	private timer: ReturnType<typeof setTimeout> | null = null;
 	private dirty = false;
 	private inFlight: Promise<void> | null = null;
-	private savedOnce = false;
 	/** The comment op on its way, from its first await to its answer; null when none is. */
 	private op: Promise<unknown> | null = null;
 	private mouseSelecting = false;
@@ -335,9 +334,12 @@ export class DocReview {
 		return this.dirty || this.timer !== null || this.inFlight !== null;
 	}
 
-	/** Resolves once the comment op on its way, if any, has its answer, so a decision never reads the comments before it lands. */
+	/**
+	 * Resolves once no comment op is on its way, including one started while this waited, so a decision
+	 * never reads the comments before the last answer lands.
+	 */
 	async settled(): Promise<void> {
-		await this.op?.catch(() => {});
+		while (this.op) await this.op.catch(() => {});
 	}
 
 	/**
@@ -501,9 +503,6 @@ export class DocReview {
 				// No edit came after this save's text, so the choices are stored against its blob.
 				this.store(this.blob);
 			}
-			// Only the first save is read aloud; every later pause in typing would repeat it.
-			if (!this.savedOnce) desk.announce('Your edits are saving as you type.');
-			this.savedOnce = true;
 		} else {
 			this.saveFailed = true;
 			this.saveStatus = `Not saved: ${result.message}`;

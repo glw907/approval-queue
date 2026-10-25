@@ -39,7 +39,7 @@ text drops a box left empty. Below 1260px a tap on a highlight opens the drawer 
 	let { review, file, label, kindWord, yaml = false, amend }: Props = $props();
 
 	let host = $state<HTMLDivElement>();
-	let view = $state<EditorView | null>(null);
+	let view = $state.raw<EditorView | null>(null);
 
 	onMount(() => {
 		if (!host) return;
@@ -120,12 +120,13 @@ text drops a box left empty. Below 1260px a tap on a highlight opens the drawer 
 				<button
 					type="button"
 					class="btn btn-link btn-sm linkbtn addc"
+					aria-keyshortcuts="Control+Alt+M"
 					aria-disabled={review.selectionEmpty}
 					title="Select text to comment on it"
 					onpointerdown={commentDown}
 					onclick={(e) => e.detail === 0 && void review.openBox()}
 				>
-					Comment <kbd>Ctrl</kbd><kbd>Alt</kbd><kbd>M</kbd>
+					Comment <kbd aria-hidden="true">Ctrl</kbd><kbd aria-hidden="true">Alt</kbd><kbd aria-hidden="true">M</kbd>
 				</button>
 			{/if}
 			{#if amend !== undefined && view}
@@ -341,16 +342,28 @@ text drops a box left empty. Below 1260px a tap on a highlight opens the drawer 
 		color: var(--color-muted);
 		line-height: 1.6;
 	}
-	/* Highlights are fills only, deepening while their card is current (round 6). */
+	/*
+	 * Highlights are light fills, deepening while their card is current (round 6), each with a 2px
+	 * underline in an ink with 3:1 or better against the page. No fill keeps 3:1 against the page and
+	 * 4.5:1 for the text over it with room left for a deeper current state (light warning tops out at
+	 * 2.50:1; the rest hold both only in a 3.1 to 3.2 sliver), so the underline carries the 3:1 and
+	 * the fills keep the text above 10:1. Ink against the page, light then dark: warning 6.24, 11.06;
+	 * info 6.85, 10.48; primary 6.76, 8.27.
+	 */
 	.cm-host :global(:is(.cm-anchor, .cm-cmt)) {
 		border-radius: 2px;
+		text-decoration: underline;
+		text-decoration-thickness: 2px;
+		text-underline-offset: 2px;
 		transition: background-color var(--motion-quick) var(--motion-ease);
 	}
 	.cm-host :global(.cm-anchor) {
 		background: color-mix(in oklab, var(--color-warning) 18%, transparent);
+		text-decoration-color: var(--cairn-warning-ink);
 	}
 	.cm-host :global(.cm-anchor.info) {
 		background: color-mix(in oklab, var(--color-info) 12%, transparent);
+		text-decoration-color: var(--cairn-info-ink);
 	}
 	.cm-host :global(.cm-anchor.cur) {
 		background: color-mix(in oklab, var(--color-warning) 34%, transparent);
@@ -360,6 +373,7 @@ text drops a box left empty. Below 1260px a tap on a highlight opens the drawer 
 	}
 	.cm-host :global(.cm-cmt) {
 		background: color-mix(in oklab, var(--color-primary) 14%, transparent);
+		text-decoration-color: var(--color-primary);
 	}
 	.cm-host :global(.cm-cmt.cur) {
 		background: color-mix(in oklab, var(--color-primary) 26%, transparent);

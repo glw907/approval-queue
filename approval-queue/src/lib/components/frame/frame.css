@@ -791,7 +791,7 @@ a {
 	transform: rotate(90deg);
 }
 .frame .bg {
-	max-width: 58ch;
+	max-width: 56ch;
 }
 /* The stock collapse's title and content carry a card's padding; the Background and Why rows are text. */
 .frame :where(.collapse) > :where(.collapse-title) {
@@ -848,7 +848,7 @@ a {
 	margin: 4px 0 0 18px;
 	font-size: 0.9rem;
 	color: var(--color-muted);
-	max-width: 60ch;
+	max-width: 56ch;
 }
 .frame .why .why-body p {
 	margin: 0;
@@ -948,7 +948,7 @@ a {
 }
 .frame #not-checked {
 	margin-top: 26px;
-	max-width: 64ch;
+	max-width: 56ch;
 }
 
 /* The verdict segments: DaisyUI radio buttons joined into one control. */
@@ -1012,13 +1012,13 @@ a {
 .frame .ask .summary {
 	margin: 6px 0 4px;
 	font-size: 0.95rem;
-	max-width: 64ch;
+	max-width: 56ch;
 }
 .frame .ask .layers {
 	border-block: 1px solid color-mix(in oklab, var(--color-base-content) 14%, transparent);
 	padding-block: 2px;
 	margin: 6px 0 8px;
-	max-width: 64ch;
+	max-width: 56ch;
 }
 .frame .ask .layers .bg {
 	max-width: none;
@@ -1032,7 +1032,7 @@ a {
 	margin-top: 8px;
 	border: 0;
 	padding: 0;
-	max-width: 64ch;
+	max-width: 56ch;
 }
 .frame .ask .choices-h {
 	font-weight: 600;
@@ -1074,7 +1074,7 @@ a {
 	color: var(--color-muted);
 }
 .frame .ask .side {
-	max-width: 64ch;
+	max-width: 56ch;
 	margin-top: 10px;
 }
 .frame .evidence-code {
