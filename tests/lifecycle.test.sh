@@ -50,10 +50,11 @@ wait_for() {
   return 1
 }
 
-# queue_design: starts a design in the background and sets dir and id to its item.
+# queue_design: starts a design in the background and sets dir and id to its item. It clears tab.seen too: a
+# queue that finds a fresh one waits up to 5 seconds for a tab poll that never comes, which is all of finish().
 dir="" id=""
 queue_design() {
-  rm -rf "$state/items"
+  rm -rf "$state/items" "$state/tab.seen"
   bash "$SCRIPT" design owner/repo T "$root/design.md" >"$root/out" 2>"$root/err" &
   bgpid=$!
   wait_for "$state/items/*/item.json" || return 1
