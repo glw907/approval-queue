@@ -29,10 +29,11 @@ describe('anchorLines', () => {
 		);
 	});
 
-	it('seeds a blueprint with its page title, so a heading that repeats it takes -1', () => {
-		const doc = '---\npage: Overview\n---\n\n# Overview\n';
-		expect(anchorLines(doc, 'blueprint')).toBe('overview-1.heading\tOverview\n');
-		expect(anchorLines(doc, 'page')).toBe('overview.heading\tOverview\n');
+	it('slugs an H1 that repeats the title bare, and a ## heading that repeats it takes -1 when there is no H1', () => {
+		const h1 = '---\npage: Overview\n---\n\n# Overview\n';
+		expect(anchorLines(h1, 'blueprint')).toBe('overview.heading\tOverview\n');
+		expect(anchorLines(h1, 'page')).toBe('overview.heading\tOverview\n');
+		expect(anchorLines('---\npage: Overview\n---\n\n## Overview\n', 'blueprint')).toBe('overview-1.heading\tOverview\n');
 	});
 
 	it('slugs a heading with a named entity as the page does', () => {

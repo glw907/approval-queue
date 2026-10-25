@@ -62,6 +62,17 @@ describe('listDecided', () => {
 		]);
 	});
 
+	it('adds the reason from refused.json, and only to the item that has one', async () => {
+		const meta = { kind: 'page', repo: 'r', title: 't', created: 'c' };
+		for (const id of ['a', 'b']) await seed(id, { ...meta, title: id });
+		await writeDecision(root, 'a', { decision: 'approve' });
+		await writeDecision(root, 'b', { decision: 'approve' });
+		await writeFile(join(root, 'items', 'b', 'refused.json'), JSON.stringify({ at: '2026-10-25T10:00:00Z', reason: 'The page changed.' }));
+		const decided = await listDecided(root, 0);
+		expect(decided.find((d) => d.meta.id === 'a')).not.toHaveProperty('refused');
+		expect(decided.find((d) => d.meta.id === 'b')?.refused).toBe('The page changed.');
+	});
+
 	it('returns an empty list when there is no items directory', async () => {
 		expect(await listDecided(root, 0)).toEqual([]);
 	});

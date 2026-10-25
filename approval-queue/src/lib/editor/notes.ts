@@ -66,13 +66,30 @@ function plainText(tokens: Token[]): string {
 /** The slug the page gives a heading, taking `-1`, `-2` for a repeat the way the page does. */
 type Slugger = (heading: string) => string;
 
+/** Whether the document has a `#` heading outside front matter, code, and directive containers. */
+function hasTitleHeading(doc: string): boolean {
+	const lines = doc.split('\n');
+	const scanned = fenceScan(lines);
+	const front = frontmatterSpan(doc);
+	let offset = 0;
+	for (const [i, line] of lines.entries()) {
+		const from = offset;
+		offset += line.length + 1;
+		if ((front && from < front.to) || scanned.inCode[i] || scanned.depths[i] !== null) continue;
+		if (HEADING.exec(line)?.[1].length === 1) return true;
+	}
+	return false;
+}
+
 /**
  * One slugger per document, as rehype-slug runs one per page. A blueprint's slugs the front matter's
- * `page` first, as drafter does, so a heading that repeats the title takes `-1`.
+ * `page` first, as drafter does, so a `##` heading that repeats the title takes `-1`. A blueprint with
+ * an H1 skips that seed, since the H1 stands for the title. `seed` forces the seed, which the aliases
+ * for the earlier rule use.
  */
-function sluggerFor(doc: string, kind: DocKind): Slugger {
+function sluggerFor(doc: string, kind: DocKind, seed = kind === 'blueprint' && !hasTitleHeading(doc)): Slugger {
 	const github = new GithubSlugger();
-	if (kind === 'blueprint') {
+	if (seed && kind === 'blueprint') {
 		const title = frontMatter(doc).page;
 		if (title) github.slug(title);
 	}
@@ -107,7 +124,8 @@ function textSpan(line: string, from: number, start: number): Range {
  * Each heading counts its own items, so items under a deeper heading belong to it. Front matter,
  * code blocks, and lines inside other directive containers define nothing. Slugs follow the page's
  * rule (see `sluggerFor`), so a repeated heading takes `-1`, `-2`. A key spelled with the first
- * version's slug resolves too, unless a current key holds that name.
+ * version's slug, or with the slug the title-seeded rule gave an H1, resolves too, unless a current
+ * key holds that name.
  */
 export function anchors(doc: string, kind: DocKind = 'blueprint'): Map<string, Range> {
 	const { out, alias } = scan(doc, kind);
@@ -128,18 +146,23 @@ interface Scan {
 	alias: Map<string, Range>;
 }
 
-/** Records a key under the current slug and, where the first version's slug differs, under that. */
+/**
+ * Records a key under the current slug and, where the first version's slug or the title-seeded slug
+ * differs, under that.
+ */
 function recorder(out: Map<string, Range>, alias: Map<string, Range>) {
 	let section = '';
 	let old = '';
+	let titled = '';
 	// The first version resolved a repeated heading's slug to its first section only, so a later section
 	// bearing the same old slug records no aliases.
 	const bore = new Set<string>();
 	let aliased = false;
 	return {
-		enter(name: string, oldName: string) {
+		enter(name: string, oldName: string, titledName: string) {
 			section = name;
 			old = oldName;
+			titled = titledName;
 			aliased = !bore.has(oldName);
 			bore.add(oldName);
 		},
@@ -148,11 +171,14 @@ function recorder(out: Map<string, Range>, alias: Map<string, Range>) {
 			if (!out.has(key)) out.set(key, range);
 			const oldKey = old + suffix;
 			if (aliased && oldKey !== key && !alias.has(oldKey)) alias.set(oldKey, range);
+			const titledKey = titled + suffix;
+			if (titledKey !== key && !alias.has(titledKey)) alias.set(titledKey, range);
 		},
 		// Replaces the range of a key this section already holds, as a growing page block does.
 		set(suffix: string, range: Range) {
 			out.set(section + suffix, range);
 			if (aliased && old !== section) alias.set(old + suffix, range);
+			if (titled !== section) alias.set(titled + suffix, range);
 		}
 	};
 }
@@ -163,6 +189,7 @@ function scan(doc: string, kind: DocKind): Scan {
 	const alias = new Map<string, Range>();
 	const rec = recorder(out, alias);
 	const slugOf = sluggerFor(doc, kind);
+	const titledSlugOf = sluggerFor(doc, kind, true);
 	const lines = doc.split('\n');
 	const scanned = fenceScan(lines);
 	const front = frontmatterSpan(doc);
@@ -195,7 +222,7 @@ function scan(doc: string, kind: DocKind): Scan {
 		const heading = HEADING.exec(line);
 		if (heading) {
 			const name = slugOf(heading[2]);
-			rec.enter(name, oldSlug(heading[2]));
+			rec.enter(name, oldSlug(heading[2]), titledSlugOf(heading[2]));
 			inSection = true;
 			n = 0;
 			const [start, end] = heading.indices![2]!;
@@ -257,7 +284,7 @@ function scanPage(doc: string): Scan {
 		if (heading) {
 			block = item = null;
 			const name = slugOf(heading[2]);
-			rec.enter(name, oldSlug(heading[2]));
+			rec.enter(name, oldSlug(heading[2]), name);
 			inSection = true;
 			n = 0;
 			const [start, end] = heading.indices![2]!;

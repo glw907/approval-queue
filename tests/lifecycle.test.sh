@@ -89,7 +89,8 @@ start_ticks() { sed 's/.*) //' "/proc/$1/stat" | cut -d' ' -f20; }
 queue_design
 bash "$SCRIPT" withdraw "$id" >"$root/w.out" 2>"$root/w.err"
 assert_eq "$?" "0" "withdraw a waiting item: exit code"
-assert_eq "$(wc -c <"$root/w.out")" "0" "withdraw a waiting item: stdout"
+assert_eq "$(cat "$root/w.out")" "withdrew $id" "withdraw a waiting item: stdout"
+assert_eq "$(wc -c <"$root/w.err")" "0" "withdraw a waiting item: stderr"
 finish
 assert_eq "$rc" "143" "withdraw a waiting item: the queuing command's exit code"
 [ ! -e "$dir/item.json" ] || { echo "FAIL: withdraw a waiting item: item.json is still there"; fail=1; }
@@ -99,15 +100,17 @@ sleep 0.01 &
 dead=$!
 wait "$dead"
 fake_item 20260101T000001-$dead "$dead" 1
-bash "$SCRIPT" withdraw "20260101T000001-$dead" 2>/dev/null
+bash "$SCRIPT" withdraw "20260101T000001-$dead" >"$root/w.out" 2>"$root/w.err"
 assert_eq "$?" "0" "withdraw a dead pid: exit code"
+assert_eq "$(cat "$root/w.out")" "withdrew 20260101T000001-$dead" "withdraw a dead pid: stdout"
+assert_eq "$(wc -c <"$root/w.err")" "0" "withdraw a dead pid: stderr"
 [ ! -e "$state/items/20260101T000001-$dead/item.json" ] || { echo "FAIL: withdraw a dead pid: item.json is still there"; fail=1; }
 
 # A reused pid: the pid runs, but its start time is not the one recorded. Nothing is sent to it.
 sleep 60 &
 sleeper=$!
 fake_item "20260101T000002-$sleeper" "$sleeper" 1
-bash "$SCRIPT" withdraw "20260101T000002-$sleeper" 2>/dev/null
+bash "$SCRIPT" withdraw "20260101T000002-$sleeper" >/dev/null 2>&1
 assert_eq "$?" "0" "withdraw a reused pid: exit code"
 [ ! -e "$state/items/20260101T000002-$sleeper/item.json" ] || { echo "FAIL: withdraw a reused pid: item.json is still there"; fail=1; }
 kill -0 "$sleeper" 2>/dev/null || { echo "FAIL: withdraw a reused pid: the other process was stopped"; fail=1; }
@@ -115,7 +118,7 @@ kill -0 "$sleeper" 2>/dev/null || { echo "FAIL: withdraw a reused pid: the other
 # A deferred item whose waiter is still alive: item.json goes without a TERM to the waiter.
 fake_item "20260101T000003-$sleeper" "$sleeper" "$(start_ticks "$sleeper")"
 echo '{"at":"2026-01-01T00:00:00Z"}' >"$state/items/20260101T000003-$sleeper/deferred.json"
-bash "$SCRIPT" withdraw "20260101T000003-$sleeper" 2>/dev/null
+bash "$SCRIPT" withdraw "20260101T000003-$sleeper" >/dev/null 2>&1
 assert_eq "$?" "0" "withdraw a deferred item: exit code"
 [ ! -e "$state/items/20260101T000003-$sleeper/item.json" ] || { echo "FAIL: withdraw a deferred item: item.json is still there"; fail=1; }
 kill -0 "$sleeper" 2>/dev/null || { echo "FAIL: withdraw a deferred item: the waiter was stopped"; fail=1; }
@@ -205,7 +208,7 @@ collect_after_withdraw() {
   bash "$SCRIPT" collect "$cid" >"$root/c.out" 2>"$root/c.err" &
   cpid=$!
   sleep 0.5
-  bash "$SCRIPT" withdraw "$cid" 2>/dev/null
+  bash "$SCRIPT" withdraw "$cid" >/dev/null 2>&1
   assert_eq "$?" "0" "$label: withdraw exit code"
   for i in $(seq 40); do kill -0 "$cpid" 2>/dev/null || break; sleep 0.1; done
   if kill -0 "$cpid" 2>/dev/null; then
@@ -238,6 +241,47 @@ printf '{"decision":"approve"}\n' >"$dir/decision.json"
 kill -TERM "$bgpid"
 finish
 [ -e "$dir/item.json" ] || { echo "FAIL: TERM after a decision: item.json was removed"; fail=1; }
+
+# pending lists a decided item whose waiter is dead and whose decision no log line holds, one tab-separated
+# line each, oldest id first. It skips a live waiter, a logged decision, a refusal, a triage item, a pidless
+# item, and an undecided item. After the collect, nothing is pending.
+rm -rf "$state/items"
+rm -f "$log"
+sleep 60 &
+sleeper=$!
+decided_item() {
+  fake_item "$1" "$2" "$3"
+  printf '{"decision":"approve"}\n' >"$state/items/$1/decision.json"
+  echo design >"$state/items/$1/doc.md"
+}
+decided_item 20260102T000002-$dead "$dead" 1
+jq '.title = "Second\ttitle"' "$state/items/20260102T000002-$dead/item.json" >"$root/t.json"
+mv "$root/t.json" "$state/items/20260102T000002-$dead/item.json"
+decided_item 20260102T000001-$dead "$dead" 1
+decided_item 20260102T000003-$sleeper "$sleeper" "$(start_ticks "$sleeper")"
+decided_item 20260102T000004-$dead "$dead" 1
+jq -nc '{packet: "20260102T000004-'"$dead"'", verdict: "approve"}' >"$log"
+decided_item 20260102T000005-$dead "$dead" 1
+echo '{"at":"2026-01-02T00:00:00Z","reason":"x"}' >"$state/items/20260102T000005-$dead/refused.json"
+decided_item 20260102T000006-$dead "$dead" 1
+jq '.kind = "triage"' "$state/items/20260102T000006-$dead/item.json" >"$root/t.json"
+mv "$root/t.json" "$state/items/20260102T000006-$dead/item.json"
+decided_item 20260102T000007-$dead "$dead" 1
+jq 'del(.pid, .pidStart)' "$state/items/20260102T000007-$dead/item.json" >"$root/t.json"
+mv "$root/t.json" "$state/items/20260102T000007-$dead/item.json"
+fake_item 20260102T000008-$dead "$dead" 1
+bash "$SCRIPT" pending >"$root/p.out" 2>"$root/p.err"
+assert_eq "$?" "0" "pending: exit code"
+assert_eq "$(cat "$root/p.out")" "$(printf '20260102T000001-%s\tdesign\tapprove\tT\n20260102T000002-%s\tdesign\tapprove\tSecond title' "$dead" "$dead")" "pending: the lines"
+assert_eq "$(wc -c <"$root/p.err")" "0" "pending: stderr"
+bash "$SCRIPT" collect "20260102T000001-$dead" >/dev/null 2>&1
+bash "$SCRIPT" collect "20260102T000002-$dead" >/dev/null 2>&1
+assert_eq "$(bash "$SCRIPT" pending)" "" "pending: nothing after the collects"
+rm -rf "$state/items"
+assert_eq "$(bash "$SCRIPT" pending; echo "rc $?")" "rc 0" "pending: no items"
+bash "$SCRIPT" pending extra >/dev/null 2>&1
+assert_eq "$?" "2" "pending: takes no arguments"
+kill "$sleeper"; wait "$sleeper" 2>/dev/null; sleeper=""
 
 [ "$fail" = 0 ] && echo "lifecycle: ok"
 exit "$fail"

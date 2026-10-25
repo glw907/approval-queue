@@ -42,6 +42,8 @@ printf '#!/usr/bin/env bash\necho "$*" >>"$STUB_DIR/open.record"\n' >"$stubs/xdg
 printf '#!/usr/bin/env bash\n[ "$1" = "-f" ] && shift\nexec "$@"\n' >"$stubs/setsid"
 # gh serves one PR from the fixture: the head, the merge base, and the base branch's tip are read from files,
 # so a test can move the head after queueing; a file at any commit but the head and the merge base is a 404.
+# The contents API's `sha` for the page answers from the `blob` file at the head and 404s at any other ref,
+# 404s for every ref while `blob.gone` exists, and fails with a non-404 error while `blob.down` exists.
 cat >"$stubs/gh" <<'STUB'
 #!/usr/bin/env bash
 echo "$*" >>"$STUB_DIR/gh.record"
@@ -59,6 +61,10 @@ case "$1 $2" in
              statusCheckRollup: [{name: "gate", workflowName: "ci", status: "COMPLETED", conclusion: "SUCCESS"}]}' ;;
     esac ;;
   "pr diff") cat "$CHANGE/diff.patch" ;;
+  "api repos/"*/contents/*)
+    [ -e "$STUB_DIR/blob.down" ] && { echo "gh: Bad Gateway (HTTP 502)" >&2; exit 1; }
+    [ ! -e "$STUB_DIR/blob.gone" ] && [ "${2##*?ref=}" = "$head" ] && [ "$3" = "--jq" ] && { cat "$STUB_DIR/blob"; exit 0; }
+    echo "gh: Not Found (HTTP 404)" >&2; exit 1 ;;
   "api -H")
     path=${4#repos/*/*/contents/}
     sha=${path##*?ref=}
@@ -170,9 +176,9 @@ git -C "$repo" remote rename keep origin
 
 # A page note's anchor may quote the text; a change note's takes a string only.
 printf 'head1111\n' >"$root/head"
-jq '.[0].anchor = {quote: "x", prefix: "p", suffix: "s"}' "$PAGE_NOTES" >"$root/quote-page.json"
+jq '.[0].anchor = {quote: "Sort the steps by time.", prefix: "p", suffix: "s"}' "$PAGE_NOTES" >"$root/quote-page.json"
 queue page "$repo" T "$FILE" --pr "$PR" --notes "$root/quote-page.json" --description "$DESC"
-assert_eq "$(jq -c '.[0].anchor' "$dir/notes.json")" '{"quote":"x","prefix":"p","suffix":"s"}' "page quote anchor: queued with the notes"
+assert_eq "$(jq -c '.[0].anchor' "$dir/notes.json")" '{"quote":"Sort the steps by time.","prefix":"p","suffix":"s"}' "page quote anchor: queued with the notes"
 kill -TERM "$bgpid"; wait "$bgpid" 2>/dev/null; bgpid=""
 rm -rf "$state/items"
 jq '.[0].anchor = {quote: ""}' "$PAGE_NOTES" >"$root/bad-quote.json"
@@ -190,32 +196,87 @@ assert_eq "$(grep -c 'headRefOid' "$root/gh.record")" "1" "page queue: one head 
 cmp -s "$dir/description.md" "$DESC" || { echo "FAIL: page queue: description.md is not the description file"; fail=1; }
 assert_eq "$(jq -c 'has("revises")' "$dir/item.json")" "false" "page queue: a first page is no revision"
 
-# The page approve names the head the item was queued at and the screen showed. A PR that moved while the
-# item waited is refused: the approval would cover commits nobody saw.
+# The page approve checks the page's blob at the PR's head now, not the head itself: another page's commit
+# moves the head and leaves the blob, and only a change to this page's blob refuses.
 printf 'Edited in review.\n' >>"$repo/$FILE"
 git -C "$repo" commit -q -am "Edit $FILE in review"
 approved_commit=$(git -C "$repo" rev-parse HEAD)
 approved_blob=$(git -C "$repo" rev-parse "HEAD:$FILE")
 page_approve="{\"decision\":\"approve\",\"calls\":[{\"id\":\"D1\",\"choice\":\"Keep the author's wording\"},{\"id\":\"Q1\",\"choice\":\"Keep it\"}],\"waived\":[{\"id\":\"D1\",\"choice\":\"Keep the author's wording\",\"reason\":\"Kept the author's wording\"}],\"commit\":\"$approved_commit\",\"blob\":\"$approved_blob\"}"
+page_reason="The page changed on its pull request after it was queued, so the approval wasn't recorded. The session will queue it again."
 printf 'head2222\n' >"$root/head"
+printf 'changedblob\n' >"$root/blob"
 decide "$page_approve"
-assert_eq "$rc" "1" "page approve after the PR moved: exit code"
-case "$(cat "$root/err")" in *"moved from head1111 to head2222"*) ;; *) echo "FAIL: page approve after the PR moved: stderr '$(cat "$root/err")'"; fail=1 ;; esac
-assert_eq "$(cat "$root/out")" "" "page approve after the PR moved: no decision printed"
-[ ! -e "$log" ] || { echo "FAIL: page approve after the PR moved: something was logged"; fail=1; }
+assert_eq "$rc" "1" "page approve after the page changed: exit code"
+case "$(cat "$root/err")" in *"$FILE changed on $PR"*) ;; *) echo "FAIL: page approve after the page changed: stderr '$(cat "$root/err")'"; fail=1 ;; esac
+assert_eq "$(cat "$root/out")" "" "page approve after the page changed: no decision printed"
+[ ! -e "$log" ] || { echo "FAIL: page approve after the page changed: something was logged"; fail=1; }
+assert_eq "$(jq -r '.reason' "$dir/refused.json")" "$page_reason" "page approve after the page changed: refused.json reason"
+assert_eq "$(jq -r '.at | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}Z$")' "$dir/refused.json")" "true" "page approve after the page changed: refused.json time"
+[ ! -e "$dir/refused.json.tmp" ] || { echo "FAIL: page refusal: refused.json.tmp was left"; fail=1; }
+[ -e "$dir/decision.json" ] || { echo "FAIL: page refusal: decision.json was removed"; fail=1; }
 
+# collect runs the same check: refused while the page differs, and once the blob matches again it passes,
+# logs, and clears refused.json.
+refused_dir=$dir
+bash "$SCRIPT" collect "$(basename "$refused_dir")" >"$root/c.out" 2>"$root/c.err"
+assert_eq "$?" "1" "page collect after the page changed: exit code"
+assert_eq "$(wc -c <"$root/c.out")" "0" "page collect after the page changed: no decision printed"
+[ ! -e "$log" ] || { echo "FAIL: page collect after the page changed: something was logged"; fail=1; }
+[ -e "$refused_dir/refused.json" ] || { echo "FAIL: page collect after the page changed: no refused.json"; fail=1; }
+printf '%s\n' "$queued_blob" >"$root/blob"
+bash "$SCRIPT" collect "$(basename "$refused_dir")" >"$root/c.out" 2>"$root/c.err"
+assert_eq "$?" "0" "page collect once the page matches: exit code"
+assert_eq "$(jq -r '.head' "$root/c.out")" "head2222" "page collect once the page matches: the head read"
+assert_eq "$(wc -l <"$log")" "1" "page collect once the page matches: logged once"
+[ ! -e "$refused_dir/refused.json" ] || { echo "FAIL: page collect once the page matches: refused.json was left"; fail=1; }
+rm -f "$log"
+
+printf '%s\n' "$approved_blob" >"$root/blob"
+# The page is gone at the head (a 404): refused the same way.
+printf 'head1111\n' >"$root/head"
+queue page "$repo" "Approve the page Fix a slow build" "$FILE" --pr "$PR" --notes "$PAGE_NOTES" --description "$DESC"
+touch "$root/blob.gone"
+decide "$page_approve"
+assert_eq "$rc" "1" "page approve with the page gone: exit code"
+assert_eq "$(jq -r '.reason' "$dir/refused.json")" "$page_reason" "page approve with the page gone: refused.json reason"
+[ ! -e "$log" ] || { echo "FAIL: page approve with the page gone: something was logged"; fail=1; }
+rm -f "$root/blob.gone"
+
+# gh cannot answer the blob read: exit 1, nothing logged, and no refused.json, so the item stays pending.
+queue page "$repo" "Approve the page Fix a slow build" "$FILE" --pr "$PR" --notes "$PAGE_NOTES" --description "$DESC"
+touch "$root/blob.down"
+decide "$page_approve"
+assert_eq "$rc" "1" "page approve with the blob unreadable: exit code"
+case "$(cat "$root/err")" in *"could not read $FILE at head1111"*) ;; *) echo "FAIL: page approve with the blob unreadable: stderr '$(cat "$root/err")'"; fail=1 ;; esac
+[ ! -e "$log" ] || { echo "FAIL: page approve with the blob unreadable: something was logged"; fail=1; }
+[ ! -e "$dir/refused.json" ] || { echo "FAIL: page approve with the blob unreadable: refused.json was written"; fail=1; }
+rm -f "$root/blob.down"
+
+# A queue whose head read lagged (queued at an old head, the head then caught up, the blob unchanged) passes.
+printf 'head0000\n' >"$root/head"
+queue page "$repo" "Approve the page Fix a slow build" "$FILE" --pr "$PR" --notes "$PAGE_NOTES" --description "$DESC"
+assert_eq "$(jq -r '.prHead' "$dir/item.json")" "head0000" "page lagged queue: item.json"
+printf 'head1111\n' >"$root/head"
+decide "$page_approve"
+assert_eq "$rc" "0" "page approve after the head caught up: exit code"
+assert_eq "$(jq -r '.head' "$root/out")" "head1111" "page approve after the head caught up: the head read"
+rm -f "$log"
+
+# Another page's commit moves the head and leaves this page's blob: the approve passes and names the new head.
 printf 'head1111\n' >"$root/head"
 queue page "$repo" "Approve the page Fix a slow build" "$FILE" --pr "$PR" --notes "$PAGE_NOTES" --description "$DESC"
 assert_eq "$(jq -r '.prHead' "$dir/item.json")" "head1111" "page requeue: item.json"
+printf 'head2222\n' >"$root/head"
 decide "$page_approve"
 assert_eq "$rc" "0" "page approve: exit code"
 assert_eq "$(cat "$root/out")" \
   "$(jq -cn --arg c "$approved_commit" --arg b "$approved_blob" --arg f "$FILE" --arg pr "$PR" \
-    '{decision: "approve", file: $f, commit: $c, blob: $b, pr: $pr, head: "head1111", calls: [{id: "D1", choice: "Keep the author'"'"'s wording"}, {id: "Q1", choice: "Keep it"}],
+    '{decision: "approve", file: $f, commit: $c, blob: $b, pr: $pr, head: "head2222", calls: [{id: "D1", choice: "Keep the author'"'"'s wording"}, {id: "Q1", choice: "Keep it"}],
       comments: [], threads: []}')" "page approve: stdout"
 assert_eq "$(wc -l <"$log")" "1" "page approve: one log line"
 assert_eq "$(jq -c '[.kind,.ref,.lane,.verdict,.blob,.commit,.pr,.head,.waived[0].id,.initiative]' "$log")" \
-  "[\"page\",\"sample:$FILE\",\"single\",\"approve\",\"$approved_blob\",\"$approved_commit\",\"$PR\",\"head1111\",\"D1\",null]" "page approve: log line"
+  "[\"page\",\"sample:$FILE\",\"single\",\"approve\",\"$approved_blob\",\"$approved_commit\",\"$PR\",\"head2222\",\"D1\",null]" "page approve: log line"
 page_id=$(basename "$dir")
 grep -Fxq "approval-queue: queued $page_id at http://127.0.0.1:7907/item/$page_id" "$root/err" \
   || { echo "FAIL: page: the queued link is not on stderr: $(cat "$root/err")"; fail=1; }
@@ -301,6 +362,18 @@ cmp -s "$dir/diff.patch" "$CHANGE/diff.patch" || { echo "FAIL: change queue: dif
 assert_eq "$(jq -c '[.[].id]' "$dir/notes.json")" '["L1","Q1"]' "change queue: notes.json"
 assert_eq "$(jq -c '[.ref,.head]' "$dir/pr.json")" '["glw907/cairn-cms#77","head3333"]' "change queue: pr.json"
 
+# `notes <id>` on a change item refuses a note whose file the change does not carry, and accepts one it does.
+cid=$(basename "$dir")
+cp "$dir/notes.json" "$root/change-notes.before"
+out=$(bash "$SCRIPT" notes "$cid" "$root/other-file.json" 2>&1 >/dev/null); assert_eq "$?" "2" "change notes <id>: a file the change lacks, exit code"
+case "$out" in *"names files that"*) ;; *) echo "FAIL: change notes <id>: stderr '$out' lacks 'names files that'"; fail=1 ;; esac
+cmp -s "$dir/notes.json" "$root/change-notes.before" || { echo "FAIL: change notes <id>: a refusal changed notes.json"; fail=1; }
+jq '.[0].title = "A new title"' "$CHANGE/notes.json" >"$root/change-new.json"
+out=$(bash "$SCRIPT" notes "$cid" "$root/change-new.json" 2>/dev/null); assert_eq "$?" "0" "change notes <id>: a carried file, exit code"
+assert_eq "$out" "replaced the notes of $cid at http://127.0.0.1:7907/item/$cid" "change notes <id>: stdout"
+assert_eq "$(jq -c . "$dir/notes.json")" "$(jq -c . "$root/change-new.json")" "change notes <id>: notes.json holds the new notes"
+cp "$CHANGE/notes.json" "$dir/notes.json"
+
 # A second command for the same PR waits on neither; it is refused while this one is waiting.
 out=$(bash "$SCRIPT" change "$CPR" Again 2>&1 >/dev/null); assert_eq "$?" "2" "change queued twice: exit code"
 case "$out" in *"already in the waiting item"*) ;; *) echo "FAIL: change queued twice: stderr '$out'"; fail=1 ;; esac
@@ -313,6 +386,9 @@ assert_eq "$rc" "1" "change approve after the PR moved: exit code"
 case "$(cat "$root/err")" in *"moved from head3333 to head4444"*) ;; *) echo "FAIL: change approve after the PR moved: stderr '$(cat "$root/err")'"; fail=1 ;; esac
 assert_eq "$(cat "$root/out")" "" "change approve after the PR moved: no decision printed"
 assert_eq "$(wc -l <"$log")" "$lines" "change approve after the PR moved: nothing logged"
+assert_eq "$(jq -r '.reason' "$dir/refused.json")" \
+  "The pull request moved after it was queued, so the approval wasn't recorded. The session will queue it again." \
+  "change approve after the PR moved: refused.json reason"
 
 printf 'head3333\n' >"$root/head"
 queue change "$CPR" "Retarget two links" --notes "$CHANGE/notes.json"
