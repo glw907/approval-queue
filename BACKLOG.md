@@ -12,6 +12,8 @@
 
 ## Medium
 
+- [ ] **#52** Check a change review's notes before queuing `#improvement` `#approval-queue` `#initiative:docs-system` *(2026-10-25)*
+  `approval-queue notes --check <file> <notes.json>` validates the page and blueprint shape only, so a change review's notes, which carry a `file` beside an index anchor, fail it with "unknown field file", and `kind: "change"` fails as an unknown kind. The only check left was queuing the change itself (cairn batch 5, glw907/cairn-cms#142). Accept a change notes file in `--check`, or add `notes --check --change <owner/repo#n>`, and document the change note's shape, which the blueprint skill describes only in one sentence.
 - [ ] **#51** Say when a refusal appears on the rail, and keep a bad `refused.json` from hiding its row `#improvement` `#approval-queue` `#initiative:docs-system` *(2026-10-25)*
   A refusal shows as "Refused" on the 2-second poll after the toast has said the decision went through, and nothing announces it to a screen reader. A `refused.json` that does not parse throws a `SyntaxError` in `listDecided`, which drops the decided row altogether (svelte review of the batch 4 friction pass).
 
