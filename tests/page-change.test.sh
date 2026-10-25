@@ -176,9 +176,9 @@ git -C "$repo" remote rename keep origin
 
 # A page note's anchor may quote the text; a change note's takes a string only.
 printf 'head1111\n' >"$root/head"
-jq '.[0].anchor = {quote: "x", prefix: "p", suffix: "s"}' "$PAGE_NOTES" >"$root/quote-page.json"
+jq '.[0].anchor = {quote: "Sort the steps by time.", prefix: "p", suffix: "s"}' "$PAGE_NOTES" >"$root/quote-page.json"
 queue page "$repo" T "$FILE" --pr "$PR" --notes "$root/quote-page.json" --description "$DESC"
-assert_eq "$(jq -c '.[0].anchor' "$dir/notes.json")" '{"quote":"x","prefix":"p","suffix":"s"}' "page quote anchor: queued with the notes"
+assert_eq "$(jq -c '.[0].anchor' "$dir/notes.json")" '{"quote":"Sort the steps by time.","prefix":"p","suffix":"s"}' "page quote anchor: queued with the notes"
 kill -TERM "$bgpid"; wait "$bgpid" 2>/dev/null; bgpid=""
 rm -rf "$state/items"
 jq '.[0].anchor = {quote: ""}' "$PAGE_NOTES" >"$root/bad-quote.json"
@@ -361,6 +361,18 @@ cmp -s "$dir/docs/2/old.md" "$CHANGE/base/docs/extend/share-a-draft-preview.md" 
 cmp -s "$dir/diff.patch" "$CHANGE/diff.patch" || { echo "FAIL: change queue: diff.patch is not the PR diff"; fail=1; }
 assert_eq "$(jq -c '[.[].id]' "$dir/notes.json")" '["L1","Q1"]' "change queue: notes.json"
 assert_eq "$(jq -c '[.ref,.head]' "$dir/pr.json")" '["glw907/cairn-cms#77","head3333"]' "change queue: pr.json"
+
+# `notes <id>` on a change item refuses a note whose file the change does not carry, and accepts one it does.
+cid=$(basename "$dir")
+cp "$dir/notes.json" "$root/change-notes.before"
+out=$(bash "$SCRIPT" notes "$cid" "$root/other-file.json" 2>&1 >/dev/null); assert_eq "$?" "2" "change notes <id>: a file the change lacks, exit code"
+case "$out" in *"names files that"*) ;; *) echo "FAIL: change notes <id>: stderr '$out' lacks 'names files that'"; fail=1 ;; esac
+cmp -s "$dir/notes.json" "$root/change-notes.before" || { echo "FAIL: change notes <id>: a refusal changed notes.json"; fail=1; }
+jq '.[0].title = "A new title"' "$CHANGE/notes.json" >"$root/change-new.json"
+out=$(bash "$SCRIPT" notes "$cid" "$root/change-new.json" 2>/dev/null); assert_eq "$?" "0" "change notes <id>: a carried file, exit code"
+assert_eq "$out" "replaced the notes of $cid at http://127.0.0.1:7907/item/$cid" "change notes <id>: stdout"
+assert_eq "$(jq -c . "$dir/notes.json")" "$(jq -c . "$root/change-new.json")" "change notes <id>: notes.json holds the new notes"
+cp "$CHANGE/notes.json" "$dir/notes.json"
 
 # A second command for the same PR waits on neither; it is refused while this one is waiting.
 out=$(bash "$SCRIPT" change "$CPR" Again 2>&1 >/dev/null); assert_eq "$?" "2" "change queued twice: exit code"

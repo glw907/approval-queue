@@ -138,6 +138,9 @@ jq '.[0].anchor = ""' "$NOTES" >"$root/bad-anchor.json"
 refuse "empty anchor string" "needs an anchor string" "$repo" T "$FILE" --notes "$root/bad-anchor.json" --description "$DESC"
 jq '.[0].anchor = 5' "$NOTES" >"$root/bad-anchor.json"
 refuse "anchor not a string" "needs an anchor string" "$repo" T "$FILE" --notes "$root/bad-anchor.json" --description "$DESC"
+# A quote that matches more than once, with no prefix or suffix to tell the places apart, is refused at queueing.
+jq '.[0].anchor = {quote: "the"}' "$NOTES" >"$root/repeat.json"
+refuse "repeated quote" 'the quote "the" occurs' "$repo" T "$FILE" --notes "$root/repeat.json" --description "$DESC"
 jq '.[0].anchor = {quote: "Sort the steps by time.", prefix: "Step", suffix: ""} | .[1].anchor = "sort-steps.heading"' "$NOTES" >"$root/quote-anchor.json"
 queue blueprint "$repo" T "$FILE" --notes "$root/quote-anchor.json" --description "$DESC"
 assert_eq "$(jq -c '.[0].anchor' "$dir/notes.json")" '{"quote":"Sort the steps by time.","prefix":"Step","suffix":""}' "quote anchor: queued with the notes"
@@ -292,6 +295,44 @@ assert_eq "$(jq -r '.amends' "$root/out")" "$prev_blob" "amend: the printed appr
 # `anchors` prints a file's heading anchors by cairn's slug rule.
 printf '## Set a section'"'"'s starting state\n\n- A bullet.\n' >"$root/heading.md"
 assert_eq "$(bash "$SCRIPT" anchors "$root/heading.md")" "$(printf 'set-a-sections-starting-state.heading\tSet a section'"'"'s starting state')" "anchors: the apostrophe example"
+
+# `notes --check` runs the queue-time notes checks on one document and queues nothing.
+rm -rf "$state/items"
+notes_check() { bash "$SCRIPT" notes --check "$@" >"$root/nc.out" 2>"$root/nc.err"; }
+notes_check "$repo/$FILE" "$NOTES"; assert_eq "$?" "0" "notes --check: clean notes exit code"
+assert_eq "$(cat "$root/nc.out" "$root/nc.err")" "" "notes --check: clean notes print nothing"
+notes_check "$repo/$FILE" "$root/bad.json"; assert_eq "$?" "2" "notes --check: a shape defect exits 2"
+grep -qF 'has an unknown field extra' "$root/nc.err" || { echo "FAIL: notes --check: shape defect not named: $(cat "$root/nc.err")"; fail=1; }
+notes_check "$repo/$FILE" "$root/repeat.json"; assert_eq "$?" "2" "notes --check: a repeated quote exits 2"
+grep -qF 'note C1: the quote "the" occurs' "$root/nc.err" || { echo "FAIL: notes --check: repeated quote not named: $(cat "$root/nc.err")"; fail=1; }
+notes_check "$repo/$FILE" "$root/none.json"; assert_eq "$?" "2" "notes --check: a missing notes file exits 2"
+notes_check "$root/none.md" "$NOTES"; assert_eq "$?" "2" "notes --check: a missing document exits 2"
+assert_eq "$(compgen -G "$state/items/*" | wc -l)" "0" "notes --check: queues nothing"
+
+# `notes <id>` replaces a waiting item's notes and changes nothing else; any refusal leaves notes.json alone.
+queue blueprint "$repo" T "$FILE" --notes "$NOTES" --description "$DESC"
+nid=$(basename "$dir")
+cp "$dir/item.json" "$root/item.before"
+cp "$dir/notes.json" "$root/notes.before"
+jq '.[0].title = "A new title"' "$NOTES" >"$root/new.json"
+out=$(bash "$SCRIPT" notes "$nid" "$root/new.json" 2>"$root/nc.err"); assert_eq "$?" "0" "notes <id>: exit code"
+assert_eq "$out" "replaced the notes of $nid at http://127.0.0.1:7907/item/$nid" "notes <id>: stdout"
+assert_eq "$(jq -c . "$dir/notes.json")" "$(jq -c . "$root/new.json")" "notes <id>: notes.json holds the new notes"
+cmp -s "$dir/item.json" "$root/item.before" || { echo "FAIL: notes <id>: item.json changed"; fail=1; }
+kill -0 "$bgpid" 2>/dev/null || { echo "FAIL: notes <id>: the waiter is gone"; fail=1; }
+cp "$dir/notes.json" "$root/notes.before"
+for case in "bad id|nope|$root/new.json|is not an item id" "unknown id|20200101T000000-1|$root/new.json|no item 20200101T000000-1" \
+  "bad notes|$nid|$root/bad.json|does not match the notes shape" "repeated quote|$nid|$root/repeat.json|the quote \"the\" occurs"; do
+  IFS='|' read -r label tid tfile want <<<"$case"
+  out=$(bash "$SCRIPT" notes "$tid" "$tfile" 2>&1 >/dev/null); code=$?
+  assert_eq "$code" "2" "notes <id>: $label exit code"
+  case "$out" in *"$want"*) ;; *) echo "FAIL: notes <id>: $label: stderr '$out' lacks '$want'"; fail=1 ;; esac
+  cmp -s "$dir/notes.json" "$root/notes.before" || { echo "FAIL: notes <id>: $label changed notes.json"; fail=1; }
+done
+decide '{"decision":"reject","note":"Done."}'
+out=$(bash "$SCRIPT" notes "$nid" "$root/new.json" 2>&1 >/dev/null); assert_eq "$?" "2" "notes <id>: a decided item exits 2"
+case "$out" in *"is decided"*) ;; *) echo "FAIL: notes <id>: decided: stderr '$out'"; fail=1 ;; esac
+cmp -s "$dir/notes.json" "$root/notes.before" || { echo "FAIL: notes <id>: a decided item's notes changed"; fail=1; }
 
 live_leak
 [ "$fail" -eq 0 ] && echo "blueprint.test.sh: ok"
