@@ -90,7 +90,7 @@ the filter for as long as it is mounted, unless `focusKey` is false.
 				bind:value={term}
 				onkeydown={onFilterKey}
 			/>
-			<kbd class="kbd kbd-xs desk-kbd desk-sk">/</kbd>
+			{#if focusKey}<kbd class="kbd kbd-xs desk-kbd desk-sk" aria-hidden="true">/</kbd>{/if}
 		</label>
 		<button type="button" class="btn btn-sm btn-ghost" onclick={toggleAll}>
 			{allOpen ? 'Close all groups' : 'Open all groups'}

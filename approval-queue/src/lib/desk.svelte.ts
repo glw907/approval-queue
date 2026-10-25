@@ -17,14 +17,15 @@ export interface OutlineEntry {
 	go: () => void;
 }
 
+/** How long a plain toast stays, and one that carries Undo. */
+export const FLASH_MS = 3200;
+export const FLASH_UNDO_MS = 10000;
+
 /**
  * State the layout, the open item, and the key handler share. The layout owns the keys and the
  * toast; the item panel registers the handlers that act on its own form and clears them when the
  * item changes. Only client code writes it, so one instance serves every request.
  */
-/** How long a plain toast stays, and one that carries Undo. */
-export const FLASH_MS = 3200;
-export const FLASH_UNDO_MS = 10000;
 
 class Desk {
 	singleKeys = $state(true);
@@ -89,7 +90,10 @@ class Desk {
 	 */
 	flash(text: string, undo?: () => void) {
 		this.#flashHold?.cancel();
-		this.#flashPausers.clear();
+		// The toast's element stays mounted across messages, so focus on its Undo carries over to the
+		// new clock; a pointer must move again to pause it. Without an Undo, the focused button goes.
+		this.#flashPausers.delete('pointer');
+		if (!undo) this.#flashPausers.delete('focus');
 		this.toast = text;
 		this.toastUndo = undo ?? null;
 		this.announce(text);
@@ -99,6 +103,13 @@ class Desk {
 				if (this.toast === text) this.toast = null;
 			}
 		});
+		if (this.#flashPausers.size) this.#flashHold.pause();
+	}
+
+	/** A toast leaves without a pointerleave or focusout, so both pauses end with it. */
+	releaseFlash() {
+		this.resumeFlash('pointer');
+		this.resumeFlash('focus');
 	}
 
 	/** Stops the flash toast's clock; `by` names the pointer or focus, so each resumes only its own. */

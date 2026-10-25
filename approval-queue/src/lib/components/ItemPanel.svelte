@@ -23,7 +23,7 @@ for that save first, and closing the tab then asks before leaving.
 	import { deserialize, enhance, type SubmitFunction } from '$app/forms';
 	import { beforeNavigate, goto } from '$app/navigation';
 	import { tick, untrack } from 'svelte';
-	import { age } from '#lib/board.ts';
+	import { age, spokenAge } from '#lib/board.ts';
 	import { fingerprint, gate } from '#lib/cards.ts';
 	import { setDrawer } from '#lib/components/frame/drawers.ts';
 	import { desk, type OutlineEntry } from '#lib/desk.svelte.ts';
@@ -915,12 +915,17 @@ for that save first, and closing the tab then asks before leaving.
 	{#snippet header()}
 		{#if packet}
 			<!-- A packet stored before titles can carry a long one-sentence headline. -->
-			<FrameHeader headlineText={packet.headline}>
-				{#snippet crumb()}
-					<a href="/">Board</a><span aria-hidden="true">/</span><span>Packet</span>
-					{#if packet.meta.initiativeTitle}<span aria-hidden="true">/</span><span>{packet.meta.initiativeTitle}</span>{/if}
-					{#if packetRepos}<span aria-hidden="true">/</span><span>{packetRepos}</span>{/if}
-					<span aria-hidden="true">·</span><span>Waiting <time datetime={packet.meta.created}>{age(packet.meta.created)}</time></span>
+			<FrameHeader
+				headlineText={packet.headline}
+				crumbs={[
+					{ text: 'Board', href: '/' },
+					{ text: 'Packet' },
+					...(packet.meta.initiativeTitle ? [{ text: packet.meta.initiativeTitle }] : []),
+					...(packetRepos ? [{ text: packetRepos }] : [])
+				]}
+			>
+				{#snippet state()}
+					<span>Waiting <time datetime={packet.meta.created}><span aria-hidden="true">{age(packet.meta.created)}</span><span class="sr-only">{spokenAge(packet.meta.created)}</span></time></span>
 					{#if packet.revision}<span class="badge badge-sm badge-outline rule-badge tone-info">Revision {packet.revision}</span>{/if}
 					{#if packet.irreversible}
 						<span class="badge badge-sm badge-outline rule-badge tone-error gap-1"><PacketIcon name="lock" class="size-3.5" />Irreversible</span>
@@ -936,9 +941,12 @@ for that save first, and closing the tab then asks before leaving.
 			{#snippet paragraphs()}
 				{#each docItem.description ?? [] as paragraph, i (i)}<p><Prose text={paragraph} /></p>{/each}
 			{/snippet}
-			<FrameHeader headlineText={docItem.meta.title} description={docItem.description?.length ? paragraphs : undefined}>
-				{#snippet crumb()}
-					<a href="/">Board</a><span aria-hidden="true">/</span><span>{docItem.kind === 'page' ? 'Page' : 'Blueprint'}</span><span aria-hidden="true">/</span><span>{docItem.meta.repo}</span>
+			<FrameHeader
+				headlineText={docItem.meta.title}
+				description={docItem.description?.length ? paragraphs : undefined}
+				crumbs={[{ text: 'Board', href: '/' }, { text: docItem.kind === 'page' ? 'Page' : 'Blueprint' }, { text: docItem.meta.repo }]}
+			>
+				{#snippet state()}
 					{#if docItem.revision}<span class="badge badge-sm badge-outline rule-badge tone-info">Revision {docItem.revision}</span>{/if}
 					{#if docItem.amend}<span class="badge badge-sm badge-outline rule-badge tone-info">Amends the approved version</span>{/if}
 					{@render itemState()}
@@ -947,9 +955,8 @@ for that save first, and closing the tab then asks before leaving.
 				{#snippet lede()}{docLede}{/snippet}
 			</FrameHeader>
 		{:else if change}
-			<FrameHeader headlineText={CHANGE_HEADLINE}>
-				{#snippet crumb()}
-					<a href="/">Board</a><span aria-hidden="true">/</span><span>Change</span><span aria-hidden="true">/</span><span>{change.ref}</span>
+			<FrameHeader headlineText={CHANGE_HEADLINE} crumbs={[{ text: 'Board', href: '/' }, { text: 'Change' }, { text: change.ref }]}>
+				{#snippet state()}
 					{@render itemState()}
 				{/snippet}
 				{#snippet headline()}{CHANGE_HEADLINE}{/snippet}
@@ -957,21 +964,23 @@ for that save first, and closing the tab then asks before leaving.
 			</FrameHeader>
 		{:else if data.kind === 'pr' || data.kind === 'design' || data.kind === 'triage'}
 			{@const item = data}
-			<FrameHeader headlineText={item.headlineHtml}>
-				{#snippet crumb()}
-					<a href="/">Board</a><span aria-hidden="true">/</span>
-					{#if item.kind === 'pr'}
-						<span>Pull request</span><span aria-hidden="true">/</span><span>{subject()}</span>
-						{#if item.link}
-							<span aria-hidden="true">/</span><span>{item.link.head} → {item.link.base}</span>
-							<a href={item.link.url} target="_blank" rel="noopener noreferrer">GitHub<span class="sr-only"> (opens in a new tab)</span></a>
-						{/if}
+			<FrameHeader
+				headlineText={item.headlineHtml.replace(/<[^>]*>/g, '')}
+				crumbs={[
+					{ text: 'Board', href: '/' },
+					...(item.kind === 'pr'
+						? [{ text: 'Pull request' }, { text: subject() ?? '' }]
+						: item.kind === 'design'
+							? [{ text: 'Design' }, { text: item.meta.repo.split('/').pop() ?? '' }, ...(item.meta.file ? [{ text: item.meta.file }] : [])]
+							: [{ text: 'Triage' }, { text: item.meta.title }])
+				]}
+			>
+				{#snippet state()}
+					{#if item.kind === 'pr' && item.link}
+						<span>{item.link.head} → {item.link.base}</span>
+						<a href={item.link.url} target="_blank" rel="noopener noreferrer">GitHub<span class="sr-only"> (opens in a new tab)</span></a>
 					{:else if item.kind === 'design'}
-						<span>Design</span><span aria-hidden="true">/</span><span>{item.meta.repo.split('/').pop()}</span>
-						{#if item.meta.file}<span aria-hidden="true">/</span><span>{item.meta.file}</span>{/if}
-						<span aria-hidden="true">·</span><span>{item.minutes} min read</span>
-					{:else}
-						<span>Triage</span><span aria-hidden="true">/</span><span>{item.meta.title}</span>
+						<span>{item.minutes} min read</span>
 					{/if}
 					{@render itemState()}
 				{/snippet}
@@ -1073,7 +1082,7 @@ for that save first, and closing the tab then asks before leaving.
 					{#snippet note()}
 						{#if desk.noteOpen}
 							<fieldset class="sendback fieldset">
-								<label for="note" class="lead">What should the {docReviews.length ? 'author' : 'session'} change?</label>
+								<legend class="fieldset-legend lead">What should the {docReviews.length ? 'author' : 'session'} change?</legend>
 								<p class="muted" id="note-hint">
 									{packet
 										? 'Your verdicts go with this note.'
@@ -1091,13 +1100,14 @@ for that save first, and closing the tab then asks before leaving.
 									id="note"
 									name="note"
 									class="textarea desk-field w-full"
+									aria-label="Your note"
 									aria-describedby="note-hint"
 									bind:this={noteField}
 									bind:value={noteText}
 								></textarea>
 								<div class="acts">
 									<button type="button" class="btn" aria-keyshortcuts="Escape" onclick={closeNote}>Cancel <kbd aria-hidden="true">Esc</kbd></button>
-									<button class="btn btn-primary" formaction="?/reject" aria-keyshortcuts="Control+Enter" bind:this={sendButton}>
+									<button class="btn btn-primary" formaction="?/reject" aria-keyshortcuts="Control+Enter Meta+Enter" bind:this={sendButton}>
 										Send back <kbd aria-hidden="true">Ctrl</kbd><kbd aria-hidden="true">Enter</kbd>
 									</button>
 								</div>
@@ -1165,7 +1175,7 @@ for that save first, and closing the tab then asks before leaving.
 							<button
 								type="submit"
 								class="btn btn-primary bar-approve"
-								aria-keyshortcuts="Control+Enter"
+								aria-keyshortcuts="Control+Enter Meta+Enter"
 								formaction="?/approve"
 								bind:this={approveButton}
 								aria-describedby="bar-state"
@@ -1181,7 +1191,7 @@ for that save first, and closing the tab then asks before leaving.
 							<button
 								type="submit"
 								class="btn btn-primary bar-approve"
-								aria-keyshortcuts="Control+Enter"
+								aria-keyshortcuts="Control+Enter Meta+Enter"
 								formaction="?/approve"
 								bind:this={approveButton}
 								aria-describedby="bar-state"
@@ -1194,14 +1204,14 @@ for that save first, and closing the tab then asks before leaving.
 								Approve the {data.kind === 'page' ? 'page' : data.kind === 'change' ? 'change' : 'blueprint'} <kbd aria-hidden="true">Ctrl</kbd><kbd aria-hidden="true">Enter</kbd>
 							</button>
 						{:else if data.kind === 'triage'}
-							<button class="btn btn-primary" aria-keyshortcuts="Control+Enter" bind:this={submitButton}>
+							<button class="btn btn-primary" aria-keyshortcuts="Control+Enter Meta+Enter" bind:this={submitButton}>
 								Submit calls <kbd aria-hidden="true">Ctrl</kbd><kbd aria-hidden="true">Enter</kbd>
 							</button>
 						{:else if !decided.sendBack}
 							<button
 								type="submit"
 								class="btn btn-primary bar-approve"
-								aria-keyshortcuts="Control+Enter"
+								aria-keyshortcuts={desk.singleKeys ? 'Control+Enter Meta+Enter a' : 'Control+Enter Meta+Enter'}
 								formaction="?/approve"
 								bind:this={approveButton}
 								aria-describedby="bar-state"
