@@ -2,8 +2,8 @@
 The empty state, shown when `/` finds nothing waiting. It counts 30 seconds with Keep focused,
 then calls `window.close()`, which works only while the tab holds one history entry; every
 navigation in the desk replaces its entry for that reason. The saved `desk.autoClose` setting
-turns the count off, and turning it back on restarts the count. The countdown line shows only once
-the saved setting is read, so no frame says the tab closes when auto-close is off. The page
+turns the count off, and turning it back on restarts the count. The countdown line, the Keep button, and
+the toggle show only once the saved setting is read, so no frame says the tab closes when auto-close is off. The page
 unmounts it when an item arrives, which cancels the count.
 -->
 <script lang="ts">
@@ -31,7 +31,7 @@ unmounts it when an item arrives, which cancels the count.
 		if (document.activeElement === document.body) document.getElementById('main')?.focus();
 	}
 
-	function start(focusKeep = true) {
+	async function start(focusKeep = true) {
 		secs = SECONDS;
 		phase = 'counting';
 		desk.announce(
@@ -45,7 +45,11 @@ unmounts it when an item arrives, which cancels the count.
 			}
 		});
 		// A script focus draws no ring when the last focus was not a keyboard focus, and the ring is the cue.
-		if (focusKeep) keep?.focus({ focusVisible: true });
+		if (focusKeep) {
+			// Keep renders once the saved setting is read, which happens just after the first start.
+			await tick();
+			keep?.focus({ focusVisible: true });
+		}
 	}
 
 	onMount(() => {
@@ -54,7 +58,7 @@ unmounts it when an item arrives, which cancels the count.
 		} catch {
 			// Without storage the setting stays on.
 		}
-		if (autoClose) start();
+		if (autoClose) void start();
 		else phase = 'off';
 		ready = true;
 		return () => hold?.cancel();
@@ -68,7 +72,7 @@ unmounts it when an item arrives, which cancels the count.
 		}
 		if (!autoClose && phase === 'counting') stop('Auto-close is off. This tab stays open.', 'off');
 		// The reader is on the toggle, so the restart leaves focus there.
-		else if (autoClose && phase !== 'counting' && phase !== 'closing') start(false);
+		else if (autoClose && phase !== 'counting' && phase !== 'closing') void start(false);
 	}
 
 	function onKeydown(e: KeyboardEvent) {
@@ -101,7 +105,7 @@ unmounts it when an item arrives, which cancels the count.
 			{/if}
 		</p>
 		<div class="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2">
-			{#if phase === 'counting'}
+			{#if ready && phase === 'counting'}
 				<button
 					type="button"
 					class="btn btn-sm btn-ghost -ml-3"
@@ -112,15 +116,17 @@ unmounts it when an item arrives, which cancels the count.
 					Keep this tab open <kbd class="kbd kbd-xs desk-kbd" aria-hidden="true">Esc</kbd>
 				</button>
 			{/if}
-			<label class="flex cursor-pointer items-center gap-2 text-sm">
-				<input
-					type="checkbox"
-					class="toggle toggle-sm toggle-primary"
-					bind:checked={autoClose}
-					onchange={saveAutoClose}
-				/>
-				Close when empty
-			</label>
+			{#if ready}
+				<label class="flex cursor-pointer items-center gap-2 text-sm">
+					<input
+						type="checkbox"
+						class="toggle toggle-sm toggle-primary"
+						bind:checked={autoClose}
+						onchange={saveAutoClose}
+					/>
+					Close when empty
+				</label>
+			{/if}
 		</div>
 		<p class="desk-muted mt-8 text-sm">New items open in this tab.</p>
 	</div>

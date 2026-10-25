@@ -473,6 +473,27 @@ function openableFolds(view: EditorView) {
 	}
 }
 
+let cancelCorrection: (() => void) | null = null;
+
+/**
+ * Runs `correct` once the smooth scroll ends. Only the latest jump keeps its correction, so two quick
+ * jumps never stack listeners; the timer is the backstop for a scroll that never fires `scrollend`.
+ */
+function pendCorrection(correct: () => void) {
+	cancelCorrection?.();
+	const done = () => {
+		cancelCorrection?.();
+		correct();
+	};
+	const timer = setTimeout(done, 1000);
+	window.addEventListener('scrollend', done);
+	cancelCorrection = () => {
+		clearTimeout(timer);
+		window.removeEventListener('scrollend', done);
+		cancelCorrection = null;
+	};
+}
+
 /**
  * Scrolls the window so `pos` sits below the sticky header, then puts the caret there or selects `to`.
  * `lineBlockAt` is exact only for a line inside the rendered viewport and an estimate beyond it. A
@@ -481,6 +502,7 @@ function openableFolds(view: EditorView) {
  * the line's real top and corrects any difference.
  */
 export function jumpTo(view: EditorView, pos: number, to = pos) {
+	cancelCorrection?.();
 	const folded = collapsedStart(view.state, pos);
 	if (folded !== null) view.dispatch({ effects: uncollapseUnchanged.of(folded) });
 	const smooth = !matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -496,7 +518,7 @@ export function jumpTo(view: EditorView, pos: number, to = pos) {
 					if (Math.abs(off) > 4) window.scrollTo({ top: window.scrollY + off, behavior: 'auto' });
 				}
 			});
-		if (smooth) window.addEventListener('scrollend', correct, { once: true });
+		if (smooth && Math.abs(top - window.scrollY) >= 1) pendCorrection(correct);
 		else correct();
 	}
 	view.focus();

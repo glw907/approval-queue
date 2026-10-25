@@ -374,7 +374,7 @@ async function loadItem(params: { id: string }) {
 						link: part.pr ? { url: part.pr.url, head: part.pr.headRefName, base: part.pr.baseRefName } : null,
 						...(part.since && { since: 'patch' in part.since ? { groups: fileGroups(part.since.patch) } : part.since })
 					}),
-					...(part.kind === 'design' && { doc: part.doc, docHtml: render(withoutBrief(part.doc ?? '')) })
+					...(part.kind === 'design' && { docHtml: render(withoutBrief(part.doc ?? '')) })
 				};
 			}),
 			fingerprint: packetFingerprint(parts, packet.asks),
