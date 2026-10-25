@@ -11,6 +11,15 @@
 
 ## Medium
 
+- [ ] **#51** Say when a refusal appears on the rail, and keep a bad `refused.json` from hiding its row `#improvement` `#approval-queue` `#initiative:docs-system` *(2026-10-25)*
+  A refusal shows as "Refused" on the 2-second poll after the toast has said the decision went through, and nothing announces it to a screen reader. A `refused.json` that does not parse throws a `SyntaxError` in `listDecided`, which drops the decided row altogether (svelte review of the batch 4 friction pass).
+
+- [ ] **#50** A `collect` of an approve that is already logged can write `refused.json` beside it `#bug` `#approval-queue` `#initiative:docs-system` *(2026-10-25)*
+  `collect` runs the page or head check before `append_log` looks for an existing line. If the page changed after the first command logged the approve, the second writes `refused.json` and exits 1, and the rail shows "Refused" for a decision that was recorded. Skip the check, or the file, when the log already holds the item's id (task-scope review of the batch 4 friction pass).
+
+- [ ] **#49** A refusal the command makes as a tool failure leaves the item in `pending`, and `withdraw` refuses a decided item `#improvement` `#approval-queue` `#initiative:docs-system` *(2026-10-25)*
+  A page whose worktree was removed, a packet decision that does not match its packet, and a `gh` that cannot answer write no `refused.json`, so each stays in `pending` until a session collects it or the item is cleared by hand. `withdraw` exits 2 on a decided item, so a decided item no session wants has no command to clear it.
+
 - [ ] **#48** Keep one PR's page approvals from voiding each other `#bug` `#approval-queue` `#initiative:docs-system` *(2026-10-25)*
   Three `page` items queued on glw907/cairn-cms#140 were all approved around 08:30, and all three were refused with "moved ... while it waited, so the approval does not cover it". The first two moved because the later pages' commits rode the same PR. The third moved because `pr_head` read GitHub about five seconds after a push, before the head updated. An approval cost three re-reviews. For a `page` item, check that the page's blob is unchanged instead of the PR head, or check the head against the local commit given at queue time, and show the refusal on the screen, not only on stderr.
   Record: ~/Projects/initiatives/docs-system/research/2026-10-24-extend-blueprints-batch-4/friction.md (P12)
