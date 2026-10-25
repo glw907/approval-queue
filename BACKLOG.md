@@ -2,7 +2,26 @@
 
 > Project issue tracker. Managed by `/log-issue`.
 
+## High
+
+- [ ] **#44** Give a decision whose session ended an owner `#bug` `#approval-queue` `#initiative:docs-system` *(2026-10-24)*
+  Two page approvals (Content model, Arrange the admin sidebar, 2026-10-24 16:26) landed in decision files after their queueing session ended; the follow-up (mark glw907/cairn-cms#139 ready, CI, merge) has no owner. `collect` covers a deferred item, but an approve with no live session is a file in a folder.
+  Add an `approval-queue pending` listing of decided items with no recorded follow-up, or a decision hook that runs a named command.
+  Record: ~/Projects/initiatives/docs-system/research/2026-10-24-extend-blueprints-batch-4-friction.md (approval-queue 1)
+
 ## Medium
+
+- [ ] **#47** Add a notes check before queueing `#improvement` `#approval-queue` `#initiative:docs-system` *(2026-10-24)*
+  No `approval-queue notes --check <file>` exists; a malformed note, or a quote anchor matching more than once, shows up only at queue time or in the review. One theme note quoted `cairn-audit`, which occurs many times; caught by hand.
+  Record: ~/Projects/initiatives/docs-system/research/2026-10-24-extend-blueprints-batch-4-friction.md (approval-queue 5)
+
+- [ ] **#46** Fix the H1 anchor slug in `approval-queue anchors` `#bug` `#approval-queue` `#initiative:docs-system` *(2026-10-24)*
+  It prints a blueprint's H1 as `<slug>-1.heading` on all three batch 4 pages, as if a heading with the same text came first. The front matter's `page:` title is the likely cause.
+  Record: ~/Projects/initiatives/docs-system/research/2026-10-24-extend-blueprints-batch-4-friction.md (approval-queue 4)
+
+- [ ] **#45** Amend an undecided item's notes in place `#improvement` `#approval-queue` `#initiative:docs-system` *(2026-10-24)*
+  A misplaced note anchor took a withdraw and a full requeue, which resets the item's id and URL.
+  Record: ~/Projects/initiatives/docs-system/research/2026-10-24-extend-blueprints-batch-4-friction.md (approval-queue 3)
 
 - [x] **#29** `tests/packet.test.sh` fails when another session logs a decision mid-gate `#bug` `#approval-queue` `#initiative:approval-queue` *(2026-10-24)*
   The test guards the live queue by comparing the size of `~/.local/state/approval-queue/decisions.jsonl` before and after the run, so any real decision logged during the gate reads as a leak. It failed three times this way in the send-back revisions pass. Assert instead that no line the test wrote (its packet ids or refs) appears in the live log.
@@ -87,6 +106,7 @@
 
 - [ ] **#40** `approval-queue withdraw` prints "No such file" from `proc_stat` when the waiter is gone `#bug` `#approval-queue` `#initiative:approval-queue` *(2026-10-25)*
   `read -r s <"/proc/$1/stat" 2>/dev/null` fails its redirect before the `2>/dev/null` applies, so bash prints `line 25: /proc/<pid>/stat: No such file or directory`. The result is right; the line is noise. Group the read in braces with the redirect outside.
+  Batch 4: `withdraw` printed `line 25: /proc/511192/stat: No such file or directory` and nothing else, though the item was gone (404); it should print "withdrew <id>". Record: ~/Projects/initiatives/docs-system/research/2026-10-24-extend-blueprints-batch-4-friction.md (approval-queue 2)
 
 - [ ] **#39** A design's table renders without cell padding or borders, and its headings do not nest in a packet part `#bug` `#approval-queue` `#initiative:approval-queue` *(2026-10-25)*
   The columns of a rendered design table run together on the design screen and in a packet part (`DesignView`'s `.desk-read` has no table rule). An embedded design's `##` headings render as `h2` inside a part's Why, so the outline jumps up, and the prose there inherits the Why body's muted colour.
