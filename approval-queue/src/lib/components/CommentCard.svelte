@@ -98,7 +98,7 @@ With comments read only, as on a decided item, the card shows no actions.
 		<div role="group" class="note done collapsed" id="thread-{t.id}" tabindex="-1" aria-label="Resolved comment">
 			<p class="nh">
 				<span class="kind">Resolved.</span><span class="outcome">{t.quote}</span>
-				{#if actions}<button type="button" class="linkbtn reopen" onclick={() => void review.resolveThread(t.id, false)}>Reopen</button>{/if}
+				{#if actions}<button type="button" class="btn btn-link btn-sm linkbtn reopen" onclick={() => void review.resolveThread(t.id, false)}>Reopen</button>{/if}
 			</p>
 		</div>
 	{:else}

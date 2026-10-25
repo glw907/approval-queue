@@ -37,7 +37,7 @@
 	}
 }
 /* Rule 1: state changes cross-fade in quick time. */
-:is(.btn, .linkbtn, .rail a.q, .rail-keys, .rv-list a, .drawer-x, .appbtn, summary) {
+:is(.btn, .rail a.q, .rv-list a, summary) {
 	transition:
 		color var(--motion-quick) var(--motion-ease),
 		background-color var(--motion-quick) var(--motion-ease),
@@ -118,12 +118,50 @@ html {
 	color: var(--color-muted);
 	padding: 0 4px 10px;
 }
-.rail .rail-group,
 .rail .group {
 	font-weight: 600;
 	font-size: 1rem;
 	padding: 10px 4px 2px;
 	margin: 0;
+}
+/* The Board row leads the rail; its active fill matches the current packet's. */
+.rail .board-btn {
+	--btn-fg: var(--color-base-content);
+	margin-top: 4px;
+}
+.rail .board-btn.btn-active {
+	--btn-bg: var(--color-base-300);
+	--btn-border: var(--color-base-300);
+}
+.rail .board-btn svg {
+	width: 16px;
+	height: 16px;
+	fill: none;
+	stroke: currentColor;
+	stroke-width: 2;
+	stroke-linecap: round;
+}
+/* An initiative's group sits in a box, as the prototype's drawer sets it (its .init-region). */
+.rail .init-region {
+	border: 1px solid var(--color-base-300);
+	border-radius: var(--radius-box);
+	background-color: color-mix(in oklab, var(--color-base-100) 55%, var(--color-base-200));
+	padding: 0 6px 6px;
+	margin-top: 8px;
+	min-width: 0;
+}
+.rail .init-region .group {
+	font-size: 0.95rem;
+	padding-top: 10px;
+}
+/* The repo names the list under it in a faint mono label. */
+.rail .repo-title {
+	margin: 0;
+	padding: 6px 4px 2px;
+	font-family: var(--font-mono);
+	font-size: 0.72rem;
+	font-weight: 500;
+	color: var(--color-muted);
 }
 .rail .rail-list {
 	list-style: none;
@@ -148,7 +186,12 @@ html {
 }
 .rail a.q:hover,
 .rail a.q.on {
-	background: var(--tint);
+	background: var(--color-base-300);
+}
+/* An orphaned item's line: no session waits on it, in the warning ink (6:1 on the group's fill). */
+.rail a.q .orphan {
+	font-size: 0.8rem;
+	color: var(--cairn-warning-ink);
 }
 .rail a.q .meta {
 	font-size: 0.85rem;
@@ -157,7 +200,8 @@ html {
 	justify-content: space-between;
 	gap: 8px;
 }
-.rail a.q.on .meta {
+.rail a.q.on .meta,
+.rail a.q:hover .meta {
 	color: color-mix(in oklab, var(--color-muted) 70%, var(--color-base-content));
 }
 .rail .dq {
@@ -174,23 +218,22 @@ html {
 	color: var(--cairn-success-ink);
 	flex: none;
 }
+/* A deferred item is set aside, not done: its outcome takes the warning ink, not the approved green. */
+.rail .dq.deferred span:last-child {
+	color: var(--cairn-warning-ink);
+}
 .rail li.dq span:first-child {
 	min-width: 0;
 	overflow-wrap: anywhere;
 }
 .rail-keys {
+	--btn-fg: var(--color-muted);
 	margin-top: 18px;
 	justify-self: start;
-	font: inherit;
-	font-size: 0.88rem;
-	color: var(--color-muted);
-	background: none;
-	border: 0;
-	padding: 4px;
-	cursor: pointer;
+	font-weight: 400;
 }
 .rail-keys:hover {
-	color: var(--color-base-content);
+	--btn-fg: var(--color-base-content);
 }
 .shell kbd {
 	font: 0.7rem var(--font-body);
@@ -199,7 +242,7 @@ html {
 	padding: 0 4px;
 }
 /* A key inside a control is plain muted text, as `desk-kbd` draws it; the shortcut sheet keeps its keycaps. */
-.shell :is(.btn, .linkbtn, .rail-keys, .place, .hint) kbd {
+.shell :is(.btn, .place, .hint) kbd {
 	border-color: transparent;
 	padding-inline: 1px;
 	opacity: 0.7;
@@ -208,6 +251,12 @@ html {
 	.shell {
 		grid-template-columns: var(--rail-w) minmax(0, 1fr);
 	}
+}
+
+/* The Board row's key and an ask option's key keep their boxed keycap, as the prototype draws them. */
+.shell :is(.board-btn, .ask-option) kbd {
+	border-color: color-mix(in oklab, currentColor 30%, transparent);
+	opacity: 0.85;
 }
 
 /* Drawers and the app bar are off above their breakpoints. */
@@ -225,21 +274,16 @@ html {
 	display: none;
 }
 .drawer-x {
+	--btn-fg: var(--color-muted);
 	position: absolute;
 	top: 10px;
 	right: 10px;
 	width: 36px;
 	height: 36px;
-	border: 0;
-	border-radius: var(--radius-field);
-	background: transparent;
-	color: var(--color-muted);
-	cursor: pointer;
 	place-items: center;
 }
 .drawer-x:hover {
-	background: var(--color-base-300);
-	color: var(--color-base-content);
+	--btn-fg: var(--color-base-content);
 }
 .drawer-x svg,
 .appbtn svg {
@@ -377,19 +421,18 @@ html {
 	margin-left: 0;
 }
 .place .next-call {
-	color: var(--cairn-warning-ink);
+	--btn-fg: var(--cairn-warning-ink);
 }
 .place .nothing-open {
 	color: var(--cairn-success-ink);
 }
+/* A link that acts: the stock link button, at the text's own size and weight. */
 .linkbtn {
-	font: inherit;
-	color: var(--color-primary);
-	background: none;
-	border: 0;
+	min-height: 0;
+	height: auto;
 	padding: 2px 0;
-	cursor: pointer;
-	text-decoration: underline;
+	font: inherit;
+	font-weight: 400;
 	text-underline-offset: 2px;
 	white-space: nowrap;
 }
@@ -531,6 +574,18 @@ a {
 	padding: 12px 16px;
 	box-shadow: var(--bar-shadow);
 }
+/* In dark the page fill is the bar's own, so the bar lifts by tone (base-200) and a heavier shadow,
+   as the prototype's bar does. */
+[data-theme='survey-dark'] .bar {
+	background: var(--color-base-200);
+	box-shadow: 0 8px 28px -6px rgb(0 0 0 / 0.6), 0 2px 6px -2px rgb(0 0 0 / 0.4);
+}
+@media (prefers-color-scheme: dark) {
+	:root:not([data-theme]) .bar {
+		background: var(--color-base-200);
+		box-shadow: 0 8px 28px -6px rgb(0 0 0 / 0.6), 0 2px 6px -2px rgb(0 0 0 / 0.4);
+	}
+}
 .bar .state {
 	margin-left: auto;
 	text-align: right;
@@ -599,6 +654,9 @@ a {
 	flex: none;
 }
 .sendback {
+	/* The stock fieldset sets a small grid; the note panel keeps the page's size and its own spacing. */
+	display: block;
+	font-size: 1rem;
 	border: 1px solid var(--color-base-300);
 	border-radius: var(--radius-box);
 	background: var(--color-base-100);
@@ -735,6 +793,14 @@ a {
 .frame .bg {
 	max-width: 58ch;
 }
+/* The stock collapse's title and content carry a card's padding; the Background and Why rows are text. */
+.frame :where(.collapse) > :where(.collapse-title) {
+	min-height: 0;
+	padding: 0;
+}
+.frame :where(.collapse) > :where(.collapse-content) {
+	padding: 0;
+}
 .frame .bg > summary {
 	display: flex;
 	gap: 6px;
@@ -770,6 +836,7 @@ a {
 }
 .frame .why > summary {
 	display: inline-flex;
+	justify-self: start;
 	gap: 4px;
 	align-items: center;
 	margin-top: 4px;
@@ -777,6 +844,7 @@ a {
 	color: var(--color-primary);
 }
 .frame .why .why-body {
+	padding: 0;
 	margin: 4px 0 0 18px;
 	font-size: 0.9rem;
 	color: var(--color-muted);
@@ -892,6 +960,8 @@ a {
 	background: var(--color-base-100);
 }
 .frame .seg .btn {
+	--btn-color: transparent;
+	--btn-fg: var(--color-muted);
 	font: 600 0.82rem/1.2 var(--font-body);
 	border: 0;
 	border-left: 1px solid var(--color-base-300);
@@ -899,8 +969,6 @@ a {
 	padding: 7px 11px;
 	min-height: 0;
 	height: auto;
-	background: transparent;
-	color: var(--color-muted);
 	cursor: pointer;
 	white-space: nowrap;
 	box-shadow: none;
@@ -909,21 +977,25 @@ a {
 	border-left: 0;
 }
 .frame .seg .btn:hover {
-	color: var(--color-base-content);
-	background: var(--color-base-200);
+	--btn-color: var(--color-base-200);
+	--btn-fg: var(--color-base-content);
 }
 .frame .seg .btn:checked {
-	background: var(--color-base-300);
-	color: var(--color-base-content);
+	--btn-color: var(--color-base-300);
+	--btn-fg: var(--color-base-content);
 	box-shadow: inset 0 0 0 1px var(--site-field-border);
 }
 .frame .seg.changed .btn:checked {
-	background: var(--color-warning);
-	color: #22262b;
+	--btn-color: var(--color-warning);
+	--btn-fg: #22262b;
 	box-shadow: none;
 }
 .frame .seg .btn:focus-visible {
 	outline-offset: -2px;
+}
+/* A joined segment's focus ring sits above its neighbours, so no sibling's edge cuts it. */
+.join > .join-item:focus-visible {
+	z-index: 1;
 }
 .frame .seg .btn:disabled {
 	cursor: not-allowed;
@@ -1074,18 +1146,14 @@ a {
 		background: var(--color-base-200);
 	}
 	.appbtn {
-		display: inline-flex;
-		align-items: center;
+		--btn-bg: var(--color-base-100);
+		--btn-border: var(--color-base-300);
+		--btn-fg: var(--color-base-content);
 		gap: 8px;
 		min-height: 40px;
 		padding: 0 10px;
-		border: 1px solid var(--color-base-300);
-		border-radius: var(--radius-field);
-		background: var(--color-base-100);
-		color: var(--color-base-content);
-		font: inherit;
 		font-size: 0.95rem;
-		cursor: pointer;
+		font-weight: 400;
 	}
 	.appbtn .count {
 		min-width: 1.4rem;
@@ -1114,7 +1182,8 @@ a {
 @media (max-width: 639.98px) {
 	.bar {
 		display: grid;
-		grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+		/* Send back keeps its one line; Defer takes what is left. */
+		grid-template-columns: max-content minmax(0, 1fr);
 		align-items: stretch;
 		padding: 12px 16px;
 	}
@@ -1134,7 +1203,6 @@ a {
 	}
 	.bar .btn {
 		justify-content: center;
-		white-space: normal;
 		text-align: center;
 	}
 	.bar .s2 {

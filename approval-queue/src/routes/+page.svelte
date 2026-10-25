@@ -4,7 +4,8 @@ nothing waits. The sort comes from the server's cookie read, so the first render
 order; picking a sort writes the cookie and reorders here, and the 2-second poll refreshes the
 rows without moving the reader. Row links replace the history entry, so the empty state's
 `window.close()` keeps working. Each row's one link stretches over the row, so a row is one tab
-stop and the whole row is the target. An item whose decision `held` is counting down or posting
+stop and the whole row is the target; it carries `data-q`, so j and k walk the rows, and its
+description is the row's meta line, then the orphan line when no session waits. An item whose decision `held` is counting down or posting
 is left off, and the empty state shows once nothing else waits. A deferred row sits under
 "Deferred"; an orphaned row says no session is waiting for its answer.
 -->
@@ -57,7 +58,7 @@ is left off, and the empty state shows once nothing else waits. A deferred row s
 				</div>
 				<div class="flex items-center gap-3">
 					<span id="sort-label" class="text-sm font-semibold">Sort</span>
-					<div class="join rounded-field border border-base-300 bg-base-100" role="radiogroup" aria-labelledby="sort-label">
+					<div class="join sort-seg rounded-field border border-base-300 bg-base-100" role="radiogroup" aria-labelledby="sort-label">
 						<input
 							type="radio"
 							name="sort"
@@ -80,6 +81,7 @@ is left off, and the empty state shows once nothing else waits. A deferred row s
 			<div class="mt-4">
 				<!-- svelte-ignore a11y_no_redundant_roles: the phone layout sets display:block, which drops table semantics in some browsers, so the roles restore them -->
 				<table class="table board-table" role="table">
+					<caption class="sr-only">Packets and items waiting for you, grouped by initiative</caption>
 					<!-- svelte-ignore a11y_no_redundant_roles: the phone layout sets display:block, which drops table semantics in some browsers, so the roles restore them -->
 					<thead role="rowgroup">
 						<!-- svelte-ignore a11y_no_redundant_roles: the phone layout sets display:block, which drops table semantics in some browsers, so the roles restore them -->
@@ -100,25 +102,32 @@ is left off, and the empty state shows once nothing else waits. A deferred row s
 										{#if i === 0}{group.title}{:else}<span class="sr-only">{group.title}</span>{/if}
 									</th>
 									<td role="cell" class="align-top">
-										<a class="board-link font-medium" href="/item/{row.id}" data-sveltekit-replacestate>
+										<a
+											class="board-link font-medium"
+											href="/item/{row.id}"
+											data-q
+											data-sveltekit-replacestate
+											aria-describedby={row.orphaned ? `meta-${row.id} orphan-${row.id}` : `meta-${row.id}`}
+										>
 											{row.headline}
 										</a>
-										<div class="desk-muted mt-0.5 flex flex-wrap items-center gap-x-2 text-[0.8rem]">
-											<span>{scent(row)}</span>
+										<div id="meta-{row.id}" class="desk-muted mt-0.5 flex flex-wrap items-center gap-x-2 text-[0.8rem]">
 											{#if row.irreversible}
 												<span class="tone-error inline-flex items-center gap-1 font-semibold">
 													<PacketIcon name="lock" class="size-3.5" />Irreversible
 												</span>
+												<span aria-hidden="true">&middot;</span>
 											{/if}
+											<span>{scent(row)}</span>
 										</div>
 										{#if row.orphaned}
-											<p class="desk-muted mt-0.5 text-[0.8rem]">No session is waiting for this.</p>
+											<p id="orphan-{row.id}" class="desk-muted mt-0.5 text-[0.8rem]">No session is waiting for this.</p>
 										{/if}
 									</td>
 									<td role="cell" class="num align-top">
-										{#if row.single}<span class="desk-muted">&ndash;</span>{:else}<span class={row.asks ? 'font-semibold' : 'desk-muted'}>{row.asks}</span>{/if}
+										{#if row.single}<span class="desk-muted" aria-hidden="true">&ndash;</span><span class="sr-only">No asks</span>{:else}<span class={row.asks ? 'font-semibold' : 'desk-muted'}>{row.asks}</span>{/if}
 									</td>
-									<td role="cell" class="num align-top">{age(row.created)}</td>
+									<td role="cell" class="num align-top"><time datetime={row.created}>{age(row.created)}</time></td>
 								</tr>
 							{/each}
 						</tbody>
@@ -141,6 +150,11 @@ is left off, and the empty state shows once nothing else waits. A deferred row s
 		color: var(--color-muted);
 		font-size: 0.875rem;
 		font-weight: 600;
+	}
+	/* The selected sort is near-black, as the prototype sets it, where the stock checked state takes the primary blue. */
+	.sort-seg .btn:checked {
+		--btn-color: var(--color-base-content);
+		--btn-fg: var(--color-base-100);
 	}
 	.init-col {
 		width: 11rem;

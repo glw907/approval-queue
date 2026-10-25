@@ -108,6 +108,16 @@ describe('layout', () => {
 		expect(data).toMatchObject({ queue: [{ id: 'a' }], decided: [] });
 	});
 
+	it('gives each packet its ask count and irreversible flag, and every other kind none', async () => {
+		await seed('a', '2026-10-11T10:00:00Z');
+		await seedPacket(state.root, 'p1', PACKET, { created: '2026-10-11T11:00:00Z' });
+		await seedPacket(state.root, 'p2', PACKET.replace(/^1\. \[session\]/m, '1. [irreversible]'), { created: '2026-10-11T12:00:00Z' });
+		const { queue } = (await layoutLoad({ depends() {}, isDataRequest: false } as never)) as unknown as {
+			queue: Array<{ id: string; asks: number; irreversible: boolean }>;
+		};
+		expect(Object.fromEntries(queue.map((q) => [q.id, [q.asks, q.irreversible]]))).toEqual({ a: [0, false], p1: [2, false], p2: [2, true] });
+	});
+
 	it('depends on desk:queue, so the open tab can poll it', async () => {
 		const keys: string[] = [];
 		await layoutLoad({ depends: (key: string) => keys.push(key), isDataRequest: false } as never);

@@ -114,7 +114,7 @@ unplaced and hidden.
 	role={open ? 'dialog' : undefined}
 	aria-modal={open ? 'true' : undefined}
 >
-	<button type="button" class="drawer-x" aria-label="Close comments" onclick={closeDrawers}>
+	<button type="button" class="drawer-x btn btn-ghost btn-sm btn-square" aria-label="Close comments" onclick={closeDrawers}>
 		<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
 	</button>
 	<div class="mtitle"><span>Comments</span><span class="ncount">{review.cardCount}</span></div>

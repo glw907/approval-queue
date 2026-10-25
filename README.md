@@ -206,3 +206,13 @@ The gate runs the app's `check` and `test`, then every `tests/*.test.sh`, includ
 ## History
 
 The code arrived from `glw907/workstation` with its history, including the `review-desk` era names.
+
+## Home-grown parts
+
+Every screen takes its stock DaisyUI class first, with overrides that keep the 2026-10-14 prototype's look. These parts stay home-grown, each for the defect that stock part has here:
+
+- **Frame drawers (the queue rail and the review pane).** The stock `drawer` has one `lg:drawer-open` breakpoint and opens from a checkbox. Here the rail stops being a drawer at 1024px and the pane at 1260px, and `drawers.ts` makes the page behind inert, moves focus in, returns it to the opener on close, and closes on Esc and on a link into the work. The stock drawer does none of that.
+- **The queue rail's list.** The stock `menu` styles any non-`ul` child of an item as a menu row, so the contents outline (an `ol`) that opens under the current item would take row padding and hover fills. The rail keeps its own list and takes the stock `btn` classes for the Board row, the close button, and the shortcuts button.
+- **The breadcrumb (`FrameHeader.svelte`).** Stock `breadcrumbs` takes only `li` items with its own separators. The crumb row mixes links, plain text, a read time, and status badges, built by each screen's snippet, so it stays a flex row inside a `nav` with the Breadcrumb label.
+- **The rail's contents outline and the board's table.** The stock `menu` and `table` do not cover an outline with call marks or a table that becomes a stacked list on a phone.
+- **The review pane's rows (`PaneList`).** They take `menu menu-sm`, but the status dot, the second line, and the numbered outline form are home-grown rows inside it, since the stock menu row holds one line of text.

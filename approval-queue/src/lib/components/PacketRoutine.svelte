@@ -67,9 +67,9 @@ omits one. Renders nothing for a packet with no routine parts.
 						{:else}
 							<p class="sx"><Prose text={row.fact} /></p>
 						{/if}
-						<details class="why">
-							<summary><PacketIcon name="chev" class="chev" />Why</summary>
-							<div class="why-body">
+						<details class="collapse why">
+							<summary class="collapse-title"><PacketIcon name="chev" class="chev" />Why</summary>
+							<div class="collapse-content why-body">
 								<p><Prose text={row.why} /></p>
 								{#if part?.kind === 'pr'}
 									{#if part.link}

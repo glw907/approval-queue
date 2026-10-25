@@ -64,23 +64,23 @@ and refuses a post that leaves one unanswered. Renders nothing for a packet with
 
 					<div class="layers">
 						{#if background.rest}
-							<details class="bg">
-								<summary>
+							<details class="collapse bg">
+								<summary class="collapse-title">
 									<PacketIcon name="chev" class="chev" />
 									<span><span class="lead">Background.</span> <Prose text={background.lead} /></span>
 								</summary>
-								<div class="body"><p><Prose text={background.rest} /></p></div>
+								<div class="collapse-content body"><p><Prose text={background.rest} /></p></div>
 							</details>
 						{:else}
 							<p class="bg bg-flat"><span class="lead">Background.</span> <Prose text={background.lead} /></p>
 						{/if}
 						{#if ask.facts.length}
-							<details class="bg">
-								<summary>
+							<details class="collapse bg">
+								<summary class="collapse-title">
 									<PacketIcon name="chev" class="chev" />
 									<span><span class="lead">Facts.</span> <Prose text={ask.factsLead} /></span>
 								</summary>
-								<div class="body">
+								<div class="collapse-content body">
 									<ul class="fact-list">
 										{#each ask.facts as fact, i (i)}
 											<li><Prose text={fact.text} />{#if fact.source} <span class="fact-src">(<Prose text={fact.source} />)</span>{/if}</li>
@@ -90,12 +90,12 @@ and refuses a post that leaves one unanswered. Renders nothing for a packet with
 							</details>
 						{/if}
 						{#if ask.evidence}
-							<details class="bg">
-								<summary>
+							<details class="collapse bg">
+								<summary class="collapse-title">
 									<PacketIcon name="chev" class="chev" />
 									<span><span class="lead">Evidence.</span> <Prose text={ask.evidence.lead} /></span>
 								</summary>
-								<div class="body">
+								<div class="collapse-content body">
 									<!-- svelte-ignore a11y_no_noninteractive_tabindex: a sideways-scrolling excerpt needs the keyboard to reach it -->
 									<pre class="evidence-code" role="region" tabindex="0" aria-label="Evidence excerpt, scrolls sideways"><code>{ask.evidence.excerpt}</code></pre>
 								</div>
@@ -130,6 +130,7 @@ and refuses a post that leaves one unanswered. Renders nothing for a packet with
 										<PacketIcon name="bulb" class="size-3.5" />Session’s pick
 									</span>
 								{/if}
+								{#if j < 3}<kbd class="kbd kbd-sm desk-kbd desk-sk" aria-hidden="true">{j + 1}</kbd>{/if}
 							</label>
 						{/each}
 					</fieldset>
