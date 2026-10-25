@@ -29,7 +29,7 @@ readable pull request ref shows no PR line.
 
 {#if pr}
 	<p class="bg bg-first bg-flat prline">
-		<span class="lead">Pull request <a href={pr.url} target="_blank" rel="noopener noreferrer">{pr.ref}</a>.</span>
+		<span class="lead">Pull request <a href={pr.url} target="_blank" rel="noopener noreferrer">{pr.ref}<span class="sr-only"> (opens in a new tab)</span></a>.</span>
 		{#if pr.head}It was at commit <code>{pr.head.slice(0, 9)}</code> when this page was queued, and your approval covers only that commit.{/if}
 		If the pull request gains a commit before you approve, the queue refuses the approval and the page comes back to you.
 	</p>
@@ -67,7 +67,7 @@ readable pull request ref shows no PR line.
 
 {@render place()}
 
-<DocEditor {review} {amend} file={name} label="Page {name}, markdown" kindWord="page" />
+<DocEditor {review} {amend} file={name} label={amend === undefined ? `Page ${name}, markdown` : `Page ${name}, markdown, changes since the approved version`} kindWord="page" />
 
 <style>
 	code {
@@ -75,7 +75,7 @@ readable pull request ref shows no PR line.
 		font-size: 0.86em;
 	}
 	.prline {
-		max-width: 58ch;
+		max-width: 56ch;
 	}
 	.prline a {
 		color: var(--color-primary);

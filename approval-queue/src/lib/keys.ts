@@ -2,6 +2,10 @@ export type KeyAction =
 	| 'toggle-sheet'
 	| 'queue-next'
 	| 'queue-prev'
+	| 'board'
+	| 'pick-1'
+	| 'pick-2'
+	| 'pick-3'
 	| 'undo'
 	| 'approve'
 	| 'open-note'
@@ -46,15 +50,18 @@ export interface KeyMods {
 	alt: boolean;
 	shift: boolean;
 	/**
-	 * The physical key, as `KeyboardEvent.code` names it. The comment chords match it rather than
-	 * `key`, which Option on macOS and AltGr on other layouts turn into another character.
+	 * The physical key, as `KeyboardEvent.code` names it. The comment chords use it only when `key`
+	 * is not a letter, since Option on macOS and AltGr on other layouts turn `key` into another character.
 	 */
 	code?: string;
 }
 
 const MOVES: Record<string, KeyAction> = { '1': 'move-now', '2': 'move-defer', '3': 'move-drop' };
+/** On a packet, a digit picks that option of the ask holding focus; the layout finds the ask. */
+const PICKS: Record<string, KeyAction> = { '1': 'pick-1', '2': 'pick-2', '3': 'pick-3' };
 const DOCS: ReadonlyArray<KeyContext['page']> = ['blueprint', 'page', 'change'];
-const COMMENT_KEYS: Record<string, KeyAction> = { KeyM: 'comment', KeyN: 'next-comment', KeyP: 'prev-comment' };
+const COMMENT_LETTERS: Record<string, KeyAction> = { m: 'comment', n: 'next-comment', p: 'prev-comment' };
+const COMMENT_CODES: Record<string, KeyAction> = { KeyM: 'comment', KeyN: 'next-comment', KeyP: 'prev-comment' };
 
 /**
  * Follows the catalogue's global handler order: the open sheet takes everything but `?`, then
@@ -72,7 +79,8 @@ export function keyAction(key: string, mods: KeyMods, context: KeyContext): KeyA
 	}
 	// The comment chords work from the editor, which is a typing target, and with single keys off.
 	if (DOCS.includes(page) && mods.ctrl && mods.alt && !mods.meta && !mods.shift) {
-		const action = COMMENT_KEYS[mods.code ?? ''];
+		// The letter the layout types, so Dvorak and AZERTY follow their own keys; any other character falls back to the physical key.
+		const action = /^[a-z]$/i.test(key) ? COMMENT_LETTERS[key.toLowerCase()] : COMMENT_CODES[mods.code ?? ''];
 		if (action) return action;
 	}
 
@@ -97,10 +105,12 @@ export function keyAction(key: string, mods: KeyMods, context: KeyContext): KeyA
 	if (key === '?') return 'toggle-sheet';
 	if (key === 'j') return 'queue-next';
 	if (key === 'k') return 'queue-prev';
+	if (key === 'b') return 'board';
 	if (key === 'z') return held ? 'undo' : null;
 	if ((page === 'pr' || page === 'design') && key === 'a') return noteOpen || approveLocked ? null : 'approve';
 	if (page !== 'triage' && key === 'r') return 'open-note';
 	if ((page === 'pr' || page === 'change') && key === '/') return 'focus-filter';
 	if (page === 'triage' && key in MOVES) return MOVES[key];
+	if (page === 'packet' && !held && key in PICKS) return PICKS[key];
 	return null;
 }

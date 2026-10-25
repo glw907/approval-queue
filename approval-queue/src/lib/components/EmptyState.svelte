@@ -2,7 +2,9 @@
 The empty state, shown when `/` finds nothing waiting. It counts 30 seconds with Keep focused,
 then calls `window.close()`, which works only while the tab holds one history entry; every
 navigation in the desk replaces its entry for that reason. The saved `desk.autoClose` setting
-turns the count off. The page unmounts it when an item arrives, which cancels the count.
+turns the count off, and turning it back on restarts the count. The countdown line, the Keep button, and
+the toggle show only once the saved setting is read, so no frame says the tab closes when auto-close is off. The page
+unmounts it when an item arrives, which cancels the count.
 -->
 <script lang="ts">
 	import { onMount, tick } from 'svelte';
@@ -14,6 +16,8 @@ turns the count off. The page unmounts it when an item arrives, which cancels th
 	let phase = $state<'counting' | 'kept' | 'off' | 'closing'>('counting');
 	let secs = $state(SECONDS);
 	let autoClose = $state(true);
+	/** The saved setting is read, so the countdown line can say what will happen. */
+	let ready = $state(false);
 	let keep = $state<HTMLButtonElement>();
 	let hold: { cancel: () => void } | null = null;
 
@@ -27,7 +31,7 @@ turns the count off. The page unmounts it when an item arrives, which cancels th
 		if (document.activeElement === document.body) document.getElementById('main')?.focus();
 	}
 
-	function start() {
+	async function start(focusKeep = true) {
 		secs = SECONDS;
 		phase = 'counting';
 		desk.announce(
@@ -41,7 +45,11 @@ turns the count off. The page unmounts it when an item arrives, which cancels th
 			}
 		});
 		// A script focus draws no ring when the last focus was not a keyboard focus, and the ring is the cue.
-		keep?.focus({ focusVisible: true });
+		if (focusKeep) {
+			// Keep renders once the saved setting is read, which happens just after the first start.
+			await tick();
+			keep?.focus({ focusVisible: true });
+		}
 	}
 
 	onMount(() => {
@@ -50,8 +58,9 @@ turns the count off. The page unmounts it when an item arrives, which cancels th
 		} catch {
 			// Without storage the setting stays on.
 		}
-		if (autoClose) start();
+		if (autoClose) void start();
 		else phase = 'off';
+		ready = true;
 		return () => hold?.cancel();
 	});
 
@@ -62,6 +71,8 @@ turns the count off. The page unmounts it when an item arrives, which cancels th
 			// The toggle still holds for this page.
 		}
 		if (!autoClose && phase === 'counting') stop('Auto-close is off. This tab stays open.', 'off');
+		// The reader is on the toggle, so the restart leaves focus there.
+		else if (autoClose && phase !== 'counting' && phase !== 'closing') void start(false);
 	}
 
 	function onKeydown(e: KeyboardEvent) {
@@ -77,7 +88,9 @@ turns the count off. The page unmounts it when an item arrives, which cancels th
 		<h1 class="desk-title text-[1.6rem] leading-tight"><i class="site-benchmark"></i>Nothing waiting</h1>
 		<p class="mt-2">
 			Every waiting session has its answer.
-			{#if phase === 'counting'}
+			{#if !ready}
+				<!-- Nothing yet: the saved setting decides what to say. -->
+			{:else if phase === 'counting'}
 				This tab closes in
 				<span class="countdown font-semibold">
 					<span style="--value:{secs};" aria-hidden="true">{secs}</span>
@@ -92,25 +105,28 @@ turns the count off. The page unmounts it when an item arrives, which cancels th
 			{/if}
 		</p>
 		<div class="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2">
-			{#if phase === 'counting'}
+			{#if ready && phase === 'counting'}
 				<button
 					type="button"
 					class="btn btn-sm btn-ghost -ml-3"
+					aria-keyshortcuts="Escape"
 					bind:this={keep}
 					onclick={() => stop('This tab stays open.', 'kept')}
 				>
-					Keep this tab open <kbd class="kbd kbd-xs desk-kbd">Esc</kbd>
+					Keep this tab open <kbd class="kbd kbd-xs desk-kbd" aria-hidden="true">Esc</kbd>
 				</button>
 			{/if}
-			<label class="flex cursor-pointer items-center gap-2 text-sm">
-				<input
-					type="checkbox"
-					class="toggle toggle-sm toggle-primary"
-					bind:checked={autoClose}
-					onchange={saveAutoClose}
-				/>
-				Close when empty
-			</label>
+			{#if ready}
+				<label class="flex cursor-pointer items-center gap-2 text-sm">
+					<input
+						type="checkbox"
+						class="toggle toggle-sm toggle-primary"
+						bind:checked={autoClose}
+						onchange={saveAutoClose}
+					/>
+					Close when empty
+				</label>
+			{/if}
 		</div>
 		<p class="desk-muted mt-8 text-sm">New items open in this tab.</p>
 	</div>

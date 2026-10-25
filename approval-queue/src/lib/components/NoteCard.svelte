@@ -19,13 +19,15 @@ programmatic focus, so a screen can land focus on it after a change.
 		disabled?: boolean;
 		/** The card is current, so it takes the tint and its highlight deepens. */
 		current?: boolean;
+		/** The heading level of the card's title, one under the margin's own title. */
+		level: 3 | 4;
 		onchoose: (index: number) => void;
 		/** Opens a decided call or a resolved correction again. */
 		onreopen: () => void;
 		onresolve: () => void;
 	}
 
-	let { note, choice, resolved = false, disabled = false, current = false, onchoose, onreopen, onresolve }: Props = $props();
+	let { note, choice, resolved = false, disabled = false, current = false, level, onchoose, onreopen, onresolve }: Props = $props();
 
 	const head = $derived(note.kind === 'info' ? 'Corrected.' : 'Your call.');
 	const outcome = $derived(
@@ -39,10 +41,8 @@ programmatic focus, so a screen can land focus on it after a change.
 
 {#if outcome !== null}
 	<div role="group" class="note done collapsed" id="note-{note.id}" tabindex="-1" aria-label="{outcome.head} {note.title}">
-		<p class="nh">
-			<span class="kind">{outcome.head}</span><span class="outcome">{outcome.text}</span>
-			<button type="button" class="linkbtn reopen" {disabled} onclick={onreopen}>Reopen</button>
-		</p>
+		<svelte:element this={'h' + level} class="nh"><span class="kind">{outcome.head}</span><span class="outcome">{outcome.text}</span></svelte:element>
+		<button type="button" class="btn btn-link btn-sm linkbtn reopen" {disabled} onclick={onreopen}>Reopen</button>
 	</div>
 {:else}
 	<div
@@ -52,7 +52,7 @@ programmatic focus, so a screen can land focus on it after a change.
 		tabindex="-1"
 		aria-label="{head} {note.title}"
 	>
-		<p class="nh"><span class="kind">{head}</span><span>{note.title}</span></p>
+		<svelte:element this={'h' + level} class="nh"><span class="kind">{head}</span><span>{note.title}</span></svelte:element>
 		{#each note.body as para, i (i)}<p>{@render inline(para)}</p>{/each}
 		{#each note.sides ?? [] as side, i (i)}<div class="side"><b>{side.who}:</b> {@render inline(side.text)}</div>{/each}
 		{#if note.was !== undefined && note.now !== undefined}
@@ -65,7 +65,7 @@ programmatic focus, so a screen can land focus on it after a change.
 		{#if note.choices?.length}
 			<div class="choices">
 				{#each note.choices as c, i (i)}
-					<button type="button" class="choice" {disabled} onclick={() => onchoose(i)}>{c.label}</button>
+					<button type="button" class="choice btn btn-sm" {disabled} onclick={() => onchoose(i)}>{c.label}</button>
 				{/each}
 			</div>
 		{:else if !disabled}
@@ -87,14 +87,21 @@ programmatic focus, so a screen can land focus on it after a change.
 	.nh {
 		margin: 0 0 4px;
 	}
+	.collapsed {
+		display: flex;
+		align-items: baseline;
+		gap: 0 8px;
+	}
 	.collapsed .nh {
 		margin: 0;
+		flex: 1 1 auto;
+		min-width: 0;
 	}
 	.outcome {
 		font-weight: 400;
 	}
 	.reopen {
-		margin-left: 8px;
+		flex: none;
 		font-weight: 400;
 		font-size: 0.82rem;
 	}
@@ -118,22 +125,20 @@ programmatic focus, so a screen can land focus on it after a change.
 		gap: 4px 8px;
 		margin-top: 8px;
 	}
+	/* The stock small button, set as a full-width choice: a long label wraps and reads from the left. */
 	.choice {
-		display: flex;
+		--btn-color: var(--color-base-100);
+		--btn-fg: var(--color-base-content);
+		--btn-border: var(--color-base-300);
 		width: 100%;
-		align-items: center;
-		gap: 6px;
+		height: auto;
+		justify-content: flex-start;
 		text-align: left;
-		font: 600 0.82rem/1.2 var(--font-body);
-		border-radius: var(--radius-field);
-		border: 1px solid var(--color-base-300);
-		background: var(--color-base-100);
-		color: var(--color-base-content);
-		padding: 6px 10px;
-		cursor: pointer;
+		font-weight: 600;
+		padding-block: 6px;
 	}
 	.choice:hover:not(:disabled) {
-		background: var(--color-base-200);
+		--btn-color: var(--color-base-200);
 	}
 	.choice:disabled,
 	.reopen:disabled {

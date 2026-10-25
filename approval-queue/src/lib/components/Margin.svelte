@@ -23,9 +23,11 @@ unplaced and hidden.
 		review: DocReview;
 		/** What the empty margin and a gone comment call the document: "blueprint", "page", or a change document's kind. */
 		kindWord: string;
+		/** The level of the cards' headings; the margin's own title sits one above. Three under a page's h1, four under a section's h2 and the Comments h3. */
+		level?: 3 | 4;
 	}
 
-	let { review, kindWord }: Props = $props();
+	let { review, kindWord, level = 3 }: Props = $props();
 
 	let layer = $state<HTMLDivElement>();
 	let wide = $state(true);
@@ -114,10 +116,10 @@ unplaced and hidden.
 	role={open ? 'dialog' : undefined}
 	aria-modal={open ? 'true' : undefined}
 >
-	<button type="button" class="drawer-x" aria-label="Close comments" onclick={closeDrawers}>
+	<button type="button" class="drawer-x btn btn-ghost btn-sm btn-square" aria-label="Close comments" onclick={closeDrawers}>
 		<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
 	</button>
-	<div class="mtitle"><span>Comments</span><span class="ncount">{review.cardCount}</span></div>
+	<div class="mtitle"><svelte:element this={'h' + (level - 1)} class="mhead">Comments</svelte:element><span class="ncount">{review.cardCount}</span></div>
 	<div class="mcards" bind:this={layer} style:min-height={wide && height ? `${height}px` : undefined}>
 		{#each review.cards as card (card.key)}
 			{@const current = review.currentCard === card.key}
@@ -132,6 +134,7 @@ unplaced and hidden.
 					{@const note = card.note}
 					<NoteCard
 						{note}
+						{level}
 						{current}
 						choice={review.decided[note.id]}
 						resolved={review.resolved.includes(note.id)}
@@ -141,7 +144,7 @@ unplaced and hidden.
 						onresolve={() => review.resolveNote(note.id, true)}
 					/>
 				{:else}
-					<CommentCard {review} {card} {kindWord} {current} />
+					<CommentCard {review} {card} {kindWord} {current} {level} />
 				{/if}
 			</div>
 		{:else}

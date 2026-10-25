@@ -53,6 +53,22 @@ describe('keyAction', () => {
 		expect(keyAction('Enter', none, ctx({ page: 'triage' }))).toBeNull();
 	});
 
+	it('goes to the board on b from any page, and not with single keys off or while typing', () => {
+		for (const page of ['pr', 'packet', 'triage', 'blueprint'] as const) expect(keyAction('b', none, ctx({ page }))).toBe('board');
+		expect(keyAction('b', none, ctx({ singleKeys: false }))).toBeNull();
+		expect(keyAction('b', none, ctx({ typing: true }))).toBeNull();
+		expect(keyAction('b', { ...none, ctrl: true }, base)).toBeNull();
+	});
+
+	it('picks an ask option with 1, 2, or 3 on a packet only, never during a hold or while typing', () => {
+		const packet = ctx({ page: 'packet' });
+		expect(['1', '2', '3'].map((d) => keyAction(d, none, packet))).toEqual(['pick-1', 'pick-2', 'pick-3']);
+		expect(keyAction('4', none, packet)).toBeNull();
+		expect(keyAction('1', none, ctx({ page: 'packet', held: true }))).toBeNull();
+		expect(keyAction('1', none, ctx({ page: 'packet', typing: true }))).toBeNull();
+		expect(keyAction('1', none, ctx({ page: 'blueprint' }))).toBeNull();
+	});
+
 	it('moves the queue with j and k on any page', () => {
 		expect(keyAction('j', none, ctx({ page: 'triage' }))).toBe('queue-next');
 		expect(keyAction('k', none, ctx({ page: 'design' }))).toBe('queue-prev');
@@ -169,10 +185,15 @@ describe('keyAction', () => {
 		expect(keyAction('m', { ...none, ctrl: true, code: 'KeyM' }, t)).toBeNull();
 	});
 
-	it('matches the comment chords by physical key, whatever character the layout gives them', () => {
+	it('follows the letter the layout types, and falls back to the physical key for any other character', () => {
 		const t = ctx({ page: 'blueprint', typing: true });
 		// Option+M on macOS gives "µ", and AltGr layouts give their own characters.
 		expect(keyAction('µ', { ...none, ctrl: true, alt: true, code: 'KeyM' }, t)).toBe('comment');
-		expect(keyAction('m', { ...none, ctrl: true, alt: true, code: 'Semicolon' }, t)).toBeNull();
+		// A Dvorak-style layout types these letters from other physical keys.
+		expect(keyAction('m', { ...none, ctrl: true, alt: true, code: 'Semicolon' }, t)).toBe('comment');
+		expect(keyAction('n', { ...none, ctrl: true, alt: true, code: 'KeyB' }, t)).toBe('next-comment');
+		expect(keyAction('p', { ...none, ctrl: true, alt: true, code: 'KeyR' }, t)).toBe('prev-comment');
+		// A letter that is not a comment chord is not rescued by the key under it.
+		expect(keyAction('x', { ...none, ctrl: true, alt: true, code: 'KeyM' }, t)).toBeNull();
 	});
 });

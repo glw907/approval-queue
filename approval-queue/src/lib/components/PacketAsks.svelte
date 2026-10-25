@@ -10,9 +10,11 @@ label; `answers` is bound up so the bar can count what is left. The server rebui
 and refuses a post that leaves one unanswered. Renders nothing for a packet with no asks.
 -->
 <script lang="ts">
+	import { desk } from '#lib/desk.svelte.ts';
 	import { RULE_LOOK, refKind } from '#lib/packet-view.ts';
 	import { splitLead } from '#lib/prose.ts';
 	import type { PageData } from '../../routes/item/[id=id]/$types';
+	import FilesDiff from './FilesDiff.svelte';
 	import PacketIcon from './PacketIcon.svelte';
 	import PartFiles from './PartFiles.svelte';
 	import Prose from './Prose.svelte';
@@ -21,7 +23,7 @@ and refuses a post that leaves one unanswered. Renders nothing for a packet with
 
 	interface Props {
 		asks: Ask[];
-		/** Every part, which carries the files an ask's bound part changed since the send-back. */
+		/** Every part, which carries the diff an ask's bound PR shows as evidence. */
 		parts: Extract<PageData, { kind: 'packet' }>['parts'];
 		/** The label picked for each ask, by the ask's number counting from 1. */
 		answers: Record<number, string | undefined>;
@@ -50,37 +52,43 @@ and refuses a post that leaves one unanswered. Renders nothing for a packet with
 					class={['note ask', picked !== undefined ? 'done' : look.tone === 'error' ? 'error' : 'decide']}
 				>
 					<h3 id="ask-{ask.index}-title" class="nh">
-						<span class="kind">{look.label}.</span>
-						<Prose text={ask.question} />
+						<PacketIcon name={picked !== undefined ? 'check' : look.tone === 'error' ? 'warn' : 'info'} class="size-5 kind" />
+						<span><Prose text={ask.question} /></span>
+						<span class="badge badge-sm badge-outline rule-badge gap-1 {look.tone === 'error' ? 'tone-error' : 'tone-warning'}">
+							<PacketIcon name={look.icon} class="size-3.5" />{look.label}
+						</span>
 					</h3>
 					{#if ask.part}
 						<p class="ask-part">{refKind(ask.part)} · <code>{ask.part}</code></p>
 						{@const bound = parts.find((p) => p.ref === ask.part)}
-						{#if bound?.kind === 'pr' && bound.since}
-							<PartFiles groups={bound.groups ?? []} since={bound.since} />
+						{#if bound?.kind === 'pr'}
+							<PartFiles since={bound.since} />
+							{#if bound.totals}
+								<div class="mt-2"><FilesDiff groups={bound.groups ?? []} totals={bound.totals} focusKey={false} /></div>
+							{/if}
 						{/if}
 					{/if}
 					<p class="summary"><Prose text={ask.summary} /></p>
 
 					<div class="layers">
 						{#if background.rest}
-							<details class="bg">
-								<summary>
+							<details class="collapse bg">
+								<summary class="collapse-title">
 									<PacketIcon name="chev" class="chev" />
 									<span><span class="lead">Background.</span> <Prose text={background.lead} /></span>
 								</summary>
-								<div class="body"><p><Prose text={background.rest} /></p></div>
+								<div class="collapse-content body"><p><Prose text={background.rest} /></p></div>
 							</details>
 						{:else}
 							<p class="bg bg-flat"><span class="lead">Background.</span> <Prose text={background.lead} /></p>
 						{/if}
 						{#if ask.facts.length}
-							<details class="bg">
-								<summary>
+							<details class="collapse bg">
+								<summary class="collapse-title">
 									<PacketIcon name="chev" class="chev" />
 									<span><span class="lead">Facts.</span> <Prose text={ask.factsLead} /></span>
 								</summary>
-								<div class="body">
+								<div class="collapse-content body">
 									<ul class="fact-list">
 										{#each ask.facts as fact, i (i)}
 											<li><Prose text={fact.text} />{#if fact.source} <span class="fact-src">(<Prose text={fact.source} />)</span>{/if}</li>
@@ -90,12 +98,12 @@ and refuses a post that leaves one unanswered. Renders nothing for a packet with
 							</details>
 						{/if}
 						{#if ask.evidence}
-							<details class="bg">
-								<summary>
+							<details class="collapse bg">
+								<summary class="collapse-title">
 									<PacketIcon name="chev" class="chev" />
 									<span><span class="lead">Evidence.</span> <Prose text={ask.evidence.lead} /></span>
 								</summary>
-								<div class="body">
+								<div class="collapse-content body">
 									<!-- svelte-ignore a11y_no_noninteractive_tabindex: a sideways-scrolling excerpt needs the keyboard to reach it -->
 									<pre class="evidence-code" role="region" tabindex="0" aria-label="Evidence excerpt, scrolls sideways"><code>{ask.evidence.excerpt}</code></pre>
 								</div>
@@ -117,6 +125,7 @@ and refuses a post that leaves one unanswered. Renders nothing for a packet with
 									aria-labelledby="ask-{ask.index}-l{j}"
 									aria-describedby={choice.consequence ? `ask-${ask.index}-c${j}` : undefined}
 									disabled={decided}
+									aria-keyshortcuts={j < 3 && desk.singleKeys ? String(j + 1) : undefined}
 									bind:group={answers[ask.index]}
 								/>
 								<span class="flex-1 leading-snug">
@@ -130,6 +139,7 @@ and refuses a post that leaves one unanswered. Renders nothing for a packet with
 										<PacketIcon name="bulb" class="size-3.5" />Session’s pick
 									</span>
 								{/if}
+								{#if j < 3}<kbd class="kbd kbd-sm desk-kbd desk-sk" aria-hidden="true">{j + 1}</kbd>{/if}
 							</label>
 						{/each}
 					</fieldset>

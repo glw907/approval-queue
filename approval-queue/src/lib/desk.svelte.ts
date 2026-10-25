@@ -1,3 +1,4 @@
+import { startHold } from '#lib/hold.ts';
 import type { KeyAction } from '#lib/keys.ts';
 import type { Row } from '#lib/triage.ts';
 
@@ -16,11 +17,16 @@ export interface OutlineEntry {
 	go: () => void;
 }
 
+/** How long a plain toast stays, and one that carries Undo. */
+export const FLASH_MS = 3200;
+export const FLASH_UNDO_MS = 10000;
+
 /**
  * State the layout, the open item, and the key handler share. The layout owns the keys and the
  * toast; the item panel registers the handlers that act on its own form and clears them when the
  * item changes. Only client code writes it, so one instance serves every request.
  */
+
 class Desk {
 	singleKeys = $state(true);
 	sheetOpen = $state(false);
@@ -51,7 +57,8 @@ class Desk {
 		this.#toast = text;
 		this.toastUndo = null;
 	}
-	#toastTimer: ReturnType<typeof setTimeout> | undefined;
+	#flashHold: ReturnType<typeof startHold> | undefined;
+	#flashPausers = new Set<string>();
 	/** The live region's text. */
 	status = $state('');
 	handlers: Partial<Record<KeyAction, () => void>> = {};
@@ -78,19 +85,42 @@ class Desk {
 
 	/**
 	 * Shows a plain toast and reads it aloud, then clears it unless another took its place. One with
-	 * `undo` carries an Undo button and stays longer, as the prototype's do.
+	 * `undo` carries an Undo button and stays 10 seconds (WCAG 2.2.1); `pauseFlash` stops the clock
+	 * while the pointer or focus is on it, as the held decision's toast does.
 	 */
 	flash(text: string, undo?: () => void) {
-		clearTimeout(this.#toastTimer);
+		this.#flashHold?.cancel();
+		// The toast's element stays mounted across messages, so focus on its Undo carries over to the
+		// new clock; a pointer must move again to pause it. Without an Undo, the focused button goes.
+		this.#flashPausers.delete('pointer');
+		if (!undo) this.#flashPausers.delete('focus');
 		this.toast = text;
 		this.toastUndo = undo ?? null;
 		this.announce(text);
-		this.#toastTimer = setTimeout(
-			() => {
+		this.#flashHold = startHold(undo ? FLASH_UNDO_MS : FLASH_MS, {
+			tick: () => {},
+			fire: () => {
 				if (this.toast === text) this.toast = null;
-			},
-			undo ? 6000 : 3200
-		);
+			}
+		});
+		if (this.#flashPausers.size) this.#flashHold.pause();
+	}
+
+	/** A toast leaves without a pointerleave or focusout, so both pauses end with it. */
+	releaseFlash() {
+		this.resumeFlash('pointer');
+		this.resumeFlash('focus');
+	}
+
+	/** Stops the flash toast's clock; `by` names the pointer or focus, so each resumes only its own. */
+	pauseFlash(by: string) {
+		this.#flashPausers.add(by);
+		this.#flashHold?.pause();
+	}
+
+	resumeFlash(by: string) {
+		this.#flashPausers.delete(by);
+		if (this.#flashPausers.size === 0) this.#flashHold?.resume();
 	}
 
 	/** Blanks the region first so a repeated message is read again. */

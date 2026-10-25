@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 vi.mock('$app/navigation', () => ({ goto: vi.fn(), invalidate: vi.fn() }));
 
 const { Held, HOLD_MS, seedFrom } = await import('./held.svelte.ts');
-const { desk } = await import('./desk.svelte.ts');
+const { desk, FLASH_MS, FLASH_UNDO_MS } = await import('./desk.svelte.ts');
 type HeldDecision = import('./held.svelte.ts').HeldDecision;
 type ActionResult = import('$app/forms').ActionResult;
 
@@ -276,5 +276,77 @@ describe('seedFrom', () => {
 		form.set('call:B3', 'Keep it');
 		form.set('note', '- Still open: Why\n');
 		expect(seedFrom(form, 'blueprint')).toMatchObject({ note: '- Still open: Why\n', answers: {}, picks: [] });
+	});
+});
+
+describe('desk.flash', () => {
+	beforeEach(() => vi.useFakeTimers());
+	afterEach(() => {
+		desk.toast = null;
+		vi.useRealTimers();
+	});
+
+	it('keeps a plain toast for 3.2 seconds and an Undo toast for 10', () => {
+		desk.flash('Plain');
+		vi.advanceTimersByTime(FLASH_MS);
+		expect(desk.toast).toBeNull();
+		desk.flash('Comment deleted', () => {});
+		vi.advanceTimersByTime(FLASH_UNDO_MS - 1);
+		expect(desk.toast).toBe('Comment deleted');
+		vi.advanceTimersByTime(1);
+		expect(desk.toast).toBeNull();
+	});
+
+	it('stops the clock while paused and carries on from the time left', () => {
+		desk.flash('Comment deleted', () => {});
+		vi.advanceTimersByTime(4000);
+		desk.pauseFlash('pointer');
+		vi.advanceTimersByTime(60_000);
+		expect(desk.toast).toBe('Comment deleted');
+		desk.resumeFlash('pointer');
+		vi.advanceTimersByTime(FLASH_UNDO_MS - 4000 - 1);
+		expect(desk.toast).toBe('Comment deleted');
+		vi.advanceTimersByTime(1);
+		expect(desk.toast).toBeNull();
+	});
+
+	it('resumes only when pointer and focus have both let go', () => {
+		desk.flash('Comment deleted', () => {});
+		desk.pauseFlash('pointer');
+		desk.pauseFlash('focus');
+		desk.resumeFlash('pointer');
+		vi.advanceTimersByTime(FLASH_UNDO_MS * 2);
+		expect(desk.toast).toBe('Comment deleted');
+		desk.resumeFlash('focus');
+		vi.advanceTimersByTime(FLASH_UNDO_MS);
+		expect(desk.toast).toBeNull();
+	});
+
+	it('keeps the clock stopped for a new message while focus is still on the toast', () => {
+		desk.flash('Comment deleted', () => {});
+		desk.pauseFlash('focus');
+		desk.flash('Reply deleted', () => {});
+		vi.advanceTimersByTime(FLASH_UNDO_MS * 2);
+		expect(desk.toast).toBe('Reply deleted');
+		desk.resumeFlash('focus');
+		vi.advanceTimersByTime(FLASH_UNDO_MS);
+		expect(desk.toast).toBeNull();
+	});
+
+	it('lets a message with no Undo run, since the focused button is gone', () => {
+		desk.flash('Comment deleted', () => {});
+		desk.pauseFlash('focus');
+		desk.flash('Saved');
+		vi.advanceTimersByTime(FLASH_MS);
+		expect(desk.toast).toBeNull();
+	});
+
+	it('ends both pauses when the toast unmounts', () => {
+		desk.flash('Comment deleted', () => {});
+		desk.pauseFlash('pointer');
+		desk.pauseFlash('focus');
+		desk.releaseFlash();
+		vi.advanceTimersByTime(FLASH_UNDO_MS);
+		expect(desk.toast).toBeNull();
 	});
 });

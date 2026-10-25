@@ -1,7 +1,23 @@
+import { EditorState } from '@codemirror/state';
 import type { EditorView } from '@codemirror/view';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { desk } from '#lib/desk.svelte.ts';
 import type { PlacedNote } from './notes.ts';
-import { DocReview, heldBySave, noteStart, restoredDrafted, sendBackDraft, type CommentAnswer, type ReviewInit, type SaveResult } from './review.svelte.ts';
+import { DocReview, heldBySave, RESTORE_GONE, noteStart, restoredDrafted, sendBackDraft, type CommentAnswer, type ReviewInit, type SaveResult } from './review.svelte.ts';
+
+// The editor's state fields need a DOM-built view, so the review's calls into them read a stand-in's plain ranges.
+type Ranges = Record<string, [number, number]>;
+vi.mock('./setup.ts', async (importOriginal) => ({
+	...(await importOriginal<typeof import('./setup.ts')>()),
+	commentRanges: (view: { ranges: Ranges }) => view.ranges,
+	setCommentRange: (view: { ranges: Ranges }, key: string, range: [number, number] | null) => {
+		if (range) view.ranges[key] = range;
+		else delete view.ranges[key];
+	},
+	noteRanges: () => ({}),
+	setCurrent: () => {},
+	setDecided: () => {}
+}));
 
 const KEY = 'desk.calls.test';
 
@@ -225,5 +241,145 @@ describe('DocReview comments', () => {
 		expect(settled).toBe(true);
 		expect(r.threads.find((t) => t.id === 'T1')?.resolved).toBe(true);
 		vi.unstubAllGlobals();
+	});
+});
+
+describe('DocReview comment removal and its Undo', () => {
+	const anchor = (from: number, to: number) => ({ quote: 'x', prefix: '', suffix: '', from, to, commit: 'c' });
+	const doc = 'One line.\nTwo line.';
+	const stored = [
+		{ id: 'C1', text: 'First', anchor: anchor(0, 3) },
+		{ id: 'C2', text: 'Second', anchor: anchor(10, 13) }
+	];
+	const asked: Array<Record<string, string>> = [];
+
+	/** The smallest stand-in for the view: the document, the ranges the review keeps, and a focus that counts. */
+	function standIn(text = doc) {
+		return {
+			state: EditorState.create({ doc: text }),
+			ranges: { 'comment:C1': [0, 3], 'comment:C2': [10, 13] } as Record<string, [number, number]>,
+			focused: 0,
+			dispatch() {},
+			focus() {
+				this.focused++;
+			}
+		};
+	}
+
+	function make(answers: Array<() => Promise<CommentAnswer>>) {
+		asked.length = 0;
+		const poster = vi.fn((fields: Record<string, string>) => {
+			asked.push(fields);
+			return (answers.shift() ?? (async () => ({ ok: true as const, id: 'N1', comments: [], threads: [] })))();
+		});
+		const r = new DocReview({
+			doc,
+			original: doc,
+			blob: 'b1',
+			notes: [],
+			save: async () => ({ ok: true, blob: 'b2' }),
+			comments: stored.map((c) => ({ ...c, placed: { from: c.anchor.from, to: c.anchor.to } })),
+			comment: poster
+		});
+		r.commentable = true;
+		const view = standIn();
+		r.attach(view as unknown as EditorView);
+		return { r, view, poster };
+	}
+	const remaining = (ids: string[]) => async (): Promise<CommentAnswer> => ({
+		ok: true,
+		id: ids[0],
+		comments: stored.filter((c) => ids.includes(c.id)),
+		threads: []
+	});
+
+	beforeEach(() => {
+		vi.stubGlobal('matchMedia', () => ({ matches: true }));
+		vi.stubGlobal('document', { getElementById: () => null });
+	});
+	afterEach(() => {
+		desk.toast = null;
+		vi.unstubAllGlobals();
+	});
+
+	it('adds a deleted comment again on its text as the editor holds it now', async () => {
+		const { r, view } = make([remaining(['C1']), async () => ({ ok: true, id: 'N1', comments: stored, threads: [] })]);
+		await r.deleteComment('C2');
+		expect(desk.toast).toBe('Comment deleted');
+		// Edits since the delete moved the text; the comment comes back where "Two" now sits.
+		view.state = EditorState.create({ doc: 'Added.\n' + doc });
+		desk.toastUndo?.();
+		await r.settled();
+		expect(asked.at(-1)).toMatchObject({ op: 'add', text: 'Second', from: '17', to: '20' });
+	});
+
+	it('says so, and posts nothing, when the text a deleted comment was on is gone', async () => {
+		const { r, view, poster } = make([remaining(['C1'])]);
+		await r.deleteComment('C2');
+		view.state = EditorState.create({ doc: 'Nothing is left.' });
+		desk.toastUndo?.();
+		await r.settled();
+		expect(desk.toast).toBe(RESTORE_GONE);
+		expect(poster).toHaveBeenCalledTimes(1);
+	});
+
+	it('puts focus on the next card after a delete, else the previous one, else the editor', async () => {
+		const buttons: Record<string, { focus: () => void }> = {};
+		const card = (id: string) => {
+			const button = { focus: vi.fn() };
+			buttons[id] = button;
+			return { querySelector: () => button, focus: vi.fn() };
+		};
+		const present: Record<string, ReturnType<typeof card>> = { 'comment-C2': card('comment-C2') };
+		vi.stubGlobal('document', { getElementById: (id: string) => present[id] ?? null });
+		const first = make([remaining(['C2'])]);
+		await first.r.deleteComment('C1');
+		expect(buttons['comment-C2'].focus).toHaveBeenCalled();
+		const second = make([remaining(['C1'])]);
+		delete present['comment-C2'];
+		present['comment-C1'] = card('comment-C1');
+		await second.r.deleteComment('C2');
+		expect(buttons['comment-C1'].focus).toHaveBeenCalled();
+		const third = make([remaining(['C1'])]);
+		delete present['comment-C1'];
+		await third.r.deleteComment('C2');
+		expect(third.view.focused).toBe(1);
+	});
+
+	it('leaves a box open while an op is on its way, and closes it once the op has landed', async () => {
+		let answer: (a: CommentAnswer) => void = () => {};
+		const { r } = make([() => new Promise<CommentAnswer>((resolve) => (answer = resolve))]);
+		const op = r.deleteComment('C1');
+		r.box = { kind: 'edit', id: 'C2', text: 'Second' };
+		await r.cancelBox();
+		expect(r.box).not.toBeNull();
+		answer({ ok: true, id: 'C1', comments: stored.slice(1), threads: [] });
+		await op;
+		await r.cancelBox();
+		expect(r.box).toBeNull();
+	});
+
+	it('settles only once an op started while it waited has landed too', async () => {
+		const answers: Array<(a: CommentAnswer) => void> = [];
+		const pending = () => new Promise<CommentAnswer>((resolve) => answers.push(resolve));
+		const { r } = make([pending, pending]);
+		const first = r.deleteComment('C1');
+		let settled = false;
+		const waiting = r.settled().then(() => (settled = true));
+		answers[0]({ ok: true, id: 'C1', comments: stored.slice(1), threads: [] });
+		// The first op's slot clears, and the next op starts before the waiter looks again.
+		let second: Promise<void> | undefined;
+		while (!second) {
+			await Promise.resolve();
+			if (!(r as unknown as { op: unknown }).op) second = r.deleteComment('C2');
+		}
+		await Promise.resolve();
+		await Promise.resolve();
+		expect(settled).toBe(false);
+		answers[1]({ ok: true, id: 'C2', comments: [], threads: [] });
+		await waiting;
+		await first;
+		await second;
+		expect(settled).toBe(true);
 	});
 });

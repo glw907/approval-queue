@@ -68,7 +68,7 @@ own place bar, between its opening rows and the editor, since that bar spans the
 					{#if place}<span class="open">{@render place()}</span>{/if}
 					<button
 						type="button"
-						class="linkbtn"
+						class="btn btn-link btn-sm linkbtn"
 						bind:this={paneButton}
 						aria-expanded={desk.paneOpen}
 						aria-controls="review"
@@ -93,7 +93,7 @@ own place bar, between its opening rows and the editor, since that bar spans the
 		onclick={focusTarget}
 	>
 		<div class="rv-sticky">
-			<button type="button" class="drawer-x" aria-label="Close the {paneLabel.toLowerCase()}" onclick={closeDrawers}>
+			<button type="button" class="drawer-x btn btn-ghost btn-sm btn-square" aria-label="Close the {paneLabel.toLowerCase()}" onclick={closeDrawers}>
 				<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
 			</button>
 			{@render pane()}

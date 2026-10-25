@@ -23,6 +23,7 @@ for that save first, and closing the tab then asks before leaving.
 	import { deserialize, enhance, type SubmitFunction } from '$app/forms';
 	import { beforeNavigate, goto } from '$app/navigation';
 	import { tick, untrack } from 'svelte';
+	import { age, spokenAge } from '#lib/board.ts';
 	import { fingerprint, gate } from '#lib/cards.ts';
 	import { setDrawer } from '#lib/components/frame/drawers.ts';
 	import { desk, type OutlineEntry } from '#lib/desk.svelte.ts';
@@ -206,6 +207,11 @@ for that save first, and closing the tab then asks before leaving.
 		return sections.map((s, i) => ({ ...s, n: i + 1 }));
 	});
 	const packet = $derived(data.kind === 'packet' ? data : null);
+	/** The repos the packet's PR and design parts live in, by name, in order of first appearance. */
+	const packetRepos = $derived(
+		packet ? [...new Set(packet.parts.filter((p) => p.kind !== 'step').map((p) => p.ref.split(/[#:]/)[0].split('/').pop()))].join(', ') : ''
+	);
+	const CHANGE_HEADLINE = 'Approving this change clears its pull request to merge.';
 
 	// The page keys this component on the item id, so the save's address is fixed once per item: a
 	// save that lands after the reader has moved on still reaches this item, never the next one.
@@ -297,7 +303,7 @@ for that save first, and closing the tab then asks before leaving.
 	const docReviews = review ? [review] : changeReviews;
 	const openCalls = $derived(docReviews.flatMap((r) => r.openCalls));
 	const decidedCount = $derived(docReviews.reduce((n, r) => n + Object.keys(r.decided).length, 0));
-	const blueprint = $derived(data.kind === 'blueprint' || data.kind === 'page' ? data : null);
+	const docItem = $derived(data.kind === 'blueprint' || data.kind === 'page' ? data : null);
 	const change = $derived(data.kind === 'change' ? data : null);
 	const frozen = $derived(isDecided);
 	const missing = $derived(data.kind === 'blueprint' || data.kind === 'page' ? data.missing : false);
@@ -359,9 +365,9 @@ for that save first, and closing the tab then asks before leaving.
 	 * with the fact check. A blueprint's type name is hyphenated as a modifier ("symptom-row page").
 	 */
 	const docLede = $derived.by(() => {
-		if (!blueprint || !review) return '';
-		const type = blueprint.pageType ? `${/^[aeiou]/i.test(blueprint.pageType) ? 'an' : 'a'} ${blueprint.pageType.replaceAll(' ', '-')} page` : 'a docs page';
-		const what = `${blueprint.kind === 'page' ? 'This draft is' : 'This blueprint describes'} ${type}${blueprint.track ? ` on the ${blueprint.track} track` : ''}.`;
+		if (!docItem || !review) return '';
+		const type = docItem.pageType ? `${/^[aeiou]/i.test(docItem.pageType) ? 'an' : 'a'} ${docItem.pageType.replaceAll(' ', '-')} page` : 'a docs page';
+		const what = `${docItem.kind === 'page' ? 'This draft is' : 'This blueprint describes'} ${type}${docItem.track ? ` on the ${docItem.track} track` : ''}.`;
 		const fixed = review.notes.filter((n) => n.kind === 'info').length;
 		const disputed = review.notes.filter((n) => n.kind === 'decide').length;
 		const asked = review.notes.filter((n) => n.kind === 'question').length;
@@ -773,6 +779,8 @@ for that save first, and closing the tab then asks before leaving.
 	// navigation can't hold the same item twice.
 	let deciding = false;
 
+	// The custom enhance cancels the post and never calls `applyAction`: the held store posts the
+	// decision later, and the form's own result would reload or redirect the item the reader has left.
 	const decide: SubmitFunction = async ({ cancel, action, formData }) => {
 		cancel();
 		if (deciding || refuseOpenBox()) return;
@@ -835,17 +843,26 @@ for that save first, and closing the tab then asks before leaving.
 	};
 </script>
 
+{#snippet itemState()}
+	{#if data.meta.deferred}
+		<span class="badge badge-sm badge-outline rule-badge tone-warning">Deferred</span>
+	{/if}
+	{#if data.meta.orphaned}
+		<span class="badge badge-sm badge-outline rule-badge tone-warning">No session is waiting for this.</span>
+	{/if}
+{/snippet}
+
 {#snippet docPlace()}
 	<div class="place">
 		<span class="where"><b>{placeWhere}</b></span>
 		{#if openCalls.length}
-			<span class="open"><button type="button" class="linkbtn next-call" onclick={nextCall}>Next call for you <kbd>F8</kbd></button></span>
+			<span class="open"><button type="button" class="btn btn-link btn-sm linkbtn next-call" aria-keyshortcuts="F8" onclick={nextCall}>Next call for you <kbd aria-hidden="true">F8</kbd></button></span>
 		{:else if hasCalls}
 			<span class="open"><span class="nothing-open">Every call made</span></span>
 		{/if}
 		<span class="tools">
 			<span class="toc-wrap">
-				<button type="button" class="linkbtn" bind:this={tocButton} aria-expanded={tocOpen} aria-controls="toc" onclick={toggleToc}>Contents</button>
+				<button type="button" class="btn btn-link btn-sm linkbtn" bind:this={tocButton} aria-expanded={tocOpen} aria-controls="toc" onclick={toggleToc}>Contents</button>
 				{#if tocOpen}
 					<!-- svelte-ignore a11y_no_noninteractive_element_interactions: Escape on the list closes it, as on a menu -->
 					<ol class="toc" id="toc" aria-label="Contents" onkeydown={tocKey}>
@@ -873,7 +890,7 @@ for that save first, and closing the tab then asks before leaving.
 			</span>
 			<button
 				type="button"
-				class="linkbtn comments-btn"
+				class="btn btn-link btn-sm linkbtn comments-btn"
 				aria-expanded={desk.paneOpen && desk.pane.startsWith('margin')}
 				aria-controls={(docReviews[currentDoc ?? 0] ?? docReviews[0]).margin}
 				onclick={(e) => openComments(e.currentTarget)}>Comments <span class="ncount">{cardCount}</span></button
@@ -898,61 +915,74 @@ for that save first, and closing the tab then asks before leaving.
 	{#snippet header()}
 		{#if packet}
 			<!-- A packet stored before titles can carry a long one-sentence headline. -->
-			<FrameHeader long={packet.headline.length > 90}>
-				{#snippet crumb()}
-					<a href="/">Board</a><span aria-hidden="true">/</span><span>Packet</span>
-					{#if packet.meta.initiativeTitle}<span aria-hidden="true">/</span><span>{packet.meta.initiativeTitle}</span>{/if}
+			<FrameHeader
+				headlineText={packet.headline}
+				crumbs={[
+					{ text: 'Board', href: '/' },
+					{ text: 'Packet' },
+					...(packet.meta.initiativeTitle ? [{ text: packet.meta.initiativeTitle }] : []),
+					...(packetRepos ? [{ text: packetRepos }] : [])
+				]}
+			>
+				{#snippet state()}
+					<span>Waiting <time datetime={packet.meta.created}><span aria-hidden="true">{age(packet.meta.created)}</span><span class="sr-only">{spokenAge(packet.meta.created)}</span></time></span>
 					{#if packet.revision}<span class="badge badge-sm badge-outline rule-badge tone-info">Revision {packet.revision}</span>{/if}
 					{#if packet.irreversible}
 						<span class="badge badge-sm badge-outline rule-badge tone-error gap-1"><PacketIcon name="lock" class="size-3.5" />Irreversible</span>
 					{/if}
+					{@render itemState()}
 				{/snippet}
 				{#snippet headline()}<Prose text={packet.headline} />{/snippet}
 				{#snippet description()}
 					{#each [packet.background, ...packet.summary] as paragraph, i (i)}<p><Prose text={paragraph} /></p>{/each}
 				{/snippet}
 			</FrameHeader>
-		{:else if blueprint && review}
+		{:else if docItem && review}
 			{#snippet paragraphs()}
-				{#each blueprint.description ?? [] as paragraph, i (i)}<p><Prose text={paragraph} /></p>{/each}
+				{#each docItem.description ?? [] as paragraph, i (i)}<p><Prose text={paragraph} /></p>{/each}
 			{/snippet}
-			<FrameHeader description={blueprint.description?.length ? paragraphs : undefined}>
-				{#snippet crumb()}
-					<a href="/">Board</a><span aria-hidden="true">/</span><span>{blueprint.kind === 'page' ? 'Page' : 'Blueprint'}</span><span aria-hidden="true">/</span><span>{blueprint.meta.repo}</span>
-					{#if blueprint.revision}<span class="badge badge-sm badge-outline rule-badge tone-info">Revision {blueprint.revision}</span>{/if}
-					{#if blueprint.amend}<span class="badge badge-sm badge-outline rule-badge tone-info">Amends the approved version</span>{/if}
+			<FrameHeader
+				headlineText={docItem.meta.title}
+				description={docItem.description?.length ? paragraphs : undefined}
+				crumbs={[{ text: 'Board', href: '/' }, { text: docItem.kind === 'page' ? 'Page' : 'Blueprint' }, { text: docItem.meta.repo }]}
+			>
+				{#snippet state()}
+					{#if docItem.revision}<span class="badge badge-sm badge-outline rule-badge tone-info">Revision {docItem.revision}</span>{/if}
+					{#if docItem.amend}<span class="badge badge-sm badge-outline rule-badge tone-info">Amends the approved version</span>{/if}
+					{@render itemState()}
 				{/snippet}
-				{#snippet headline()}{blueprint.meta.title}{/snippet}
+				{#snippet headline()}{docItem.meta.title}{/snippet}
 				{#snippet lede()}{docLede}{/snippet}
 			</FrameHeader>
 		{:else if change}
-			<FrameHeader>
-				{#snippet crumb()}
-					<a href="/">Board</a><span aria-hidden="true">/</span><span>Change</span><span aria-hidden="true">/</span><span>{change.ref}</span>
+			<FrameHeader headlineText={CHANGE_HEADLINE} crumbs={[{ text: 'Board', href: '/' }, { text: 'Change' }, { text: change.ref }]}>
+				{#snippet state()}
+					{@render itemState()}
 				{/snippet}
-				{#snippet headline()}
-					Approving this change clears its pull request to merge.
-				{/snippet}
+				{#snippet headline()}{CHANGE_HEADLINE}{/snippet}
 				{#snippet lede()}{changeLede}{/snippet}
 			</FrameHeader>
 		{:else if data.kind === 'pr' || data.kind === 'design' || data.kind === 'triage'}
 			{@const item = data}
-			<FrameHeader long={item.headlineHtml.length > 90}>
-				{#snippet crumb()}
-					<a href="/">Board</a><span aria-hidden="true">/</span>
-					{#if item.kind === 'pr'}
-						<span>Pull request</span><span aria-hidden="true">/</span><span>{subject()}</span>
-						{#if item.link}
-							<span aria-hidden="true">/</span><span>{item.link.head} → {item.link.base}</span>
-							<a href={item.link.url} target="_blank" rel="noopener noreferrer">GitHub</a>
-						{/if}
+			<FrameHeader
+				headlineText={item.headlineHtml.replace(/<[^>]*>/g, '')}
+				crumbs={[
+					{ text: 'Board', href: '/' },
+					...(item.kind === 'pr'
+						? [{ text: 'Pull request' }, { text: subject() ?? '' }]
+						: item.kind === 'design'
+							? [{ text: 'Design' }, { text: item.meta.repo.split('/').pop() ?? '' }, ...(item.meta.file ? [{ text: item.meta.file }] : [])]
+							: [{ text: 'Triage' }, { text: item.meta.title }])
+				]}
+			>
+				{#snippet state()}
+					{#if item.kind === 'pr' && item.link}
+						<span>{item.link.head} → {item.link.base}</span>
+						<a href={item.link.url} target="_blank" rel="noopener noreferrer">GitHub<span class="sr-only"> (opens in a new tab)</span></a>
 					{:else if item.kind === 'design'}
-						<span>Design</span><span aria-hidden="true">/</span><span>{item.meta.repo.split('/').pop()}</span>
-						{#if item.meta.file}<span aria-hidden="true">/</span><span>{item.meta.file}</span>{/if}
-						<span aria-hidden="true">·</span><span>{item.minutes} min read</span>
-					{:else}
-						<span>Triage</span><span aria-hidden="true">/</span><span>{item.meta.title}</span>
+						<span>{item.minutes} min read</span>
 					{/if}
+					{@render itemState()}
 				{/snippet}
 				{#snippet headline()}{@html item.headlineHtml}{/snippet}
 				{#snippet lede()}{@html item.ledeHtml}{/snippet}
@@ -966,14 +996,14 @@ for that save first, and closing the tab then asks before leaving.
 		<PacketBrief data={packet} bind:verdicts decided={packet.decided} />
 		<PacketAsks asks={packet.asks} parts={packet.parts} bind:answers decided={packet.decided} />
 		<PacketRoutine routine={packet.routine} parts={packet.parts} bind:verdicts decided={packet.decided} />
-	{:else if blueprint && review}
-		{#if blueprint.missing}
-			<p class="bg bg-first bg-flat">The queue can no longer read <code>{blueprint.file}</code> from the worktree’s latest commit. The editor shows the copy that was queued, and you can’t edit it.</p>
+	{:else if docItem && review}
+		{#if docItem.missing}
+			<p class="bg bg-first bg-flat">The queue can no longer read <code>{docItem.file}</code> from the worktree’s latest commit. The editor shows the copy that was queued, and you can’t edit it.</p>
 		{/if}
-		{#if blueprint.kind === 'page'}
-			<PageView {review} file={blueprint.file} pr={blueprint.pr} place={docPlace} amend={blueprint.amend?.original} />
+		{#if docItem.kind === 'page'}
+			<PageView {review} file={docItem.file} pr={docItem.pr} place={docPlace} amend={docItem.amend?.original} />
 		{:else}
-			<BlueprintView {review} file={blueprint.file} place={docPlace} amend={blueprint.amend?.original} />
+			<BlueprintView {review} file={docItem.file} place={docPlace} amend={docItem.amend?.original} />
 		{/if}
 	{:else if change}
 		<ChangeView data={change} reviews={changeReviews} place={docPlace} />
@@ -1051,9 +1081,9 @@ for that save first, and closing the tab then asks before leaving.
 				<DecisionBar>
 					{#snippet note()}
 						{#if desk.noteOpen}
-							<div class="sendback">
-								<label for="note" class="lead">What should the {docReviews.length ? 'author' : 'session'} change?</label>
-								<p class="muted">
+							<fieldset class="sendback fieldset">
+								<legend class="fieldset-legend lead">What should the {docReviews.length ? 'author' : 'session'} change?</legend>
+								<p class="muted" id="note-hint">
 									{packet
 										? 'Your verdicts go with this note.'
 										: review && yourWords
@@ -1070,16 +1100,18 @@ for that save first, and closing the tab then asks before leaving.
 									id="note"
 									name="note"
 									class="textarea desk-field w-full"
+									aria-label="Your note"
+									aria-describedby="note-hint"
 									bind:this={noteField}
 									bind:value={noteText}
 								></textarea>
 								<div class="acts">
-									<button type="button" class="btn" onclick={closeNote}>Cancel <kbd>Esc</kbd></button>
-									<button class="btn btn-primary" formaction="?/reject" bind:this={sendButton}>
-										Send back <kbd>Ctrl</kbd><kbd>Enter</kbd>
+									<button type="button" class="btn" aria-keyshortcuts="Escape" onclick={closeNote}>Cancel <kbd aria-hidden="true">Esc</kbd></button>
+									<button class="btn btn-primary" formaction="?/reject" aria-keyshortcuts="Control+Enter Meta+Enter" bind:this={sendButton}>
+										Send back <kbd aria-hidden="true">Ctrl</kbd><kbd aria-hidden="true">Enter</kbd>
 									</button>
 								</div>
-							</div>
+							</fieldset>
 						{/if}
 					{/snippet}
 					{#snippet reject()}
@@ -1143,6 +1175,7 @@ for that save first, and closing the tab then asks before leaving.
 							<button
 								type="submit"
 								class="btn btn-primary bar-approve"
+								aria-keyshortcuts="Control+Enter Meta+Enter"
 								formaction="?/approve"
 								bind:this={approveButton}
 								aria-describedby="bar-state"
@@ -1152,12 +1185,13 @@ for that save first, and closing the tab then asks before leaving.
 									approvePacket();
 								}}
 							>
-								Approve the packet <kbd>Ctrl</kbd><kbd>Enter</kbd>
+								Approve the packet <kbd aria-hidden="true">Ctrl</kbd><kbd aria-hidden="true">Enter</kbd>
 							</button>
 						{:else if docReviews.length}
 							<button
 								type="submit"
 								class="btn btn-primary bar-approve"
+								aria-keyshortcuts="Control+Enter Meta+Enter"
 								formaction="?/approve"
 								bind:this={approveButton}
 								aria-describedby="bar-state"
@@ -1167,16 +1201,17 @@ for that save first, and closing the tab then asks before leaving.
 									approveDoc();
 								}}
 							>
-								Approve the {data.kind === 'page' ? 'page' : data.kind === 'change' ? 'change' : 'blueprint'} <kbd>Ctrl</kbd><kbd>Enter</kbd>
+								Approve the {data.kind === 'page' ? 'page' : data.kind === 'change' ? 'change' : 'blueprint'} <kbd aria-hidden="true">Ctrl</kbd><kbd aria-hidden="true">Enter</kbd>
 							</button>
 						{:else if data.kind === 'triage'}
-							<button class="btn btn-primary" bind:this={submitButton}>
-								Submit calls <kbd>Ctrl</kbd><kbd>Enter</kbd>
+							<button class="btn btn-primary" aria-keyshortcuts="Control+Enter Meta+Enter" bind:this={submitButton}>
+								Submit calls <kbd aria-hidden="true">Ctrl</kbd><kbd aria-hidden="true">Enter</kbd>
 							</button>
 						{:else if !decided.sendBack}
 							<button
 								type="submit"
 								class="btn btn-primary bar-approve"
+								aria-keyshortcuts={desk.singleKeys ? 'Control+Enter Meta+Enter a' : 'Control+Enter Meta+Enter'}
 								formaction="?/approve"
 								bind:this={approveButton}
 								aria-describedby="bar-state"
@@ -1186,7 +1221,7 @@ for that save first, and closing the tab then asks before leaving.
 									approveCards();
 								}}
 							>
-								{data.kind === 'pr' ? 'Approve and merge' : 'Approve the design'} <kbd>Ctrl</kbd><kbd>Enter</kbd>
+								{data.kind === 'pr' ? 'Approve and merge' : 'Approve the design'} <kbd aria-hidden="true">Ctrl</kbd><kbd aria-hidden="true">Enter</kbd>
 							</button>
 						{/if}
 					{/snippet}
@@ -1197,11 +1232,12 @@ for that save first, and closing the tab then asks before leaving.
 </Frame>
 
 {#if data.kind === 'packet' && data.irreversible && !data.decided}
-	<dialog id="confirm" class="modal" aria-labelledby="confirm-title" bind:this={confirmDialog}>
+	<dialog id="confirm" class="modal" aria-labelledby="confirm-title" aria-describedby="confirm-body" bind:this={confirmDialog}>
 		<div class="modal-box max-w-md rounded-box border border-base-300 p-5">
 			<h2 id="confirm-title" class="desk-title flex items-center gap-2 text-xl">
 				<PacketIcon name="lock" class="size-5 tone-error" />This approval cannot be undone later
 			</h2>
+			<div id="confirm-body">
 			{#if data.irreversibleSteps.length}
 				<p class="mt-2 leading-relaxed">Approving lets the session run these steps, and none of them can be reverted:</p>
 				<ul class="mt-1 list-disc ps-5 leading-relaxed">
@@ -1213,8 +1249,10 @@ for that save first, and closing the tab then asks before leaving.
 				<p class="mt-2 leading-relaxed">An ask in this packet is marked irreversible.</p>
 			{/if}
 			<p class="mt-2 text-sm desk-muted">Undo still works for 5 seconds after you confirm.</p>
+			</div>
 			<div class="modal-action mt-4">
-				<button type="button" class="btn btn-ghost" onclick={() => confirmDialog?.close()}>Cancel</button>
+				<!-- svelte-ignore a11y_autofocus: the safe choice takes focus when the dialog opens, so Enter never confirms an irreversible approval -->
+				<button type="button" class="btn btn-ghost" autofocus onclick={() => confirmDialog?.close()}>Cancel</button>
 				<button
 					type="submit"
 					class="btn btn-error"

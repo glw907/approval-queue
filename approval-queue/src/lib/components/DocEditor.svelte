@@ -34,12 +34,14 @@ text drops a box left empty. Below 1260px a tap on a highlight opens the drawer 
 		yaml?: boolean;
 		/** The approved text this file amends. Set, the editor shows the diff since it, unchanged runs folded. */
 		amend?: string;
+		/** The margin's card heading level: 4 where the editor sits under its own document's h2, else 3. */
+		level?: 3 | 4;
 	}
 
-	let { review, file, label, kindWord, yaml = false, amend }: Props = $props();
+	let { review, file, label, kindWord, yaml = false, amend, level }: Props = $props();
 
 	let host = $state<HTMLDivElement>();
-	let view = $state<EditorView | null>(null);
+	let view = $state.raw<EditorView | null>(null);
 
 	onMount(() => {
 		if (!host) return;
@@ -119,22 +121,23 @@ text drops a box left empty. Below 1260px a tap on a highlight opens the drawer 
 			{#if review.canComment}
 				<button
 					type="button"
-					class="linkbtn addc"
+					class="btn btn-link btn-sm linkbtn addc"
+					aria-keyshortcuts="Control+Alt+M"
 					aria-disabled={review.selectionEmpty}
 					title="Select text to comment on it"
 					onpointerdown={commentDown}
 					onclick={(e) => e.detail === 0 && void review.openBox()}
 				>
-					Comment <kbd>Ctrl</kbd><kbd>Alt</kbd><kbd>M</kbd>
+					Comment <kbd aria-hidden="true">Ctrl</kbd><kbd aria-hidden="true">Alt</kbd><kbd aria-hidden="true">M</kbd>
 				</button>
 			{/if}
 			{#if amend !== undefined && view}
-				<button type="button" class="linkbtn addc" onclick={() => uncollapseAll(view!)}>Show all unchanged lines</button>
+				<button type="button" class="btn btn-link btn-sm linkbtn addc" onclick={() => uncollapseAll(view!)}>Show all unchanged lines</button>
 			{/if}
 			{#if review.editable}
-				<label class="marks"><input type="checkbox" bind:checked={review.markChanges} /> Mark the lines you changed</label>
+				<label class="marks"><input type="checkbox" class="toggle toggle-sm" bind:checked={review.markChanges} /> Mark the lines you changed</label>
 			{/if}
-			<!-- Not a live region: the review announces the first save and any failure, not every pause in typing. -->
+			<!-- Not a live region: the review announces a failed save, not every pause in typing. -->
 			<span class={['esaved', review.saveFailed && 'failed']}>{review.saveStatus}</span>
 		</div>
 		<!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events: the padding forwards a pointer press to the editor, which has its own keyboard focus, and a tap on a highlight opens its card, which Ctrl+Alt+N reaches from the keyboard -->
@@ -147,7 +150,7 @@ text drops a box left empty. Below 1260px a tap on a highlight opens the drawer 
 		></div>
 		{#if !view}<p class="loading">Loading the editor…</p>{/if}
 	</div>
-	<Margin {review} {kindWord} />
+	<Margin {review} {kindWord} {level} />
 </div>
 
 <style>
@@ -184,8 +187,12 @@ text drops a box left empty. Below 1260px a tap on a highlight opens the drawer 
 		margin-left: 12px;
 		font-size: 0.8rem;
 	}
+	/* daisyUI dims an aria-disabled button to 20% ink and cuts its pointer events, which would kill
+	   the tooltip and the pointerdown hint; the click guard stays in script. */
 	.addc[aria-disabled='true'] {
+		--btn-color: var(--color-muted);
 		color: var(--color-muted);
+		pointer-events: auto;
 		text-decoration: none;
 		cursor: default;
 	}
@@ -196,10 +203,6 @@ text drops a box left empty. Below 1260px a tap on a highlight opens the drawer 
 		margin-left: auto;
 		cursor: pointer;
 		white-space: nowrap;
-	}
-	.marks input {
-		accent-color: var(--color-primary);
-		margin: 0;
 	}
 	.esaved {
 		margin-left: auto;
@@ -345,16 +348,28 @@ text drops a box left empty. Below 1260px a tap on a highlight opens the drawer 
 		color: var(--color-muted);
 		line-height: 1.6;
 	}
-	/* Highlights are fills only, deepening while their card is current (round 6). */
+	/*
+	 * Highlights are light fills, deepening while their card is current (round 6), each with a 2px
+	 * underline in an ink with 3:1 or better against the page. No fill keeps 3:1 against the page and
+	 * 4.5:1 for the text over it with room left for a deeper current state (light warning tops out at
+	 * 2.50:1; the rest hold both only in a 3.1 to 3.2 sliver), so the underline carries the 3:1 and
+	 * the fills keep the text above 10:1. Ink against the page, light then dark: warning 6.24, 11.06;
+	 * info 6.85, 10.48; primary 6.76, 8.27.
+	 */
 	.cm-host :global(:is(.cm-anchor, .cm-cmt)) {
 		border-radius: 2px;
+		text-decoration: underline;
+		text-decoration-thickness: 2px;
+		text-underline-offset: 2px;
 		transition: background-color var(--motion-quick) var(--motion-ease);
 	}
 	.cm-host :global(.cm-anchor) {
 		background: color-mix(in oklab, var(--color-warning) 18%, transparent);
+		text-decoration-color: var(--cairn-warning-ink);
 	}
 	.cm-host :global(.cm-anchor.info) {
 		background: color-mix(in oklab, var(--color-info) 12%, transparent);
+		text-decoration-color: var(--cairn-info-ink);
 	}
 	.cm-host :global(.cm-anchor.cur) {
 		background: color-mix(in oklab, var(--color-warning) 34%, transparent);
@@ -364,6 +379,7 @@ text drops a box left empty. Below 1260px a tap on a highlight opens the drawer 
 	}
 	.cm-host :global(.cm-cmt) {
 		background: color-mix(in oklab, var(--color-primary) 14%, transparent);
+		text-decoration-color: var(--color-primary);
 	}
 	.cm-host :global(.cm-cmt.cur) {
 		background: color-mix(in oklab, var(--color-primary) 26%, transparent);

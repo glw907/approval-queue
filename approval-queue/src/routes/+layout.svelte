@@ -11,7 +11,7 @@ this session" until the queue reload lists it there itself.
 -->
 <script lang="ts">
 	import '../app.css';
-	import { afterNavigate, invalidate } from '$app/navigation';
+	import { afterNavigate, goto, invalidate } from '$app/navigation';
 	import { page } from '$app/state';
 	import { onMount } from 'svelte';
 	import { fade } from 'svelte/transition';
@@ -25,6 +25,7 @@ this session" until the queue reload lists it there itself.
 
 	const KINDS = { pr: 'PR', design: 'Design', triage: 'Triage', packet: 'Packet', blueprint: 'Blueprint', page: 'Page', change: 'Change' };
 	const OUTCOMES = { approve: 'Approved', reject: 'Sent back', submit: 'Submitted', defer: 'Deferred' };
+	const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
 	let sheet: HTMLDialogElement;
 	let railButton = $state<HTMLButtonElement>();
@@ -55,9 +56,23 @@ this session" until the queue reload lists it there itself.
 		const groups = new Map<string, typeof waiting>();
 		for (const item of waiting) groups.set(initiativeOf(item), [...(groups.get(initiativeOf(item)) ?? []), item]);
 		return [...groups]
-			.map(([title, items]) => ({ title, items }))
+			.map(([title, items]) => {
+				// Within a group the repo names its own list, as the prototype's rail does.
+				const repos = new Map<string, typeof waiting>();
+				for (const item of items) {
+					const repo = item.repo.split('/').pop() ?? item.repo;
+					repos.set(repo, [...(repos.get(repo) ?? []), item]);
+				}
+				return { title, repos: [...repos].map(([repo, list]) => ({ repo, items: list })) };
+			})
 			.sort((a, b) => rank(a.title) - rank(b.title));
 	});
+
+	/** The line under a rail entry's title: a packet's asks and whether it cannot be undone, else its kind. */
+	function railMeta(item: (typeof data.queue)[number]) {
+		if (item.kind !== 'packet') return item.number === undefined ? KINDS[item.kind] : `${KINDS[item.kind]} #${item.number}`;
+		return [item.asks ? plural(item.asks, 'ask') : 'Routine only', item.irreversible && 'irreversible'].filter(Boolean).join(' · ');
+	}
 
 	type SheetRow = { keys: string[]; text: string; single?: boolean };
 	const CTRL_ENTER = ['Ctrl', 'Enter'];
@@ -66,6 +81,7 @@ this session" until the queue reload lists it there itself.
 		const anywhere: SheetRow[] = [
 			{ keys: ['j'], text: 'Next item in the queue', single: true },
 			{ keys: ['k'], text: 'Previous item in the queue', single: true },
+			{ keys: ['b'], text: 'Go to the board', single: true },
 			{ keys: ['z'], text: 'Undo the last decision, within five seconds of it', single: true },
 			{ keys: ['?'], text: 'Show or hide this sheet', single: true },
 			{ keys: ['Esc'], text: 'Close the sheet, a panel, or the note' }
@@ -76,7 +92,12 @@ this session" until the queue reload lists it there itself.
 		const screens: Record<typeof desk.page, { title: string; rows: SheetRow[] }> = {
 			packet: {
 				title: 'On a packet',
-				rows: [{ keys: ['F8'], text: 'Next open ask' }, approveOr('Approve the packet'), sendBack]
+				rows: [
+						{ keys: ['F8'], text: 'Next open ask' },
+						{ keys: ['1', '2', '3'], text: 'Pick that option of the ask in focus', single: true },
+						approveOr('Approve the packet'),
+						sendBack
+					]
 			},
 			pr: {
 				title: 'On a pull request',
@@ -172,12 +193,6 @@ this session" until the queue reload lists it there itself.
 		}
 	}
 
-	/** "owner/repo" and an optional number, as the queue and the toast print an item. */
-	function label(item: { repo: string; number?: number }) {
-		const name = item.repo.split('/').pop();
-		return item.number === undefined ? name : `${name} #${item.number}`;
-	}
-
 	function toggleSheet() {
 		if (sheet.open) sheet.close();
 		else {
@@ -186,12 +201,25 @@ this session" until the queue reload lists it there itself.
 		}
 	}
 
+	/**
+	 * Moves focus to the next or previous queue link. On the board the rows are the list, as the
+	 * prototype's `moveList` scopes it; on any other page it is the rail's entries.
+	 */
 	function moveQueue(step: number) {
-		const links = [...document.querySelectorAll<HTMLAnchorElement>('[data-q]')];
+		const links = [...document.querySelectorAll<HTMLAnchorElement>(page.url.pathname === '/' ? '#main [data-q]' : '#rail [data-q]')];
 		if (!links.length) return;
 		const at = links.indexOf(document.activeElement as HTMLAnchorElement);
-		const from = at >= 0 ? at : Math.max(links.findIndex((a) => a.hasAttribute('aria-current')), 0);
+		const from = at >= 0 ? at : links.findIndex((a) => a.hasAttribute('aria-current'));
 		links[Math.min(links.length - 1, Math.max(0, from + step))].focus();
+	}
+
+	/** Picks the n-th option of the ask that holds focus; false when focus is outside an ask or it has no such option. */
+	function pickChoice(n: number) {
+		const radio = document.activeElement?.closest('.ask')?.querySelectorAll<HTMLInputElement>('input[type=radio]')[n - 1];
+		if (!radio || radio.disabled) return false;
+		radio.click();
+		radio.focus();
+		return true;
 	}
 
 	/** Motion rule 4: a toast that leaves on its timer fades out; one Undo ends, or any under reduced motion, goes at once. */
@@ -232,6 +260,10 @@ this session" until the queue reload lists it there itself.
 			}
 		);
 		if (!action) return;
+		if (action.startsWith('pick-')) {
+			if (pickChoice(Number(action.slice(5)))) e.preventDefault();
+			return;
+		}
 		const run =
 			action === 'toggle-sheet'
 				? toggleSheet
@@ -239,9 +271,11 @@ this session" until the queue reload lists it there itself.
 					? () => moveQueue(1)
 					: action === 'queue-prev'
 						? () => moveQueue(-1)
-						: action === 'undo'
-							? () => void held.undo()
-							: desk.handlers[action];
+						: action === 'board'
+							? () => void goto('/', { replaceState: true })
+							: action === 'undo'
+								? () => void held.undo()
+								: desk.handlers[action];
 		if (!run) return;
 		e.preventDefault();
 		run();
@@ -258,54 +292,70 @@ this session" until the queue reload lists it there itself.
 		role={desk.railOpen ? 'dialog' : undefined}
 		aria-modal={desk.railOpen ? 'true' : undefined}
 	>
-		<button type="button" class="drawer-x" aria-label="Close the queue" onclick={closeDrawers}>
+		<button type="button" class="drawer-x btn btn-ghost btn-sm btn-square" aria-label="Close the queue" onclick={closeDrawers}>
 			<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
 		</button>
 		<div class="title"><a href="/" data-sveltekit-replacestate>Approval Queue</a></div>
 		<div class="sub" aria-live="polite">{waiting.length} waiting</div>
+		<a
+			href="/"
+			class={['btn btn-sm btn-ghost board-btn justify-start gap-2', page.url.pathname === '/' && 'btn-active']}
+			aria-current={page.url.pathname === '/' ? 'page' : undefined}
+			aria-keyshortcuts={desk.singleKeys ? 'b' : undefined}
+			data-sveltekit-replacestate
+		>
+			<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h10" /></svg>Board
+			<kbd class="desk-sk" aria-hidden="true">b</kbd>
+		</a>
 		{#each sidebar as group, g (group.title)}
-			<h2 class="group" id="nav-{g}">{group.title}</h2>
-			<ul class="rail-list" aria-labelledby="nav-{g}">
-				{#each group.items as item (item.id)}
-					<li>
-						<a
-							href="/item/{item.id}"
-							data-q
-							class={['q', item.id === currentId && 'on']}
-							aria-current={item.id === currentId ? 'page' : undefined}
-						>
-							<span>{item.headline ?? item.title}</span>
-							<span class="meta">
-								<span>{item.kind === 'packet' ? KINDS[item.kind] : `${KINDS[item.kind]} · ${label(item)}`}</span>
-								<span class="tabular-nums">{age(item.created)}</span>
-							</span>
-						</a>
-						{#if item.id === currentId && desk.outline?.length}
-							<ol class="rail-toc" aria-label="Contents">
-								{#each desk.outline as e (e.key)}
-									<li>
-										<a
-											href={e.href}
-											class={[e.level === 3 && 'l3', e.cur && 'cur']}
-											aria-current={e.cur ? 'location' : undefined}
-											onclick={(ev) => {
-												ev.preventDefault();
-												closeDrawersForLink();
-												e.go();
-											}}
-											><span class="n">{e.n}</span><span class="t">{e.text}</span>{#if e.mark}<span
-													class="mk {e.mark}"
-													aria-hidden="true"
-													title={e.mark === 'call' ? 'A call for you' : 'Corrected'}
-												></span><span class="sr-only">{e.mark === 'call' ? ', a call for you' : ', corrected'}</span>{/if}</a
-										>
-									</li>
-								{/each}
-							</ol>
-						{/if}
-					</li>
+			<section class="init-region" aria-labelledby="nav-{g}">
+				<h2 class="group" id="nav-{g}">{group.title}</h2>
+				{#each group.repos as repo (repo.repo)}
+					<h3 class="repo-title">{repo.repo}</h3>
+					<ul class="rail-list" aria-label="{repo.repo} in {group.title}">
+						{#each repo.items as item (item.id)}
+							<li>
+								<a
+									href="/item/{item.id}"
+									data-q
+									class={['q', item.id === currentId && 'on']}
+									aria-current={item.id === currentId ? 'page' : undefined}
+								>
+									<span>{item.headline ?? item.title}</span>
+									<span class="meta">
+										<span>{railMeta(item)}</span>
+										<time class="tabular-nums" datetime={item.created}>{age(item.created)}</time>
+									</span>
+									{#if item.orphaned}<span class="orphan">No session is waiting for this.</span>{/if}
+								</a>
+								{#if item.id === currentId && desk.outline?.length}
+									<ol class="rail-toc" aria-label="Contents">
+										{#each desk.outline as e (e.key)}
+											<li>
+												<a
+													href={e.href}
+													class={[e.level === 3 && 'l3', e.cur && 'cur']}
+													aria-current={e.cur ? 'location' : undefined}
+													onclick={(ev) => {
+														ev.preventDefault();
+														closeDrawersForLink();
+														e.go();
+													}}
+													><span class="n">{e.n}</span><span class="t">{e.text}</span>{#if e.mark}<span
+															class="mk {e.mark}"
+															aria-hidden="true"
+															title={e.mark === 'call' ? 'A call for you' : 'Corrected'}
+														></span><span class="sr-only">{e.mark === 'call' ? ', a call for you' : ', corrected'}</span>{/if}</a
+												>
+											</li>
+										{/each}
+									</ol>
+								{/if}
+							</li>
+						{/each}
+					</ul>
 				{/each}
-			</ul>
+			</section>
 		{:else}
 			<p class="dq">Nothing waiting.</p>
 		{/each}
@@ -313,7 +363,7 @@ this session" until the queue reload lists it there itself.
 			<h2 class="group">Decided this session</h2>
 			<ul class="rail-list">
 				{#each decided as row (row.id)}
-					<li class="dq">
+					<li class={['dq', row.outcome === OUTCOMES.defer && 'deferred']}>
 						<span>{row.title}</span>
 						<span>{row.outcome}</span>
 					</li>
@@ -323,8 +373,8 @@ this session" until the queue reload lists it there itself.
 		{#if desk.page === 'triage'}
 			<p class="dq desk-sk">j k next and previous</p>
 		{/if}
-		<button type="button" class="rail-keys" id="open-keys" onclick={toggleSheet}>
-			Keyboard shortcuts <kbd class="desk-sk">?</kbd>
+		<button type="button" class="rail-keys btn btn-ghost btn-sm" id="open-keys" aria-keyshortcuts={desk.singleKeys ? '?' : undefined} onclick={toggleSheet}>
+			Keyboard shortcuts <kbd class="desk-sk" aria-hidden="true">?</kbd>
 		</button>
 	</nav>
 
@@ -332,7 +382,7 @@ this session" until the queue reload lists it there itself.
 		<div class="appbar">
 			<button
 				type="button"
-				class="appbtn"
+				class="appbtn btn btn-sm"
 				id="queue-open"
 				bind:this={railButton}
 				aria-controls="rail"
@@ -386,10 +436,10 @@ this session" until the queue reload lists it there itself.
 						<tbody>
 							{#each section.rows as row (row.text)}
 								<tr>
-									<td class="whitespace-nowrap">
+									<th scope="row" class="whitespace-nowrap font-normal">
 										<!-- A "/" after the first key separates two chords that share their modifiers. -->
 										{#each row.keys as key, i (i)}{#if key === '/' && i > 0}<span class="ms-1">/</span>{:else}<kbd class={['kbd kbd-xs desk-kbd', row.single && 'desk-sk', i > 0 && 'ms-1']}>{key}</kbd>{/if}{/each}
-									</td>
+									</th>
 									<td>{row.text}</td>
 								</tr>
 							{/each}
@@ -400,7 +450,7 @@ this session" until the queue reload lists it there itself.
 		</div>
 		<div class="modal-action mt-4">
 			<form method="dialog">
-				<button class="btn btn-sm">Close <kbd class="kbd kbd-xs desk-kbd">Esc</kbd></button>
+				<button class="btn btn-sm" aria-keyshortcuts="Escape">Close <kbd class="kbd kbd-xs desk-kbd" aria-hidden="true">Esc</kbd></button>
 			</form>
 		</div>
 	</div>
@@ -429,8 +479,8 @@ this session" until the queue reload lists it there itself.
 	>
 		<div class="alert alert-info border border-base-300 text-sm">
 			<span>{held.current.toast}</span>
-			<button type="button" class="btn btn-sm" id="undo" onclick={() => void held.undo()}>
-				Undo <kbd class="kbd kbd-xs desk-kbd desk-sk">z</kbd>
+			<button type="button" class="btn btn-sm" id="undo" aria-keyshortcuts={desk.singleKeys ? 'z' : undefined} onclick={() => void held.undo()}>
+				Undo <kbd class="kbd kbd-xs desk-kbd desk-sk" aria-hidden="true">z</kbd>
 			</button>
 		</div>
 	</div>
@@ -442,7 +492,20 @@ this session" until the queue reload lists it there itself.
 		</div>
 	</div>
 {:else if desk.toast !== null}
-	<div class="toast toast-center desk-toast z-40" out:fade={toastOut(true)} onoutrostart={(e) => (e.currentTarget.inert = true)}>
+	<div
+		class="toast toast-center desk-toast z-40"
+		role="group"
+		aria-label="Notice"
+		{@attach () => () => desk.releaseFlash()}
+		out:fade={toastOut(true)}
+		onoutrostart={(e) => (e.currentTarget.inert = true)}
+		onpointermove={(e) => {
+			if (e.movementX || e.movementY) desk.pauseFlash('pointer');
+		}}
+		onpointerleave={() => desk.resumeFlash('pointer')}
+		onfocusin={() => desk.pauseFlash('focus')}
+		onfocusout={() => desk.resumeFlash('focus')}
+	>
 		<div class="alert alert-info border border-base-300 text-sm">
 			<span>{desk.toast}</span>
 			{#if desk.toastUndo}

@@ -1,5 +1,6 @@
 // The review notes a document carries and the anchors that tie each one to a line. Pure functions,
 // shared by the server (which resolves the anchors once for the page) and the editor.
+import { decodeNamedCharacterReference } from 'decode-named-character-reference';
 import GithubSlugger from 'github-slugger';
 import { Lexer, type Token } from 'marked';
 import { place } from './comments.ts';
@@ -46,13 +47,18 @@ export type PlacedNote = Note & { range: Range | null };
 /** Whether a note asks the reader for a choice. */
 export const isCall = (note: Note) => note.kind !== 'info';
 
-/** The text a heading renders as, which rehype-slug slugs: inline Markdown reduced to its words. */
+/**
+ * The text a heading renders as, which rehype-slug slugs: inline Markdown reduced to its words. marked
+ * decodes numeric references but leaves named ones as text, so those go through the decoder cairn's
+ * parser runs; an unknown name stays as written.
+ */
 function plainText(tokens: Token[]): string {
 	return tokens
 		.map((t) => {
 			if (t.type === 'image' || t.type === 'html' || t.type === 'br') return '';
 			if ('tokens' in t && t.tokens) return plainText(t.tokens);
-			return 'text' in t ? t.text : '';
+			if (t.type === 'codespan') return t.text;
+			return 'text' in t ? t.text.replace(/&(\w+);/g, (whole: string, name: string) => decodeNamedCharacterReference(name) || whole) : '';
 		})
 		.join('');
 }
@@ -126,21 +132,27 @@ interface Scan {
 function recorder(out: Map<string, Range>, alias: Map<string, Range>) {
 	let section = '';
 	let old = '';
+	// The first version resolved a repeated heading's slug to its first section only, so a later section
+	// bearing the same old slug records no aliases.
+	const bore = new Set<string>();
+	let aliased = false;
 	return {
 		enter(name: string, oldName: string) {
 			section = name;
 			old = oldName;
+			aliased = !bore.has(oldName);
+			bore.add(oldName);
 		},
 		put(suffix: string, range: Range) {
 			const key = section + suffix;
 			if (!out.has(key)) out.set(key, range);
 			const oldKey = old + suffix;
-			if (oldKey !== key && !alias.has(oldKey)) alias.set(oldKey, range);
+			if (aliased && oldKey !== key && !alias.has(oldKey)) alias.set(oldKey, range);
 		},
 		// Replaces the range of a key this section already holds, as a growing page block does.
 		set(suffix: string, range: Range) {
 			out.set(section + suffix, range);
-			if (old !== section) alias.set(old + suffix, range);
+			if (aliased && old !== section) alias.set(old + suffix, range);
 		}
 	};
 }

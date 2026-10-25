@@ -400,12 +400,22 @@ async function readBlueprint(dir: string, meta: ItemMeta): Promise<ItemContent> 
 	}
 }
 
-/** Writes `decision.json` through a temp file in the item directory, so the waiting command never reads a partial file. */
-export async function writeDecision(root: string, id: string, decision: Decision): Promise<void> {
+/** Whether the item still has its `item.json`, which a withdraw renames away before it checks for a decision. */
+const stillListed = (dir: string) => stat(join(dir, 'item.json')).then(() => true, () => false);
+
+/**
+ * Writes `decision.json` through a temp file in the item directory, so the waiting command never reads a partial file.
+ * Returns false when the item was withdrawn: the command's `retire_item` renames `item.json` away, then looks for a
+ * decision, so a decision written after that rename is taken back here and nothing is left beside a removed item.
+ */
+export async function writeDecision(root: string, id: string, decision: Decision): Promise<boolean> {
 	const dir = join(root, 'items', id);
 	const tmp = join(dir, 'decision.json.tmp');
 	await writeFile(tmp, JSON.stringify(decision));
 	await rename(tmp, join(dir, 'decision.json'));
+	if (await stillListed(dir)) return true;
+	await unlink(join(dir, 'decision.json')).catch(() => undefined);
+	return false;
 }
 
 /** Writes `deferred.json` through a temp file and `rename`, so the waiting command never reads a partial file. */
@@ -457,10 +467,10 @@ export const carried = (store: CommentStore): Required<Carried> => ({
 
 /**
  * Writes `decision.json` through a temp file named for this request, synced to disk, then `link`ed
- * into place. Returns false when a decision already exists, since `link` fails with `EEXIST` rather
- * than replace it, so two posts never both win.
+ * into place. Answers `exists` when a decision already exists, since `link` fails with `EEXIST` rather
+ * than replace it, so two posts never both win, and `gone` when the item was withdrawn (see `writeDecision`).
  */
-export async function writeDecisionOnce(root: string, id: string, decision: Decision): Promise<boolean> {
+export async function writeDecisionOnce(root: string, id: string, decision: Decision): Promise<'written' | 'exists' | 'gone'> {
 	const dir = join(root, 'items', id);
 	const tmp = join(dir, `decision.json.${randomUUID()}.tmp`);
 	const file = await open(tmp, 'wx');
@@ -472,11 +482,13 @@ export async function writeDecisionOnce(root: string, id: string, decision: Deci
 	}
 	try {
 		await link(tmp, join(dir, 'decision.json'));
-		return true;
 	} catch (err) {
-		if ((err as NodeJS.ErrnoException).code === 'EEXIST') return false;
+		if ((err as NodeJS.ErrnoException).code === 'EEXIST') return 'exists';
 		throw err;
 	} finally {
 		await unlink(tmp);
 	}
+	if (await stillListed(dir)) return 'written';
+	await unlink(join(dir, 'decision.json')).catch(() => undefined);
+	return 'gone';
 }

@@ -35,8 +35,8 @@ label per row. Renders `empty` instead when there are no items.
 </script>
 
 {#if items.length}
-	<svelte:element this={numbered ? 'ol' : 'ul'}>
-		{#each items as item (item.href)}
+	<svelte:element this={numbered ? 'ol' : 'ul'} class="menu menu-sm w-full">
+		{#each items as item (`${item.href}\n${item.label}`)}
 			<li>
 				<a href={item.href} class={[item.sub && 'l3']}>
 					{#if numbered}
