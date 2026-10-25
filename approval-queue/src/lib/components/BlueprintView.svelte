@@ -55,7 +55,7 @@ typing commits it there.
 
 {@render place()}
 
-<DocEditor {review} {amend} file={name} label="Blueprint {name}" kindWord="blueprint" yaml={/\.ya?ml$/.test(file)} />
+<DocEditor {review} {amend} file={name} label={amend === undefined ? `Blueprint ${name}` : `Blueprint ${name}, changes since the approved version`} kindWord="blueprint" yaml={/\.ya?ml$/.test(file)} />
 
 <style>
 	code {

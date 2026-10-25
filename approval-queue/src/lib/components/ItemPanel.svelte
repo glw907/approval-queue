@@ -209,7 +209,7 @@ for that save first, and closing the tab then asks before leaving.
 	const packet = $derived(data.kind === 'packet' ? data : null);
 	/** The repos the packet's PR and design parts live in, by name, in order of first appearance. */
 	const packetRepos = $derived(
-		packet ? [...new Set(packet.parts.map((p) => p.ref.split(/[#:]/)[0].split('/').pop()))].join(', ') : ''
+		packet ? [...new Set(packet.parts.filter((p) => p.kind !== 'step').map((p) => p.ref.split(/[#:]/)[0].split('/').pop()))].join(', ') : ''
 	);
 	const CHANGE_HEADLINE = 'Approving this change clears its pull request to merge.';
 

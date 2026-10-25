@@ -67,7 +67,7 @@ readable pull request ref shows no PR line.
 
 {@render place()}
 
-<DocEditor {review} {amend} file={name} label="Page {name}, markdown" kindWord="page" />
+<DocEditor {review} {amend} file={name} label={amend === undefined ? `Page ${name}, markdown` : `Page ${name}, markdown, changes since the approved version`} kindWord="page" />
 
 <style>
 	code {
