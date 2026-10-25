@@ -35,6 +35,10 @@ describe('anchorLines', () => {
 		expect(anchorLines(doc, 'page')).toBe('overview.heading\tOverview\n');
 	});
 
+	it('slugs a heading with a named entity as the page does', () => {
+		expect(anchorLines('## Q &amp; A\n', 'page')).toBe('q--a.heading\tQ &amp; A\n');
+	});
+
 	it('prints nothing for a document with no heading', () => {
 		expect(anchorLines('Just a paragraph.\n', 'page')).toBe('');
 	});

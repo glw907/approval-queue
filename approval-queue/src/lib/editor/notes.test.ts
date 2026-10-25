@@ -45,6 +45,24 @@ describe('heading slugs', () => {
 		}
 	});
 
+	it.each([
+		['Q &amp; A', 'q--a'],
+		['Fish &amp; chips &lt; salt &copy;', 'fish--chips--salt-'],
+		['Tom &#38; Jerry', 'tom--jerry'],
+		['An &foo; entity', 'an-foo-entity']
+	])('decodes the entities in %s to give %s', (text, want) => expect(slugs([text])).toEqual([want]));
+
+	it('gives a repeated old slug aliases to its first section only', () => {
+		const items = (n: number) => Array.from({ length: n }, (_, i) => `- Item ${i + 1}.`).join('\n');
+		const doc = `## Setup\n\n${items(2)}\n\n## Setup\n\n${items(5)}\n`;
+		for (const kind of ['blueprint', 'page'] as const) {
+			const found = anchors(doc, kind);
+			expect(found.has('setup.p3')).toBe(false);
+			expect(doc.slice(...found.get('setup-1.p3')!)).toBe('Item 4.');
+			expect(doc.slice(...found.get('setup.p1')!)).toBe('Item 2.');
+		}
+	});
+
 	it('lets a current key win over an alias of the same name', () => {
 		const doc = "## A'b\n\n- One.\n\n## A b\n\n- Two.\n";
 		const found = anchors(doc, 'page');
