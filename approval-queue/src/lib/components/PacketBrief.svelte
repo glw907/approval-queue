@@ -52,9 +52,9 @@ changed. A step the packet does not route shows no segment.
 						{#if routed}<Prose text={routed.fact} />{/if}
 					</p>
 					{#if routed}
-						<details class="why">
-							<summary><PacketIcon name="chev" class="chev" />Why</summary>
-							<div class="why-body"><p><Prose text={routed.why} /></p></div>
+						<details class="collapse why">
+							<summary class="collapse-title"><PacketIcon name="chev" class="chev" />Why</summary>
+							<div class="collapse-content why-body"><p><Prose text={routed.why} /></p></div>
 						</details>
 					{/if}
 				</div>

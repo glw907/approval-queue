@@ -26,7 +26,7 @@ beside it follows as a smaller status line, and one passed alone is the one-para
 		<path d="M0 154 C 220 132, 360 178, 560 148 S 900 114, 1200 140" />
 		<path d="M640 160 C 700 120, 820 118, 900 140 S 1060 150, 1200 128" />
 	</svg>
-	<p class="crumb">{@render crumb()}</p>
+	<nav class="crumb" aria-label="Breadcrumb">{@render crumb()}</nav>
 	<h1 class={['desk-title', long && 'long']}><span class="site-benchmark" aria-hidden="true"></span>{@render headline()}</h1>
 	{#if description}
 		<div class="lede">{@render description()}</div>

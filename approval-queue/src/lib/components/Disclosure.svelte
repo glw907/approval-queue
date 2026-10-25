@@ -20,12 +20,12 @@ the body is the children.
 	let { name, summaryHtml, wide = false, open = $bindable(false), children }: Props = $props();
 </script>
 
-<details class={['bg', wide && 'wide']} bind:open>
-	<summary>
+<details class={['collapse bg', wide && 'wide']} bind:open>
+	<summary class="collapse-title">
 		<PacketIcon name="chev" class="chev" />
 		<span><span class="lead">{name}.</span>{#if summaryHtml}{" "}{@html summaryHtml}{/if}</span>
 	</summary>
-	<div class="body">
+	<div class="collapse-content body">
 		{@render children?.()}
 	</div>
 </details>

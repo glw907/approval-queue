@@ -119,7 +119,7 @@ text drops a box left empty. Below 1260px a tap on a highlight opens the drawer 
 			{#if review.canComment}
 				<button
 					type="button"
-					class="linkbtn addc"
+					class="btn btn-link btn-sm linkbtn addc"
 					aria-disabled={review.selectionEmpty}
 					title="Select text to comment on it"
 					onpointerdown={commentDown}
@@ -129,10 +129,10 @@ text drops a box left empty. Below 1260px a tap on a highlight opens the drawer 
 				</button>
 			{/if}
 			{#if amend !== undefined && view}
-				<button type="button" class="linkbtn addc" onclick={() => uncollapseAll(view!)}>Show all unchanged lines</button>
+				<button type="button" class="btn btn-link btn-sm linkbtn addc" onclick={() => uncollapseAll(view!)}>Show all unchanged lines</button>
 			{/if}
 			{#if review.editable}
-				<label class="marks"><input type="checkbox" bind:checked={review.markChanges} /> Mark the lines you changed</label>
+				<label class="marks"><input type="checkbox" class="toggle toggle-sm" bind:checked={review.markChanges} /> Mark the lines you changed</label>
 			{/if}
 			<!-- Not a live region: the review announces the first save and any failure, not every pause in typing. -->
 			<span class={['esaved', review.saveFailed && 'failed']}>{review.saveStatus}</span>
@@ -185,7 +185,7 @@ text drops a box left empty. Below 1260px a tap on a highlight opens the drawer 
 		font-size: 0.8rem;
 	}
 	.addc[aria-disabled='true'] {
-		color: var(--color-muted);
+		--btn-fg: var(--color-muted);
 		text-decoration: none;
 		cursor: default;
 	}
@@ -196,10 +196,6 @@ text drops a box left empty. Below 1260px a tap on a highlight opens the drawer 
 		margin-left: auto;
 		cursor: pointer;
 		white-space: nowrap;
-	}
-	.marks input {
-		accent-color: var(--color-primary);
-		margin: 0;
 	}
 	.esaved {
 		margin-left: auto;

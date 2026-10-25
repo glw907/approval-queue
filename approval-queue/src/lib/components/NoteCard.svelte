@@ -41,7 +41,7 @@ programmatic focus, so a screen can land focus on it after a change.
 	<div role="group" class="note done collapsed" id="note-{note.id}" tabindex="-1" aria-label="{outcome.head} {note.title}">
 		<p class="nh">
 			<span class="kind">{outcome.head}</span><span class="outcome">{outcome.text}</span>
-			<button type="button" class="linkbtn reopen" {disabled} onclick={onreopen}>Reopen</button>
+			<button type="button" class="btn btn-link btn-sm linkbtn reopen" {disabled} onclick={onreopen}>Reopen</button>
 		</p>
 	</div>
 {:else}
@@ -65,7 +65,7 @@ programmatic focus, so a screen can land focus on it after a change.
 		{#if note.choices?.length}
 			<div class="choices">
 				{#each note.choices as c, i (i)}
-					<button type="button" class="choice" {disabled} onclick={() => onchoose(i)}>{c.label}</button>
+					<button type="button" class="choice btn btn-sm" {disabled} onclick={() => onchoose(i)}>{c.label}</button>
 				{/each}
 			</div>
 		{:else if !disabled}
@@ -118,22 +118,20 @@ programmatic focus, so a screen can land focus on it after a change.
 		gap: 4px 8px;
 		margin-top: 8px;
 	}
+	/* The stock small button, set as a full-width choice: a long label wraps and reads from the left. */
 	.choice {
-		display: flex;
+		--btn-color: var(--color-base-100);
+		--btn-fg: var(--color-base-content);
+		--btn-border: var(--color-base-300);
 		width: 100%;
-		align-items: center;
-		gap: 6px;
+		height: auto;
+		justify-content: flex-start;
 		text-align: left;
-		font: 600 0.82rem/1.2 var(--font-body);
-		border-radius: var(--radius-field);
-		border: 1px solid var(--color-base-300);
-		background: var(--color-base-100);
-		color: var(--color-base-content);
-		padding: 6px 10px;
-		cursor: pointer;
+		font-weight: 600;
+		padding-block: 6px;
 	}
 	.choice:hover:not(:disabled) {
-		background: var(--color-base-200);
+		--btn-color: var(--color-base-200);
 	}
 	.choice:disabled,
 	.reopen:disabled {

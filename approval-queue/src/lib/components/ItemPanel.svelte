@@ -839,13 +839,13 @@ for that save first, and closing the tab then asks before leaving.
 	<div class="place">
 		<span class="where"><b>{placeWhere}</b></span>
 		{#if openCalls.length}
-			<span class="open"><button type="button" class="linkbtn next-call" onclick={nextCall}>Next call for you <kbd>F8</kbd></button></span>
+			<span class="open"><button type="button" class="btn btn-link btn-sm linkbtn next-call" onclick={nextCall}>Next call for you <kbd>F8</kbd></button></span>
 		{:else if hasCalls}
 			<span class="open"><span class="nothing-open">Every call made</span></span>
 		{/if}
 		<span class="tools">
 			<span class="toc-wrap">
-				<button type="button" class="linkbtn" bind:this={tocButton} aria-expanded={tocOpen} aria-controls="toc" onclick={toggleToc}>Contents</button>
+				<button type="button" class="btn btn-link btn-sm linkbtn" bind:this={tocButton} aria-expanded={tocOpen} aria-controls="toc" onclick={toggleToc}>Contents</button>
 				{#if tocOpen}
 					<!-- svelte-ignore a11y_no_noninteractive_element_interactions: Escape on the list closes it, as on a menu -->
 					<ol class="toc" id="toc" aria-label="Contents" onkeydown={tocKey}>
@@ -873,7 +873,7 @@ for that save first, and closing the tab then asks before leaving.
 			</span>
 			<button
 				type="button"
-				class="linkbtn comments-btn"
+				class="btn btn-link btn-sm linkbtn comments-btn"
 				aria-expanded={desk.paneOpen && desk.pane.startsWith('margin')}
 				aria-controls={(docReviews[currentDoc ?? 0] ?? docReviews[0]).margin}
 				onclick={(e) => openComments(e.currentTarget)}>Comments <span class="ncount">{cardCount}</span></button
@@ -1051,7 +1051,7 @@ for that save first, and closing the tab then asks before leaving.
 				<DecisionBar>
 					{#snippet note()}
 						{#if desk.noteOpen}
-							<div class="sendback">
+							<fieldset class="sendback fieldset">
 								<label for="note" class="lead">What should the {docReviews.length ? 'author' : 'session'} change?</label>
 								<p class="muted">
 									{packet
@@ -1079,7 +1079,7 @@ for that save first, and closing the tab then asks before leaving.
 										Send back <kbd>Ctrl</kbd><kbd>Enter</kbd>
 									</button>
 								</div>
-							</div>
+							</fieldset>
 						{/if}
 					{/snippet}
 					{#snippet reject()}
@@ -1197,11 +1197,12 @@ for that save first, and closing the tab then asks before leaving.
 </Frame>
 
 {#if data.kind === 'packet' && data.irreversible && !data.decided}
-	<dialog id="confirm" class="modal" aria-labelledby="confirm-title" bind:this={confirmDialog}>
+	<dialog id="confirm" class="modal" aria-labelledby="confirm-title" aria-describedby="confirm-body" bind:this={confirmDialog}>
 		<div class="modal-box max-w-md rounded-box border border-base-300 p-5">
 			<h2 id="confirm-title" class="desk-title flex items-center gap-2 text-xl">
 				<PacketIcon name="lock" class="size-5 tone-error" />This approval cannot be undone later
 			</h2>
+			<div id="confirm-body">
 			{#if data.irreversibleSteps.length}
 				<p class="mt-2 leading-relaxed">Approving lets the session run these steps, and none of them can be reverted:</p>
 				<ul class="mt-1 list-disc ps-5 leading-relaxed">
@@ -1213,8 +1214,10 @@ for that save first, and closing the tab then asks before leaving.
 				<p class="mt-2 leading-relaxed">An ask in this packet is marked irreversible.</p>
 			{/if}
 			<p class="mt-2 text-sm desk-muted">Undo still works for 5 seconds after you confirm.</p>
+			</div>
 			<div class="modal-action mt-4">
-				<button type="button" class="btn btn-ghost" onclick={() => confirmDialog?.close()}>Cancel</button>
+				<!-- svelte-ignore a11y_autofocus: the safe choice takes focus when the dialog opens, so Enter never confirms an irreversible approval -->
+				<button type="button" class="btn btn-ghost" autofocus onclick={() => confirmDialog?.close()}>Cancel</button>
 				<button
 					type="submit"
 					class="btn btn-error"
