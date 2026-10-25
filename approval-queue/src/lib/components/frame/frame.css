@@ -227,7 +227,7 @@ html {
 	overflow-wrap: anywhere;
 }
 .rail-keys {
-	--btn-fg: var(--color-muted);
+	--btn-rest-fg: var(--color-muted);
 	margin-top: 18px;
 	justify-self: start;
 	font-weight: 400;
@@ -274,7 +274,7 @@ html {
 	display: none;
 }
 .drawer-x {
-	--btn-fg: var(--color-muted);
+	--btn-rest-fg: var(--color-muted);
 	position: absolute;
 	top: 10px;
 	right: 10px;
@@ -339,17 +339,36 @@ html {
 	-webkit-mask-image: linear-gradient(to right, transparent 30%, #000 75%);
 	mask-image: linear-gradient(to right, transparent 30%, #000 75%);
 }
-.sheethead .crumb {
+.sheethead .crumbrow {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 6px 12px;
 	font-size: 0.75rem;
 	color: var(--color-muted);
+	padding: 14px 0 10px;
+}
+.sheethead .crumb {
 	display: flex;
 	flex-wrap: wrap;
 	align-items: center;
 	gap: 8px;
-	padding: 14px 0 10px;
+	list-style: none;
 	margin: 0;
+	padding: 0;
 }
-.sheethead .crumb a {
+/* The slash is drawn, so a screen reader hears a list of places and no punctuation. */
+.sheethead .crumb li + li::before {
+	content: '/';
+	margin-right: 8px;
+}
+.sheethead .crumbstate {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 6px 8px;
+}
+.sheethead .crumbrow a {
 	color: inherit;
 	text-decoration: underline;
 }
@@ -421,6 +440,7 @@ html {
 	margin-left: 0;
 }
 .place .next-call {
+	--btn-color: var(--cairn-warning-ink);
 	--btn-fg: var(--cairn-warning-ink);
 }
 .place .nothing-open {
@@ -725,6 +745,8 @@ a {
 	background: var(--color-success);
 }
 .frame .note .nh {
+	font-family: inherit;
+	line-height: inherit;
 	font-weight: 600;
 	margin: 0 0 4px;
 	font-size: inherit;
@@ -743,6 +765,26 @@ a {
 }
 .frame .note.done .nh .kind {
 	color: var(--cairn-success-ink);
+}
+/* An ask is tinted whole by its state, as the prototype sets it. */
+.frame .note.ask.error {
+	background: color-mix(in oklab, var(--color-error) 9%, var(--color-base-100));
+}
+.frame .note.ask.decide {
+	background: color-mix(in oklab, var(--color-warning) 12%, var(--color-base-100));
+}
+.frame .note.ask.done {
+	background: color-mix(in oklab, var(--color-success) 9%, var(--color-base-100));
+}
+.frame .ask .nh {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 4px 10px;
+	font-size: 1rem;
+}
+.frame .ask .nh .kind {
+	margin-right: 0;
 }
 .frame .note p {
 	margin: 0 0 6px;
@@ -794,12 +836,17 @@ a {
 	max-width: 56ch;
 }
 /* The stock collapse's title and content carry a card's padding; the Background and Why rows are text. */
-.frame :where(.collapse) > :where(.collapse-title) {
+.frame :where(.bg, .why).collapse > :where(.collapse-title) {
 	min-height: 0;
 	padding: 0;
 }
-.frame :where(.collapse) > :where(.collapse-content) {
+.frame :where(.bg, .why).collapse > :where(.collapse-content) {
 	padding: 0;
+}
+/* daisyUI rings the whole details through :has(summary:focus-visible), beside the summary's own
+   ring; the summary's alone stays. */
+.frame .collapse:has(> summary:focus-visible) {
+	outline: none;
 }
 .frame .bg > summary {
 	display: flex;
@@ -981,17 +1028,23 @@ a {
 	--btn-fg: var(--color-base-content);
 }
 .frame .seg .btn:checked {
-	--btn-color: var(--color-base-300);
-	--btn-fg: var(--color-base-content);
-	box-shadow: inset 0 0 0 1px var(--site-field-border);
+	--btn-color: var(--color-base-content);
+	--btn-fg: var(--color-base-100);
 }
 .frame .seg.changed .btn:checked {
 	--btn-color: var(--color-warning);
-	--btn-fg: #22262b;
-	box-shadow: none;
+	--btn-fg: var(--color-warning-content);
 }
 .frame .seg .btn:focus-visible {
 	outline-offset: -2px;
+}
+/* The ring sits inside the fill, so it takes the fill's own contrast ink: the global primary ring is
+   2.2:1 on the ink fill in light and 1.1:1 on the warning fill in dark. */
+.frame .seg .btn:checked:focus-visible {
+	outline-color: var(--color-base-100);
+}
+.frame .seg.changed .btn:checked:focus-visible {
+	outline-color: var(--color-warning-content);
 }
 /* A joined segment's focus ring sits above its neighbours, so no sibling's edge cuts it. */
 .join > .join-item:focus-visible {
@@ -999,6 +1052,13 @@ a {
 }
 .frame .seg .btn:disabled {
 	cursor: not-allowed;
+	color: var(--color-muted);
+	background-color: transparent;
+}
+/* A decided item keeps its recorded verdict: daisyUI's disabled fill would make every segment alike. */
+.frame .seg .btn:disabled:checked {
+	background-color: var(--btn-color);
+	color: var(--btn-fg);
 }
 
 /* Asks: notes that hold a question, its layers, and its choices. */
@@ -1146,7 +1206,7 @@ a {
 		background: var(--color-base-200);
 	}
 	.appbtn {
-		--btn-bg: var(--color-base-100);
+		--btn-color: var(--color-base-100);
 		--btn-border: var(--color-base-300);
 		--btn-fg: var(--color-base-content);
 		gap: 8px;
@@ -1299,7 +1359,9 @@ a {
 	color: var(--color-muted);
 	padding: 7px 0;
 }
-.mtitle span:first-child {
+.mtitle .mhead {
+	margin: 0;
+	font: inherit;
 	font-weight: 600;
 	color: var(--color-base-content);
 	font-size: 0.9rem;

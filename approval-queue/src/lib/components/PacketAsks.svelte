@@ -10,6 +10,7 @@ label; `answers` is bound up so the bar can count what is left. The server rebui
 and refuses a post that leaves one unanswered. Renders nothing for a packet with no asks.
 -->
 <script lang="ts">
+	import { desk } from '#lib/desk.svelte.ts';
 	import { RULE_LOOK, refKind } from '#lib/packet-view.ts';
 	import { splitLead } from '#lib/prose.ts';
 	import type { PageData } from '../../routes/item/[id=id]/$types';
@@ -51,8 +52,11 @@ and refuses a post that leaves one unanswered. Renders nothing for a packet with
 					class={['note ask', picked !== undefined ? 'done' : look.tone === 'error' ? 'error' : 'decide']}
 				>
 					<h3 id="ask-{ask.index}-title" class="nh">
-						<span class="kind">{look.label}.</span>
-						<Prose text={ask.question} />
+						<PacketIcon name={picked !== undefined ? 'check' : look.tone === 'error' ? 'warn' : 'info'} class="size-5 kind" />
+						<span><Prose text={ask.question} /></span>
+						<span class="badge badge-sm badge-outline rule-badge gap-1 {look.tone === 'error' ? 'tone-error' : 'tone-warning'}">
+							<PacketIcon name={look.icon} class="size-3.5" />{look.label}
+						</span>
 					</h3>
 					{#if ask.part}
 						<p class="ask-part">{refKind(ask.part)} · <code>{ask.part}</code></p>
@@ -121,6 +125,7 @@ and refuses a post that leaves one unanswered. Renders nothing for a packet with
 									aria-labelledby="ask-{ask.index}-l{j}"
 									aria-describedby={choice.consequence ? `ask-${ask.index}-c${j}` : undefined}
 									disabled={decided}
+									aria-keyshortcuts={j < 3 && desk.singleKeys ? String(j + 1) : undefined}
 									bind:group={answers[ask.index]}
 								/>
 								<span class="flex-1 leading-snug">
