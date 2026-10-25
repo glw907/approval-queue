@@ -27,10 +27,28 @@ describe('heading slugs', () => {
 		expect(slugs(['Same', 'Other', 'Same', 'Same'])).toEqual(['same', 'other', 'same-1', 'same-2']);
 	});
 
-	it('seeds a blueprint with its page title, and a page with nothing', () => {
+	it('seeds a blueprint with its page title only when it has no H1, and a page with nothing', () => {
 		const doc = '---\npage: Fix a slow build\n---\n\n# Fix a slow build\n';
-		expect(headingList(doc, 'blueprint').map((h) => h.slug)).toEqual(['fix-a-slow-build-1']);
+		expect(headingList(doc, 'blueprint').map((h) => h.slug)).toEqual(['fix-a-slow-build']);
 		expect(headingList(doc, 'page').map((h) => h.slug)).toEqual(['fix-a-slow-build']);
+		const none = '---\npage: Fix a slow build\n---\n\n## Fix a slow build\n';
+		expect(headingList(none, 'blueprint').map((h) => h.slug)).toEqual(['fix-a-slow-build-1']);
+		expect(headingList(none, 'page').map((h) => h.slug)).toEqual(['fix-a-slow-build']);
+	});
+
+	it('resolves the title-seeded key of an H1 and its items to the H1’s section', () => {
+		const doc = '---\npage: Overview\n---\n\n# Overview\n\n- First.\n';
+		const found = anchors(doc, 'blueprint');
+		expect(found.get('overview-1.heading')).toEqual(found.get('overview.heading'));
+		expect(found.get('overview-1.p0')).toEqual(found.get('overview.p0'));
+		expect(found.get('overview.p0')).toBeDefined();
+	});
+
+	it('lets a current key win over a title-seeded alias', () => {
+		const doc = '---\npage: Overview\n---\n\n# Overview\n\n- One.\n\n## Overview\n\n- Two.\n';
+		const found = anchors(doc, 'blueprint');
+		expect(found.get('overview.p0')?.[0]).toBe(doc.indexOf('One.'));
+		expect(found.get('overview-1.p0')?.[0]).toBe(doc.indexOf('Two.'));
 	});
 
 	it('still resolves the first version’s spelling to the same range', () => {

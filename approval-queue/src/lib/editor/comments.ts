@@ -74,3 +74,22 @@ export function place(doc: string, anchor: Anchor): { from: number; to: number }
 	}
 	return best === -1 ? null : { from: best, to: best + quote.length };
 }
+
+/** How often `needle` occurs in `doc`, overlapping occurrences included, as `place()` walks them. */
+function occurrences(doc: string, needle: string): number {
+	let count = 0;
+	for (let at = doc.indexOf(needle); at !== -1; at = doc.indexOf(needle, at + 1)) count++;
+	return count;
+}
+
+/**
+ * The quote's count in `doc` when `place()` would have to choose among several occurrences, else 0:
+ * a unique or absent quote, or one whose context occurs exactly once, is settled. A missing `prefix`
+ * or `suffix` reads as empty.
+ */
+export function ambiguousQuote(doc: string, quote: string, prefix = '', suffix = ''): number {
+	if (!quote) return 0;
+	const count = occurrences(doc, quote);
+	if (count < 2) return 0;
+	return occurrences(doc, prefix + quote + suffix) === 1 ? 0 : count;
+}

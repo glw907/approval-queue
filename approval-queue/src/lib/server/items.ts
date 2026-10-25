@@ -237,12 +237,16 @@ export async function listWaiting(root: string): Promise<ItemMeta[]> {
 	return waiting.sort((a, b) => a.created.localeCompare(b.created) || a.id.localeCompare(b.id));
 }
 
-/** Items whose `decision.json` was written at or after `since` (epoch ms, by mtime), newest first. */
+/**
+ * Items whose `decision.json` was written at or after `since` (epoch ms, by mtime), newest first. A
+ * `refused.json` the waiting command wrote beside the decision adds `refused`, its reason; it does
+ * not move the item in the order, since the order keys on the decision's mtime.
+ */
 export async function listDecided(
 	root: string,
 	since: number
-): Promise<Array<{ meta: ItemMeta; decision: Decision['decision'] }>> {
-	const decided: Array<{ meta: ItemMeta; decision: Decision['decision']; at: number }> = [];
+): Promise<Array<{ meta: ItemMeta; decision: Decision['decision']; refused?: string }>> {
+	const decided: Array<{ meta: ItemMeta; decision: Decision['decision']; refused?: string; at: number }> = [];
 	for (const id of await itemIds(root)) {
 		const dir = join(root, 'items', id);
 		try {
@@ -250,12 +254,14 @@ export async function listDecided(
 			const meta = await readMeta(dir);
 			if (!decision || !meta) continue;
 			const at = (await stat(join(dir, 'decision.json'))).mtimeMs;
-			if (at >= since) decided.push({ meta, decision: decision.decision, at });
+			if (at < since) continue;
+			const refused = await readJson<{ reason: string }>(join(dir, 'refused.json'));
+			decided.push({ meta, decision: decision.decision, ...(refused && { refused: refused.reason }), at });
 		} catch (err) {
 			if (!(err instanceof SyntaxError)) throw err;
 		}
 	}
-	return decided.sort((a, b) => b.at - a.at).map(({ meta, decision }) => ({ meta, decision }));
+	return decided.sort((a, b) => b.at - a.at).map(({ at: _at, ...row }) => row);
 }
 
 /**

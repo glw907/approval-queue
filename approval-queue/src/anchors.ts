@@ -3,7 +3,8 @@
  *
  * Run as `node anchors.ts <file>`. It prints one line per heading, `<slug>.heading`, a tab, and the
  * heading's text, with the slug the page gives it. A file ending in `.blueprint.md` is slugged as a
- * blueprint, which counts its `page` title first; any other file is slugged as a page. It exits 1 on
+ * blueprint, which counts its `page` title first unless it has an H1, since the H1 stands for the
+ * title; any other file is slugged as a page. It exits 1 on
  * a file it cannot read. Unlike `check-brief.ts` it needs the app's `node_modules`, since the slug
  * rule comes from `github-slugger`.
  */

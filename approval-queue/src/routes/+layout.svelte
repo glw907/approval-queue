@@ -36,11 +36,17 @@ this session" until the queue reload lists it there itself.
 		const mine = [...(held.current ? [held.current] : []), ...held.sending.toReversed()].map((d) => ({
 			id: d.id,
 			title: d.title,
-			outcome: OUTCOMES[d.outcome]
+			outcome: OUTCOMES[d.outcome],
+			refused: undefined as string | undefined
 		}));
 		const listed = data.decided
 			.filter(({ meta }) => !mine.some((d) => d.id === meta.id))
-			.map(({ meta, decision }) => ({ id: meta.id, title: meta.headline ?? meta.title, outcome: OUTCOMES[decision] }));
+			.map(({ meta, decision, refused }) => ({
+				id: meta.id,
+				title: meta.headline ?? meta.title,
+				outcome: refused ? 'Refused' : OUTCOMES[decision],
+				refused
+			}));
 		return [...mine, ...listed];
 	});
 
@@ -363,9 +369,10 @@ this session" until the queue reload lists it there itself.
 			<h2 class="group">Decided this session</h2>
 			<ul class="rail-list">
 				{#each decided as row (row.id)}
-					<li class={['dq', row.outcome === OUTCOMES.defer && 'deferred']}>
+					<li class={['dq', row.outcome === OUTCOMES.defer && 'deferred', row.refused && 'refused']}>
 						<span>{row.title}</span>
 						<span>{row.outcome}</span>
+						{#if row.refused}<span class="why">{row.refused}</span>{/if}
 					</li>
 				{/each}
 			</ul>
