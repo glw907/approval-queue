@@ -352,22 +352,31 @@ async function loadItem(params: { id: string }) {
 			notChecked: packet.notChecked,
 			asks: packet.asks.map((ask, i) => ({ index: i + 1, ...ask, part: ask.part?.ref ?? null })),
 			routine: packet.routine.map((row) => ({ ref: row.part.ref, kind: row.part.kind, verdict: row.verdict, fact: row.fact, why: row.why })),
-			parts: parts.map((part) => ({
-				ref: part.ref,
-				kind: part.kind,
-				lane: part.lane,
-				verdict: part.verdict,
-				head: part.head,
-				sha256: part.sha256,
-				...(part.kind === 'pr' && {
-					checks: checksSummary(part.pr?.statusCheckRollup),
-					review: reviewVerdict(part.body ?? ''),
-					groups: fileGroups(part.diff ?? ''),
-					link: part.pr ? { url: part.pr.url, head: part.pr.headRefName, base: part.pr.baseRefName } : null,
-					...(part.since && { since: 'patch' in part.since ? { groups: fileGroups(part.since.patch) } : part.since })
-				}),
-				...(part.kind === 'design' && { doc: part.doc })
-			})),
+			parts: parts.map((part) => {
+				const groups = part.kind === 'pr' ? fileGroups(part.diff ?? '') : [];
+				const files = groups.flatMap((g) => g.files);
+				return {
+					ref: part.ref,
+					kind: part.kind,
+					lane: part.lane,
+					verdict: part.verdict,
+					head: part.head,
+					sha256: part.sha256,
+					...(part.kind === 'pr' && {
+						checks: checksSummary(part.pr?.statusCheckRollup),
+						review: reviewVerdict(part.body ?? ''),
+						groups,
+						totals: {
+							files: files.length,
+							adds: files.reduce((n, f) => n + f.adds, 0),
+							dels: files.reduce((n, f) => n + f.dels, 0)
+						},
+						link: part.pr ? { url: part.pr.url, head: part.pr.headRefName, base: part.pr.baseRefName } : null,
+						...(part.since && { since: 'patch' in part.since ? { groups: fileGroups(part.since.patch) } : part.since })
+					}),
+					...(part.kind === 'design' && { doc: part.doc, docHtml: render(withoutBrief(part.doc ?? '')) })
+				};
+			}),
 			fingerprint: packetFingerprint(parts, packet.asks),
 			irreversible: isIrreversible(packet),
 			irreversibleSteps: packet.steps.filter((s) => s.tag === 'irreversible').map((s) => s.n),

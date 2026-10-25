@@ -495,6 +495,21 @@ describe('a packet', () => {
 		]);
 	});
 
+	it('load gives a PR part its totals and a design part its rendered document', async () => {
+		const patch = 'diff --git a/a.md b/a.md\n--- a/a.md\n+++ b/a.md\n@@ -1 +1,2 @@\n-old\n+new\n+more\ndiff --git a/b.md b/b.md\n--- a/b.md\n+++ b/b.md\n@@ -1 +1,2 @@\n x\n+y\n';
+		await rm(join(state.root, 'items', ID), { recursive: true });
+		// The baseline packet, whose third PR is a design part.
+		await seedPacket(state.root, ID, fixture('packet-baseline.md'));
+		await writeFile(join(state.root, 'items', ID, 'parts', '0', 'diff.patch'), patch);
+		const data = (await load({ params: { id: ID } } as never)) as Record<string, any>;
+		const pr = data.parts.find((p: any) => p.ref === 'glw907/drafter#41');
+		expect(pr.totals).toEqual({ files: 2, adds: 3, dels: 1 });
+		const design = data.parts.find((p: any) => p.kind === 'design');
+		expect(design.docHtml).toContain('<h1');
+		expect(design.docHtml).toContain('Design');
+		expect(data.parts.filter((p: any) => p.kind === 'step').every((p: any) => !('totals' in p) && !('docHtml' in p))).toBe(true);
+	});
+
 	it('load leaves the revision fields out of a first packet', async () => {
 		const data = (await load({ params: { id: ID } } as never)) as Record<string, any>;
 		for (const field of ['revision', 'sentBack', 'whatChanged']) expect(field in data).toBe(false);
