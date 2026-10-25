@@ -301,10 +301,11 @@ this session" until the queue reload lists it there itself.
 			href="/"
 			class={['btn btn-sm btn-ghost board-btn justify-start gap-2', page.url.pathname === '/' && 'btn-active']}
 			aria-current={page.url.pathname === '/' ? 'page' : undefined}
+			aria-keyshortcuts={desk.singleKeys ? 'b' : undefined}
 			data-sveltekit-replacestate
 		>
 			<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h10" /></svg>Board
-			<kbd class="desk-sk">b</kbd>
+			<kbd class="desk-sk" aria-hidden="true">b</kbd>
 		</a>
 		{#each sidebar as group, g (group.title)}
 			<section class="init-region" aria-labelledby="nav-{g}">
@@ -372,8 +373,8 @@ this session" until the queue reload lists it there itself.
 		{#if desk.page === 'triage'}
 			<p class="dq desk-sk">j k next and previous</p>
 		{/if}
-		<button type="button" class="rail-keys btn btn-ghost btn-sm" id="open-keys" onclick={toggleSheet}>
-			Keyboard shortcuts <kbd class="desk-sk">?</kbd>
+		<button type="button" class="rail-keys btn btn-ghost btn-sm" id="open-keys" aria-keyshortcuts={desk.singleKeys ? '?' : undefined} onclick={toggleSheet}>
+			Keyboard shortcuts <kbd class="desk-sk" aria-hidden="true">?</kbd>
 		</button>
 	</nav>
 
@@ -478,8 +479,8 @@ this session" until the queue reload lists it there itself.
 	>
 		<div class="alert alert-info border border-base-300 text-sm">
 			<span>{held.current.toast}</span>
-			<button type="button" class="btn btn-sm" id="undo" onclick={() => void held.undo()}>
-				Undo <kbd class="kbd kbd-xs desk-kbd desk-sk">z</kbd>
+			<button type="button" class="btn btn-sm" id="undo" aria-keyshortcuts={desk.singleKeys ? 'z' : undefined} onclick={() => void held.undo()}>
+				Undo <kbd class="kbd kbd-xs desk-kbd desk-sk" aria-hidden="true">z</kbd>
 			</button>
 		</div>
 	</div>
@@ -495,6 +496,7 @@ this session" until the queue reload lists it there itself.
 		class="toast toast-center desk-toast z-40"
 		role="group"
 		aria-label="Notice"
+		{@attach () => () => desk.releaseFlash()}
 		out:fade={toastOut(true)}
 		onoutrostart={(e) => (e.currentTarget.inert = true)}
 		onpointermove={(e) => {

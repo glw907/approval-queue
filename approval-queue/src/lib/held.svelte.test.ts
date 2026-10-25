@@ -321,4 +321,32 @@ describe('desk.flash', () => {
 		vi.advanceTimersByTime(FLASH_UNDO_MS);
 		expect(desk.toast).toBeNull();
 	});
+
+	it('keeps the clock stopped for a new message while focus is still on the toast', () => {
+		desk.flash('Comment deleted', () => {});
+		desk.pauseFlash('focus');
+		desk.flash('Reply deleted', () => {});
+		vi.advanceTimersByTime(FLASH_UNDO_MS * 2);
+		expect(desk.toast).toBe('Reply deleted');
+		desk.resumeFlash('focus');
+		vi.advanceTimersByTime(FLASH_UNDO_MS);
+		expect(desk.toast).toBeNull();
+	});
+
+	it('lets a message with no Undo run, since the focused button is gone', () => {
+		desk.flash('Comment deleted', () => {});
+		desk.pauseFlash('focus');
+		desk.flash('Saved');
+		vi.advanceTimersByTime(FLASH_MS);
+		expect(desk.toast).toBeNull();
+	});
+
+	it('ends both pauses when the toast unmounts', () => {
+		desk.flash('Comment deleted', () => {});
+		desk.pauseFlash('pointer');
+		desk.pauseFlash('focus');
+		desk.releaseFlash();
+		vi.advanceTimersByTime(FLASH_UNDO_MS);
+		expect(desk.toast).toBeNull();
+	});
 });
