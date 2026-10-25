@@ -39,7 +39,7 @@ text drops a box left empty. Below 1260px a tap on a highlight opens the drawer 
 	let { review, file, label, kindWord, yaml = false, amend }: Props = $props();
 
 	let host = $state<HTMLDivElement>();
-	let view = $state<EditorView | null>(null);
+	let view = $state.raw<EditorView | null>(null);
 
 	onMount(() => {
 		if (!host) return;
@@ -120,12 +120,13 @@ text drops a box left empty. Below 1260px a tap on a highlight opens the drawer 
 				<button
 					type="button"
 					class="btn btn-link btn-sm linkbtn addc"
+					aria-keyshortcuts="Control+Alt+M"
 					aria-disabled={review.selectionEmpty}
 					title="Select text to comment on it"
 					onpointerdown={commentDown}
 					onclick={(e) => e.detail === 0 && void review.openBox()}
 				>
-					Comment <kbd>Ctrl</kbd><kbd>Alt</kbd><kbd>M</kbd>
+					Comment <kbd aria-hidden="true">Ctrl</kbd><kbd aria-hidden="true">Alt</kbd><kbd aria-hidden="true">M</kbd>
 				</button>
 			{/if}
 			{#if amend !== undefined && view}

@@ -39,10 +39,10 @@ programmatic focus, so a screen can land focus on it after a change.
 
 {#if outcome !== null}
 	<div role="group" class="note done collapsed" id="note-{note.id}" tabindex="-1" aria-label="{outcome.head} {note.title}">
-		<p class="nh">
+		<h2 class="nh">
 			<span class="kind">{outcome.head}</span><span class="outcome">{outcome.text}</span>
 			<button type="button" class="btn btn-link btn-sm linkbtn reopen" {disabled} onclick={onreopen}>Reopen</button>
-		</p>
+		</h2>
 	</div>
 {:else}
 	<div
@@ -52,7 +52,7 @@ programmatic focus, so a screen can land focus on it after a change.
 		tabindex="-1"
 		aria-label="{head} {note.title}"
 	>
-		<p class="nh"><span class="kind">{head}</span><span>{note.title}</span></p>
+		<h2 class="nh"><span class="kind">{head}</span><span>{note.title}</span></h2>
 		{#each note.body as para, i (i)}<p>{@render inline(para)}</p>{/each}
 		{#each note.sides ?? [] as side, i (i)}<div class="side"><b>{side.who}:</b> {@render inline(side.text)}</div>{/each}
 		{#if note.was !== undefined && note.now !== undefined}

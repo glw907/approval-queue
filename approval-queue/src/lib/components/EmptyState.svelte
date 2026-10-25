@@ -105,10 +105,11 @@ unmounts it when an item arrives, which cancels the count.
 				<button
 					type="button"
 					class="btn btn-sm btn-ghost -ml-3"
+					aria-keyshortcuts="Escape"
 					bind:this={keep}
 					onclick={() => stop('This tab stays open.', 'kept')}
 				>
-					Keep this tab open <kbd class="kbd kbd-xs desk-kbd">Esc</kbd>
+					Keep this tab open <kbd class="kbd kbd-xs desk-kbd" aria-hidden="true">Esc</kbd>
 				</button>
 			{/if}
 			<label class="flex cursor-pointer items-center gap-2 text-sm">

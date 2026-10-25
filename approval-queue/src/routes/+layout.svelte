@@ -435,10 +435,10 @@ this session" until the queue reload lists it there itself.
 						<tbody>
 							{#each section.rows as row (row.text)}
 								<tr>
-									<td class="whitespace-nowrap">
+									<th scope="row" class="whitespace-nowrap font-normal">
 										<!-- A "/" after the first key separates two chords that share their modifiers. -->
 										{#each row.keys as key, i (i)}{#if key === '/' && i > 0}<span class="ms-1">/</span>{:else}<kbd class={['kbd kbd-xs desk-kbd', row.single && 'desk-sk', i > 0 && 'ms-1']}>{key}</kbd>{/if}{/each}
-									</td>
+									</th>
 									<td>{row.text}</td>
 								</tr>
 							{/each}
@@ -449,7 +449,7 @@ this session" until the queue reload lists it there itself.
 		</div>
 		<div class="modal-action mt-4">
 			<form method="dialog">
-				<button class="btn btn-sm">Close <kbd class="kbd kbd-xs desk-kbd">Esc</kbd></button>
+				<button class="btn btn-sm" aria-keyshortcuts="Escape">Close <kbd class="kbd kbd-xs desk-kbd" aria-hidden="true">Esc</kbd></button>
 			</form>
 		</div>
 	</div>
