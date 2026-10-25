@@ -19,13 +19,15 @@ programmatic focus, so a screen can land focus on it after a change.
 		disabled?: boolean;
 		/** The card is current, so it takes the tint and its highlight deepens. */
 		current?: boolean;
+		/** The heading level of the card's title, one under the margin's own title. */
+		level: 3 | 4;
 		onchoose: (index: number) => void;
 		/** Opens a decided call or a resolved correction again. */
 		onreopen: () => void;
 		onresolve: () => void;
 	}
 
-	let { note, choice, resolved = false, disabled = false, current = false, onchoose, onreopen, onresolve }: Props = $props();
+	let { note, choice, resolved = false, disabled = false, current = false, level, onchoose, onreopen, onresolve }: Props = $props();
 
 	const head = $derived(note.kind === 'info' ? 'Corrected.' : 'Your call.');
 	const outcome = $derived(
@@ -39,10 +41,8 @@ programmatic focus, so a screen can land focus on it after a change.
 
 {#if outcome !== null}
 	<div role="group" class="note done collapsed" id="note-{note.id}" tabindex="-1" aria-label="{outcome.head} {note.title}">
-		<h2 class="nh">
-			<span class="kind">{outcome.head}</span><span class="outcome">{outcome.text}</span>
-			<button type="button" class="btn btn-link btn-sm linkbtn reopen" {disabled} onclick={onreopen}>Reopen</button>
-		</h2>
+		<svelte:element this={'h' + level} class="nh"><span class="kind">{outcome.head}</span><span class="outcome">{outcome.text}</span></svelte:element>
+		<button type="button" class="btn btn-link btn-sm linkbtn reopen" {disabled} onclick={onreopen}>Reopen</button>
 	</div>
 {:else}
 	<div
@@ -52,7 +52,7 @@ programmatic focus, so a screen can land focus on it after a change.
 		tabindex="-1"
 		aria-label="{head} {note.title}"
 	>
-		<h2 class="nh"><span class="kind">{head}</span><span>{note.title}</span></h2>
+		<svelte:element this={'h' + level} class="nh"><span class="kind">{head}</span><span>{note.title}</span></svelte:element>
 		{#each note.body as para, i (i)}<p>{@render inline(para)}</p>{/each}
 		{#each note.sides ?? [] as side, i (i)}<div class="side"><b>{side.who}:</b> {@render inline(side.text)}</div>{/each}
 		{#if note.was !== undefined && note.now !== undefined}
@@ -87,14 +87,21 @@ programmatic focus, so a screen can land focus on it after a change.
 	.nh {
 		margin: 0 0 4px;
 	}
+	.collapsed {
+		display: flex;
+		align-items: baseline;
+		gap: 0 8px;
+	}
 	.collapsed .nh {
 		margin: 0;
+		flex: 1 1 auto;
+		min-width: 0;
 	}
 	.outcome {
 		font-weight: 400;
 	}
 	.reopen {
-		margin-left: 8px;
+		flex: none;
 		font-weight: 400;
 		font-size: 0.82rem;
 	}

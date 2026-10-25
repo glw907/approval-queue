@@ -98,6 +98,7 @@ No text is saved: the PR's author edits, and the comments and a send-back note g
 			file={name(doc.path)}
 			label="{KIND[doc.kind]} {name(doc.path)}, read only"
 			kindWord={doc.kind}
+			level={4}
 			yaml={/\.ya?ml$/.test(doc.path)}
 		/>
 	</section>

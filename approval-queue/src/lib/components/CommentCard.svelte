@@ -19,9 +19,11 @@ With comments read only, as on a decided item, the card shows no actions.
 		/** What the document is called in the gone line: "blueprint", "page", or a change document's kind. */
 		kindWord: string;
 		current?: boolean;
+		/** The heading level of the card's title, one under the margin's own title. */
+		level: 3 | 4;
 	}
 
-	let { review, card, kindWord, current = false }: Props = $props();
+	let { review, card, kindWord, current = false, level }: Props = $props();
 
 	const STATUS = {
 		done: { head: 'Done.', line: 'The author made the change.', tone: 'tone-success' },
@@ -71,13 +73,13 @@ With comments read only, as on a decided item, the card shows no actions.
 
 {#if card.kind === 'draft'}
 	<div role="group" class="note cmt cur" id="comment-draft" tabindex="-1" aria-label="Your comment">
-		<h2 class="nh"><span class="kind">Your comment.</span></h2>
+		<svelte:element this={'h' + level} class="nh"><span class="kind">Your comment.</span></svelte:element>
 		{@render editor('Comment on the selected text', 'Ask the author for a change, or ask a question', 'Save')}
 	</div>
 {:else if card.kind === 'comment'}
 	{@const c = card.comment}
 	<div role="group" class={['note', 'cmt', current && 'cur']} id="comment-{c.id}" tabindex="-1" aria-label="Your comment">
-		<h2 class="nh"><span class="kind">Your comment.</span>{#if !open}<span class="sub">Goes to the author with your decision</span>{/if}</h2>
+		<svelte:element this={'h' + level} class="nh"><span class="kind">Your comment.</span>{#if !open}<span class="sub">Goes to the author with your decision</span>{/if}</svelte:element>
 		{#if card.gone}{@render gone(c.quote)}{/if}
 		{#if open}
 			{@render editor('Your comment', 'Ask the author for a change, or ask a question', 'Save')}
@@ -96,14 +98,12 @@ With comments read only, as on a decided item, the card shows no actions.
 	{@const s = STATUS[t.status]}
 	{#if t.resolved}
 		<div role="group" class="note done collapsed" id="thread-{t.id}" tabindex="-1" aria-label="Resolved comment">
-			<h2 class="nh">
-				<span class="kind">Resolved.</span><span class="outcome">{t.quote}</span>
-				{#if actions}<button type="button" class="btn btn-link btn-sm linkbtn reopen" onclick={() => void review.resolveThread(t.id, false)}>Reopen</button>{/if}
-			</h2>
+			<svelte:element this={'h' + level} class="nh"><span class="kind">Resolved.</span><span class="outcome">{t.quote}</span></svelte:element>
+			{#if actions}<button type="button" class="btn btn-link btn-sm linkbtn reopen" onclick={() => void review.resolveThread(t.id, false)}>Reopen</button>{/if}
 		</div>
 	{:else}
 		<div role="group" class={['note', 'cmt', current && 'cur']} id="thread-{t.id}" tabindex="-1" aria-label="{s.head} {s.line}">
-			<h2 class="nh"><span class={['kind', s.tone]}>{s.head}</span><span class="outcome">{s.line}</span></h2>
+			<svelte:element this={'h' + level} class="nh"><span class={['kind', s.tone]}>{s.head}</span><span class="outcome">{s.line}</span></svelte:element>
 			{#if card.gone}{@render gone(t.quote)}{:else}<p class="quote">You commented on: {t.quote}</p>{/if}
 			<div class="side"><b>The author:</b> {@render inline(t.text)}</div>
 			{#if open}

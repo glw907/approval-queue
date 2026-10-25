@@ -34,9 +34,11 @@ text drops a box left empty. Below 1260px a tap on a highlight opens the drawer 
 		yaml?: boolean;
 		/** The approved text this file amends. Set, the editor shows the diff since it, unchanged runs folded. */
 		amend?: string;
+		/** The margin's card heading level: 4 where the editor sits under its own document's h2, else 3. */
+		level?: 3 | 4;
 	}
 
-	let { review, file, label, kindWord, yaml = false, amend }: Props = $props();
+	let { review, file, label, kindWord, yaml = false, amend, level }: Props = $props();
 
 	let host = $state<HTMLDivElement>();
 	let view = $state.raw<EditorView | null>(null);
@@ -135,7 +137,7 @@ text drops a box left empty. Below 1260px a tap on a highlight opens the drawer 
 			{#if review.editable}
 				<label class="marks"><input type="checkbox" class="toggle toggle-sm" bind:checked={review.markChanges} /> Mark the lines you changed</label>
 			{/if}
-			<!-- Not a live region: the review announces the first save and any failure, not every pause in typing. -->
+			<!-- Not a live region: the review announces a failed save, not every pause in typing. -->
 			<span class={['esaved', review.saveFailed && 'failed']}>{review.saveStatus}</span>
 		</div>
 		<!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events: the padding forwards a pointer press to the editor, which has its own keyboard focus, and a tap on a highlight opens its card, which Ctrl+Alt+N reaches from the keyboard -->
@@ -148,7 +150,7 @@ text drops a box left empty. Below 1260px a tap on a highlight opens the drawer 
 		></div>
 		{#if !view}<p class="loading">Loading the editor…</p>{/if}
 	</div>
-	<Margin {review} {kindWord} />
+	<Margin {review} {kindWord} {level} />
 </div>
 
 <style>
@@ -185,8 +187,12 @@ text drops a box left empty. Below 1260px a tap on a highlight opens the drawer 
 		margin-left: 12px;
 		font-size: 0.8rem;
 	}
+	/* daisyUI dims an aria-disabled button to 20% ink and cuts its pointer events, which would kill
+	   the tooltip and the pointerdown hint; the click guard stays in script. */
 	.addc[aria-disabled='true'] {
-		--btn-fg: var(--color-muted);
+		--btn-color: var(--color-muted);
+		color: var(--color-muted);
+		pointer-events: auto;
 		text-decoration: none;
 		cursor: default;
 	}
