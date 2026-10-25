@@ -45,8 +45,9 @@
 - [x] **#19** A held decision's Undo can be blocked, and a typed-URL decide on a held item is announced but ignored `#bug` `#approval-queue` `#initiative:docs-system` *(2026-10-21)*
   From the comments pass's reviews. When the next item has a comment box holding text, the Undo's `goto` is cancelled by the open-box guard: the decision is still cancelled and nothing posts, but the reader stays put with only the "Save or cancel" toast, and the restore is left pending. Separately, a decision posted from a typed URL on an item already held is announced as held while `Held.hold` ignores it. Say why the Undo did not move, and refuse the second decision aloud.
 
-- [ ] **#10** Read the inline notes with a real screen reader `#improvement` `#approval-queue` `#initiative:docs-system` *(2026-10-21)*
+- [x] **#10** Read the inline notes with a real screen reader `#improvement` `#approval-queue` `#initiative:docs-system` *(2026-10-21)*
   The notes and their choice buttons sit inside CodeMirror's `role="textbox"` (`approval-queue/src/lib/editor/setup.ts`). Tab reaches the buttons and nothing traps the keyboard, but NVDA and JAWS in focus mode may read the notes as plain text. The reviewed-pages accessibility review asked for a run with a real screen reader (its warning 10).
+  Done: Orca 50.3's debug log announces each note choice as "<label> button." in one utterance. The NVDA check is #37.
 
 - [x] **#9** Land "Next call for you" on the call on a long document at phone width `#bug` `#approval-queue` `#initiative:docs-system` *(2026-10-21)*
   On the long blueprint at 500px, a tap often leaves the call out of sight: the cursor moves, but the scroll stops at the editor's height estimate, up to 8,000px short. The prototype does the same, and short pages land correctly. The link is the phone's main way to reach a call, so measure the line before scrolling to it. Found by the reviewed-pages visual regrade.
@@ -75,54 +76,91 @@
 
 ## Low
 
-- [ ] **#36** An old-spelling note anchor can resolve into the wrong section when two headings share an old slug `#bug` `#approval-queue` `#initiative:approval-queue` *(2026-10-24)*
+- [ ] **#43** The approve action's 410 for a withdrawn packet has no test `#improvement` `#approval-queue` `#initiative:approval-queue` *(2026-10-25)*
+  The route test covers the reject action only; approve takes the same `form.has('fingerprint')` path (whole-branch review of the polish pass).
+
+- [ ] **#42** Small cues the polish pass found and left `#improvement` `#approval-queue` `#initiative:approval-queue` *(2026-10-25)*
+  "Sent back" in "Decided this session" takes the green success ink; the decision bar's Defer is hidden while the send-back note is open; `PacketAsks`' comment does not name the digit keys, and the digit caps show on a decided packet; each rail initiative is a `section` landmark; the `packet-facts` cache only drops a key when its file goes; `.linkbtn`, `.reopen`, and the pane toggle are about 20px tall and unmeasured against 2.5.8.
+
+- [ ] **#41** A `collect` can read a decision that the app is about to back off `#improvement` `#approval-queue` `#initiative:approval-queue` *(2026-10-25)*
+  With a `collect` beside a `withdraw` and Geoff's post in the same microsecond window, the collect can print a `decision.json` the app then unlinks, while his page says nothing was recorded. The reverse ordering is covered by `withdraw`'s "run collect". A fix is a design call, for example `collect` checking `item.json` again after reading the decision (task-scope review of the polish pass).
+
+- [ ] **#40** `approval-queue withdraw` prints "No such file" from `proc_stat` when the waiter is gone `#bug` `#approval-queue` `#initiative:approval-queue` *(2026-10-25)*
+  `read -r s <"/proc/$1/stat" 2>/dev/null` fails its redirect before the `2>/dev/null` applies, so bash prints `line 25: /proc/<pid>/stat: No such file or directory`. The result is right; the line is noise. Group the read in braces with the redirect outside.
+
+- [ ] **#39** A design's table renders without cell padding or borders, and its headings do not nest in a packet part `#bug` `#approval-queue` `#initiative:approval-queue` *(2026-10-25)*
+  The columns of a rendered design table run together on the design screen and in a packet part (`DesignView`'s `.desk-read` has no table rule). An embedded design's `##` headings render as `h2` inside a part's Why, so the outline jumps up, and the prose there inherits the Why body's muted colour.
+
+- [ ] **#38** The Undo toasts have no key and no length setting for someone who turns single-key shortcuts off `#improvement` `#approval-queue` `#initiative:approval-queue` *(2026-10-25)*
+  `z` reaches the held decision's Undo only with single-key shortcuts on, and the 10-second flash Undo has no key. A speech-input user must Tab to a toast at the end of the page in time. Options: a chord that ignores single-key mode, "Press Z to undo" in the announcement, or a hold length next to the shortcuts setting (daisyui-a11y review of the polish pass, WCAG 2.2.1).
+
+- [ ] **#37** Read the inline notes with NVDA on a Windows machine `#improvement` `#approval-queue` `#initiative:docs-system` *(2026-10-25)*
+  The Orca half of #10 passed on 2026-10-25 (each note choice is announced as a button). NVDA and JAWS in focus mode may still read CodeMirror's `role="textbox"` content as plain text; this needs a Windows machine.
+
+- [x] **#36** An old-spelling note anchor can resolve into the wrong section when two headings share an old slug `#bug` `#approval-queue` `#initiative:approval-queue` *(2026-10-24)*
   The alias in `notes.ts` maps a key the first section lacks (for example `setup.p3`) into the second section's block, where the old rule resolved it to nothing. Only old-spelling notes on documents with repeated headings are affected (docs friction whole-branch review).
+  Done: the alias records only for the first section that bears an old slug.
 
-- [ ] **#35** `/claim` is a GET load that changes state `#improvement` `#approval-queue` `#initiative:approval-queue` *(2026-10-24)*
+- [x] **#35** `/claim` is a GET load that changes state `#improvement` `#approval-queue` `#initiative:approval-queue` *(2026-10-24)*
   Any browser that loads `/claim`, an agent's included, takes the claim, and a link preload would do the same. A form post behind a "Claim this browser" button would keep it to one deliberate click (svelte-reviewer, docs friction close). Plan call 6 specified the load, so this changes a design call.
+  Done: `/claim` is a form post behind a "Claim this browser" button; a load sets no cookie, and a browser already claimed stays claimed.
 
-- [ ] **#34** Heading slugs keep HTML entities `#bug` `#approval-queue` `#initiative:approval-queue` *(2026-10-24)*
+- [x] **#34** Heading slugs keep HTML entities `#bug` `#approval-queue` `#initiative:approval-queue` *(2026-10-24)*
   `marked`'s inline lexer leaves `&amp;` undecoded, so a heading holding an entity can slug differently from the page's `rehype-slug` (T2 report).
+  Done: named entities decode through `decode-named-character-reference` (the decoder cairn's parser runs); code spans stay as written.
 
-- [ ] **#33** `tests/lifecycle.test.sh`'s defer case hung past its 5-second finish limit once `#bug` `#approval-queue` `#initiative:approval-queue` *(2026-10-24)*
+- [x] **#33** `tests/lifecycle.test.sh`'s defer case hung past its 5-second finish limit once `#bug` `#approval-queue` `#initiative:approval-queue` *(2026-10-24)*
   Seen three times in the docs friction pass (a diff-reviewer rerun and two fix-chain gate runs, each while other work loaded the machine); it passed on the next run and in three solo runs. A timing-sensitive wait in the defer path or in `finish()`. Not reproduced on demand.
+  Done: the cause was the command's 5-second wait for a tab poll newer than `item.json`; `queue_design` now clears `tab.seen`.
 
-- [ ] **#32** The live-log leak check only sees ids still in the test's temp log `#improvement` `#approval-queue` `#initiative:approval-queue` *(2026-10-24)*
+- [x] **#32** The live-log leak check only sees ids still in the test's temp log `#improvement` `#approval-queue` `#initiative:approval-queue` *(2026-10-24)*
   `tests/packet.test.sh` removes or overwrites the temp log between sections, so ids from earlier sections are never checked, and a command that wrote only to the live log never puts its id in the temp log. Collect every id a test queued instead (task-scope diff-reviewer, docs friction).
+  Done: each of the three tests appends every id it reads, and `live_leak` checks them against the live log.
 
-- [ ] **#31** `collect` on an undecided item waits forever once the item is withdrawn `#improvement` `#approval-queue` `#initiative:approval-queue` *(2026-10-24)*
+- [x] **#31** `collect` on an undecided item waits forever once the item is withdrawn `#improvement` `#approval-queue` `#initiative:approval-queue` *(2026-10-24)*
   The wait loop watches only `decision.json`. Leave the loop when `item.json` is gone. Related: `withdraw` removes `item.json` with no lock, so a `decision.json` written in that instant is lost, and a defer in the same instant as a withdraw's TERM reports "still queued". Also `$check_body` and `$check_err` are assigned after the EXIT trap is armed, so a TERM in that window hits an unbound variable.
+  Done: `collect` ends with "was withdrawn; nothing to collect" (exit 1) when `item.json` is gone; `retire_item`, `withdraw`'s wait on the waiter, and the app's re-check close the race windows. The narrow case where both sides back off is #41.
 
-- [ ] **#30** The item page, rail, and merge view miss small cues for deferred and orphaned items and amend reviews `#improvement` `#approval-queue` `#initiative:approval-queue` *(2026-10-24)*
+- [x] **#30** The item page, rail, and merge view miss small cues for deferred and orphaned items and amend reviews `#improvement` `#approval-queue` `#initiative:approval-queue` *(2026-10-24)*
   The item page says nothing about being deferred or orphaned. The rail does not mark an orphaned item and styles "Deferred" like "Approved". The orphan line sits outside the row link, so a screen reader skips it. The editor's label does not say it shows changes since the approval. The claim page's top padding differs from the board's. Opening a collapsed run by "Next call for you" is covered by a unit test only, and a far jump scrolls instantly where a near one is smooth (a11y and svelte reviews, T2 and T3 reports).
+  Done: the item page, rail, board row description, amend label, and claim padding carry the cues; "Next call for you" opens a folded run (browser check); the far jump now scrolls smoothly with a `requestMeasure` correction (a 400-paragraph blueprint lands the line at 140px).
 
 - [x] **#21** Print the queued item's id or URL from `approval-queue blueprint` `#improvement` `#approval-queue` `#initiative:docs-system` *(2026-10-22)*
   A successful queue prints nothing; the author learns it is queued only from `pgrep` (record 22).
   Record: `~/Projects/initiatives/docs-system/research/2026-10-22-extend-blueprints-pilot-friction.md`
   Batch 2: still prints nothing on a successful queue; the session confirmed each queue with `pgrep` (record 36).
-- [ ] **#20** The comments pass's review suggestions not taken `#improvement` `#approval-queue` `#initiative:docs-system` *(2026-10-21)*
+- [x] **#20** The comments pass's review suggestions not taken `#improvement` `#approval-queue` `#initiative:docs-system` *(2026-10-21)*
   The delete toast's Undo lasts 6 s, which may be short for a screen-reader user (a11y W9); the highlight fills are a spec colour under 3:1 against the page (a11y W5); the comment chords match `e.code`, so on Dvorak or AZERTY they follow the QWERTY key position; `settled()` is awaited once before a decision's flush, so a comment op started during the flush is not awaited; `review.svelte.test.ts` has no case for `restore`, the gone-text path, `focusAfterRemoving`, or `cancelBox` during an op, which need a CodeMirror view the store tests do not build.
+  Done: the Undo lasts 10 s and pauses; the highlight fills keep light tints with a 2px ink underline, since no fill met 3:1 against the page and 4.5:1 for the text over it; chords follow the key's letter; `settled()` loops; five new review cases. Undo reach without single-key shortcuts is #38.
 
-- [ ] **#12** The review screens' optional Svelte and accessibility suggestions `#improvement` `#approval-queue` `#initiative:docs-system` *(2026-10-21)*
+- [x] **#12** The review screens' optional Svelte and accessibility suggestions `#improvement` `#approval-queue` `#initiative:docs-system` *(2026-10-21)*
   From the reviewed-pages close review. Svelte: `$state.raw` for `DocReview.decided`, `starts`, and DocEditor's `view`; announce only save failures; move the headline's long-size threshold into `FrameHeader`; key `PaneList` rows on more than `href`; a note on why the custom enhance never calls `applyAction`; `App.PageData` in `app.d.ts`; rename the `blueprint` derived in `ItemPanel` to `docItem`. Accessibility: `aria-keyshortcuts` with `aria-hidden` key caps in buttons; `<th scope="row">` in the help sheet; a `nav` breadcrumb; `aria-describedby` on the send-back hint; an "opens in a new tab" cue; a heading for each note's header.
+  Done: all listed items landed; only a failed save announces.
 
-- [ ] **#11** DaisyUI-first pass on the review frame and its panes `#improvement` `#approval-queue` `#initiative:docs-system` *(2026-10-21)*
+- [x] **#11** DaisyUI-first pass on the review frame and its panes `#improvement` `#approval-queue` `#initiative:docs-system` *(2026-10-21)*
   No ledger ruling records a DaisyUI defect behind these home-grown parts: the frame drawers (`drawer drawer-end`; the hand-rolled `inert` focus handling is better, so record that if kept), `PaneList` (`menu menu-sm`), `.linkbtn`, `.drawer-x`, `.appbtn`, `.rail-keys`, the note choices, the pane's native checkbox (`toggle toggle-sm`), the send-back `fieldset`, and the crumb (`breadcrumbs`). Each can take the stock class and keep the prototype's look with overrides.
+  Done: stock `menu`, `toggle`, `btn`, `fieldset`, and `collapse` classes; the frame drawers, the crumb, the rail list, and the pane rows stay home-grown, each with its defect in the README's "Home-grown parts".
 
-- [ ] **#8** The packet and board polish the prototype has and the design did not list `#improvement` `#approval-queue` `#initiative:approval-packets` *(2026-10-17)*
+- [x] **#8** The packet and board polish the prototype has and the design did not list `#improvement` `#approval-queue` `#initiative:approval-packets` *(2026-10-17)*
   From the T8 visual grade (cosmetic only): the selected sort segment is blue where the prototype uses near-black; the sidebar group has no bordered box, a very faint mono repo label, and no "Board [b]" row; sidebar entries read "Packet" where the prototype shows the ask count and an irreversible flag (the layout's data holds only item metadata); no hamburger icon on the phone top bar; the breadcrumb shows "Board / N asks" where the prototype shows initiative, repos, and waiting; the person step's text is link-blue; the 1/2/3 number-key chips on ask options are missing, and so is the single-key pick; the dark-mode lifted bar (colour ledger row 7); "Reject with note" wraps on a 390px bar because the R key chip stays.
+  Done: every listed difference landed except three that were already true (the phone menu icon, the person step's ink, and the bar's "Send back with note" with no R chip).
 
-- [ ] **#7** Part detail shows less than the PR and design screens `#improvement` `#approval-queue` `#initiative:approval-packets` *(2026-10-17)*
+- [x] **#7** Part detail shows less than the PR and design screens `#improvement` `#approval-queue` `#initiative:approval-packets` *(2026-10-17)*
   A packet part's detail shows checks, review, file groups with a GitHub link, or the raw design markdown. It has no full diff browser and no rendered design, because the server sends the design as raw Markdown. The PR and design screens still set prose at 65ch to 70ch (`BriefBlock`, `DecideCards`), where the packet screen uses 56ch.
+  Done: a packet part opens the full diff (`FilesDiff`) and the rendered design (`DesignView`); the PR and design screens set prose at 56ch.
 
-- [ ] **#6** Board rows are not in the j/k navigation, and the hold pauses on pointer only `#improvement` `#approval-queue` `#initiative:approval-packets` *(2026-10-17)*
+- [x] **#6** Board rows are not in the j/k navigation, and the hold pauses on pointer only `#improvement` `#approval-queue` `#initiative:approval-packets` *(2026-10-17)*
   The sidebar's `data-q` navigation covers sidebar links only, so a board row has one tab stop and no j/k. The 5-second hold pauses while the pointer is over the bar and never on keyboard focus. The reduced hint copy says "Point at the bar to pause" even when a click already put the pointer there.
+  Done: board rows carry `data-q` and join j and k; the hold already paused on focus and pointer since be99989.
 
-- [ ] **#5** DaisyUI-first pass on the packet components `#improvement` `#approval-queue` `#initiative:approval-packets` *(2026-10-17)*
+- [x] **#5** DaisyUI-first pass on the packet components `#improvement` `#approval-queue` `#initiative:approval-packets` *(2026-10-17)*
   The a11y review's non-blocking notes: use stock `breadcrumbs` for the breadcrumb; use `collapse` (or record the defect that forced raw `<details>` with a home-grown chevron) in `PacketAsks` and `PacketRoutine`; the "Not checked" `.alert` is stripped until little of the component is left, so use a plain `div` with a start border or record why; `aria-hidden` on the timeline `<hr>`s; `aria-describedby` on the confirm dialog and `autofocus` on Cancel; focus-visible z-index on the join segments; `--btn-color` and `--btn-fg` for the checked override; a focusable scroll region on the routine table; board link context (`aria-describedby` to the meta line, `<time>` for the age, sr-only text for the en dash, a table caption).
+  Done: stock `collapse`, `menu`, `toggle`, `btn`, and `fieldset` classes plus the accessibility notes; the "Not checked" block, the timeline, and the routine list were already done.
 
-- [ ] **#4** The board reparses every `packet.json` on each 2-second poll `#improvement` `#approval-queue` `#initiative:approval-packets` *(2026-10-17)*
+- [x] **#4** The board reparses every `packet.json` on each 2-second poll `#improvement` `#approval-queue` `#initiative:approval-packets` *(2026-10-17)*
   Fine at today's scale. Cache by mtime, or store the ask count, rules, repo count, and irreversible flag in `item.json` when the command writes it.
+  Done: `packet-facts.ts` caches each packet's facts by the mtime of `packet.json`, for the board and the rail.
 
-- [ ] **#3** Add `src/app.d.ts` `#improvement` `#approval-queue` `#initiative:approval-packets` *(2026-10-17)*
+- [x] **#3** Add `src/app.d.ts` `#improvement` `#approval-queue` `#initiative:approval-packets` *(2026-10-17)*
   No `locals`, `platform`, or `PageData` augmentation is used, so nothing is broken. Add the standard stub so `App.*` types have a home when the next server concern lands. Also: turning "Close when empty" back on does not restart its count, and the empty state flashes "closes in 30 s" for one frame before `onMount` reads `localStorage`.
+  Done: `App.PageData` is typed from the layout load; turning "Close when empty" back on restarts the count, and the countdown waits for the saved setting.
