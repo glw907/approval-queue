@@ -28,15 +28,13 @@ text drops a box left empty. Below 1260px a tap on a highlight opens the drawer 
 		file: string;
 		/** The editable region's accessible name; it names the file, since a screen can hold several. */
 		label: string;
-		/** What the margin calls the document, such as "page". */
-		kindWord: string;
 		/** The page's text at the PR's merge base. Set, the editor shows the diff against it, unchanged runs folded. */
 		base?: string;
 		/** The margin's card heading level: 4 where the editor sits under its own document's h2, else 3. */
 		level?: 3 | 4;
 	}
 
-	let { review, file, label, kindWord, base, level }: Props = $props();
+	let { review, file, label, base, level }: Props = $props();
 
 	let host = $state<HTMLDivElement>();
 	let view = $state.raw<EditorView | null>(null);
@@ -147,7 +145,7 @@ text drops a box left empty. Below 1260px a tap on a highlight opens the drawer 
 		></div>
 		{#if !view}<p class="loading">Loading the editor…</p>{/if}
 	</div>
-	<Margin {review} {kindWord} {level} />
+	<Margin {review} {level} />
 </div>
 
 <style>

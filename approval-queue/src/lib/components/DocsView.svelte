@@ -96,7 +96,6 @@ since its decision bar and outline read them too.
 			{review}
 			file={name(page.path)}
 			label="Page {name(page.path)}, markdown{review.editable ? '' : ', read only'}"
-			kindWord="page"
 			base={page.base}
 			level={4}
 		/>

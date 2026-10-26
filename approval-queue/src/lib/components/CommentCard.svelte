@@ -16,14 +16,12 @@ With comments read only, as on a decided item, the card shows no actions.
 	interface Props {
 		review: DocReview;
 		card: Exclude<MarginCard, { kind: 'note' }>;
-		/** What the document is called in the gone line, such as "page". */
-		kindWord: string;
 		current?: boolean;
 		/** The heading level of the card's title, one under the margin's own title. */
 		level: 3 | 4;
 	}
 
-	let { review, card, kindWord, current = false, level }: Props = $props();
+	let { review, card, current = false, level }: Props = $props();
 
 	const STATUS = {
 		done: { head: 'Done.', line: 'The author made the change.', tone: 'tone-success' },
@@ -48,7 +46,7 @@ With comments read only, as on a decided item, the card shows no actions.
 
 {#snippet gone(quote: string)}
 	<p class="quote gone"><span class="sr-only">Removed text: </span>{quote}</p>
-	<p class="gone-line">The text you commented on is gone from the {kindWord}.</p>
+	<p class="gone-line">The text you commented on is gone from the page.</p>
 {/snippet}
 
 {#snippet editor(label: string, placeholder: string, save: string)}
