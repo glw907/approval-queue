@@ -32,12 +32,13 @@ for that save first, and closing the tab then asks before leaving.
 	import { changedCount, seedRows, type Row } from '#lib/triage.ts';
 	import { VERDICT_LOOK } from '#lib/packet-view.ts';
 	import type { PlacedNote } from '#lib/editor/notes.ts';
-	import { boxes, DocReview, heldBySave, noteStart, refuseOpenBox, restoredDrafted, sendBackDraft, type CommentAnswer } from '#lib/editor/review.svelte.ts';
+	import { boxes, DocReview, heldBySave, noteStart, refuseOpenBox, restoredDrafted, sendBackDraft, type CommentAnswer, type SaveResult } from '#lib/editor/review.svelte.ts';
 	import type { PageData } from '../../routes/item/[id=id]/$types';
 	import BriefBlock from './BriefBlock.svelte';
 	import DecideCards from './DecideCards.svelte';
 	import DesignView from './DesignView.svelte';
 	import DetailRows from './DetailRows.svelte';
+	import DocsView from './DocsView.svelte';
 	import DecisionBar from './frame/DecisionBar.svelte';
 	import Frame from './frame/Frame.svelte';
 	import FrameHeader from './frame/FrameHeader.svelte';
@@ -209,7 +210,22 @@ for that save first, and closing the tab then asks before leaving.
 		packet ? [...new Set(packet.parts.filter((p) => p.kind !== 'step').map((p) => p.ref.split(/[#:]/)[0].split('/').pop()))].join(', ') : ''
 	);
 	// svelte-ignore state_referenced_locally
+	const saveUrl = `/item/${encodeURIComponent(data.meta.id)}?/save`;
+	// svelte-ignore state_referenced_locally
 	const commentUrl = `/item/${encodeURIComponent(data.meta.id)}?/comment`;
+
+	/** Posts one page's text to the save action, which commits that page alone in the worktree. */
+	async function savePage(file: string, text: string, blob: string): Promise<SaveResult> {
+		const body = new FormData();
+		body.set('file', file);
+		body.set('blob', blob);
+		body.set('text', text);
+		const res = await fetch(saveUrl, { method: 'POST', body, headers: { 'x-sveltekit-action': 'true' } });
+		const result = deserialize(await res.text());
+		if (result.type === 'success') return { ok: true, blob: String(result.data?.blob ?? '') };
+		if (result.type === 'failure') return { ok: false, message: String(result.data?.message ?? 'refused') };
+		return { ok: false, message: result.type === 'error' ? result.error.message : 'unexpected answer' };
+	}
 
 	/** Posts one comment op to the comment action, which answers the whole stored state after it. */
 	async function postComment(fields: Record<string, string>): Promise<CommentAnswer> {
@@ -234,7 +250,33 @@ for that save first, and closing the tab then asks before leaving.
 		}
 		return out;
 	}
-	const docReviews: DocReview[] = [];
+	// The page keys this component on the item id, so each page's review is built once per item.
+	// svelte-ignore state_referenced_locally
+	const remember = data.decided ? undefined : `desk.calls.${data.meta.id}`;
+	// svelte-ignore state_referenced_locally
+	const docReviews: DocReview[] =
+		data.kind === 'docs'
+			? data.pages.map(
+					(page) =>
+						new DocReview({
+							doc: page.doc,
+							original: page.doc,
+							blob: page.blob,
+							notes: page.notes,
+							save: (text, blob) => savePage(page.path, text, blob),
+							decided: data.decided ? answeredCalls(page.notes) : undefined,
+							remember: remember && `${remember}.${page.path}`,
+							// A page gone from the worktree shows its queued copy and takes no edits or comments.
+							readonly: page.missing,
+							comments: page.comments,
+							threads: page.threads,
+							comment: data.decided ? undefined : postComment,
+							file: page.path,
+							margin: `margin-${page.path}`
+						})
+				)
+			: [];
+	const docs = $derived(data.kind === 'docs' ? data : null);
 	const openCalls = $derived(docReviews.flatMap((r) => r.openCalls));
 	const decidedCount = $derived(docReviews.reduce((n, r) => n + Object.keys(r.decided).length, 0));
 	const changedLines = $derived(docReviews.reduce((n, r) => n + r.changedLines, 0));
@@ -244,7 +286,7 @@ for that save first, and closing the tab then asks before leaving.
 	$effect(() => {
 		for (const r of docReviews) {
 			r.locked = frozen;
-			r.commentable = !frozen;
+			r.commentable = !frozen && r.editable;
 			r.setReadonly(frozen);
 		}
 	});
@@ -292,6 +334,8 @@ for that save first, and closing the tab then asks before leaving.
 		const list = parts.length < 3 ? parts.join(' and ') : `${parts.slice(0, -1).join(', ')}, and ${parts.at(-1)}`;
 		return `You sent it back with ${plural(threads.length, 'comment')}. The author ${list}.`;
 	});
+	/** The header's status line: how the author answered the comments, then the calls still open. */
+	const docLede = $derived([repliesLine, callsLine].filter(Boolean).join(' '));
 	/** Moves focus to the next open call after the one holding focus, wrapping to the first. */
 	let lastDoc = -1;
 	function nextCall() {
@@ -569,6 +613,10 @@ for that save first, and closing the tab then asks before leaving.
 	/** Approve on a docs review: a locked press moves to the next open call; otherwise the last edit saves first. */
 	async function approveDoc() {
 		if (refuseOpenBox()) return;
+		if (docReviews.some((r) => !r.editable)) {
+			desk.announce('Not approved: a page is no longer committed in its worktree. Send the review back instead.');
+			return;
+		}
 		if (openCalls.length) {
 			nextCall();
 			return;
@@ -760,7 +808,7 @@ for that save first, and closing the tab then asks before leaving.
 <Frame
 	margin={docReviews.length > 0}
 	where={data.meta.headline ?? data.meta.title}
-	paneLabel={data.kind === 'packet' ? 'Outline and parts' : data.kind === 'docs' ? 'Calls and pages' : 'Calls and outline'}
+	paneLabel={data.kind === 'packet' ? 'Outline and parts' : 'Calls and outline'}
 >
 	{#snippet header()}
 		{#if packet}
@@ -786,6 +834,23 @@ for that save first, and closing the tab then asks before leaving.
 				{#snippet description()}
 					{#each [packet.background, ...packet.summary] as paragraph, i (i)}<p><Prose text={paragraph} /></p>{/each}
 				{/snippet}
+			</FrameHeader>
+		{:else if docs}
+			{#snippet paragraphs()}
+				{#each docs.description as paragraph, i (i)}<p><Prose text={paragraph} /></p>{/each}
+			{/snippet}
+			<FrameHeader
+				headlineText={docs.meta.title}
+				description={docs.description.length ? paragraphs : undefined}
+				crumbs={[{ text: 'Board', href: '/' }, { text: 'Docs review' }, { text: docs.ref }]}
+			>
+				{#snippet state()}
+					{#if docs.revision}<span class="badge badge-sm badge-outline rule-badge tone-info">Revision {docs.revision}</span>{/if}
+					{#if docs.approved}<span class="badge badge-sm badge-outline rule-badge tone-info">Amends the approved version</span>{/if}
+					{@render itemState()}
+				{/snippet}
+				{#snippet headline()}{docs.meta.title}{/snippet}
+				{#snippet lede()}{docLede}{/snippet}
 			</FrameHeader>
 		{:else if data.kind === 'pr' || data.kind === 'design' || data.kind === 'triage'}
 			{@const item = data}
@@ -821,6 +886,8 @@ for that save first, and closing the tab then asks before leaving.
 		<PacketBrief data={packet} bind:verdicts decided={packet.decided} />
 		<PacketAsks asks={packet.asks} parts={packet.parts} bind:answers decided={packet.decided} />
 		<PacketRoutine routine={packet.routine} parts={packet.parts} bind:verdicts decided={packet.decided} />
+	{:else if docs}
+		<DocsView data={docs} reviews={docReviews} place={docPlace} />
 	{:else if data.kind === 'pr'}
 		<PrView {data} bind:picks />
 	{:else if data.kind === 'design'}

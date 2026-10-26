@@ -88,7 +88,7 @@ describe('DocReview remembered choices', () => {
 	// The panel opens the note, closes it, and opens it again; `text` and `drafted` are its two fields.
 	it('rebuilds an untouched send-back draft when a call was answered while the note was closed', () => {
 		const r = review('b1');
-		const draft = () => sendBackDraft(r.openCalls, r.changedLines, 'plan');
+		const draft = () => sendBackDraft(r.openCalls, r.changedLines, 'page');
 		let text = noteStart('', '', draft());
 		const drafted = text;
 		expect(text).toBe('- Still open: Why\n- Still open: Keep it here?\n');
@@ -100,7 +100,7 @@ describe('DocReview remembered choices', () => {
 
 	it('treats a send-back draft Undo restored untouched as untouched, so a call answered since rebuilds it', () => {
 		const r = review('b1');
-		const draft = () => sendBackDraft(r.openCalls, r.changedLines, 'plan');
+		const draft = () => sendBackDraft(r.openCalls, r.changedLines, 'page');
 		const restored = draft();
 		const drafted = restoredDrafted(restored, draft());
 		r.choose('Q1', 0);
@@ -109,18 +109,18 @@ describe('DocReview remembered choices', () => {
 
 	it('treats a restored send-back note that differs from the rebuilt draft as typed', () => {
 		const r = review('b1');
-		const typed = `${sendBackDraft(r.openCalls, 0, 'plan')}Tighten the second section.`;
-		const drafted = restoredDrafted(typed, sendBackDraft(r.openCalls, 0, 'plan'));
+		const typed = `${sendBackDraft(r.openCalls, 0, 'page')}Tighten the second section.`;
+		const drafted = restoredDrafted(typed, sendBackDraft(r.openCalls, 0, 'page'));
 		r.choose('Q1', 0);
-		expect(noteStart(typed, drafted, sendBackDraft(r.openCalls, 0, 'plan'))).toBe(typed);
+		expect(noteStart(typed, drafted, sendBackDraft(r.openCalls, 0, 'page'))).toBe(typed);
 	});
 
 	it('keeps a send-back note the reader has typed in', () => {
 		const r = review('b1');
-		const drafted = sendBackDraft(r.openCalls, 0, 'plan');
+		const drafted = sendBackDraft(r.openCalls, 0, 'page');
 		r.choose('Q1', 0);
 		const typed = `${drafted}Tighten the second section.`;
-		expect(noteStart(typed, drafted, sendBackDraft(r.openCalls, 0, 'plan'))).toBe(typed);
+		expect(noteStart(typed, drafted, sendBackDraft(r.openCalls, 0, 'page'))).toBe(typed);
 	});
 
 	it('holds a decision back while the last save failed, naming the decision', async () => {
@@ -350,5 +350,51 @@ describe('DocReview comment removal and its Undo', () => {
 		await first;
 		await second;
 		expect(settled).toBe(true);
+	});
+});
+
+describe('two pages on one screen', () => {
+	const pageNotes = (file: string, id: string): PlacedNote[] => [{ ...notes[0], id, file }];
+	const pageReview = (file: string, id: string, save: ReviewInit['save']) =>
+		new DocReview({ doc: 'Old line.', original: 'Old line.', blob: `${file}-b1`, notes: pageNotes(file, id), save, file });
+
+	beforeEach(() => vi.useFakeTimers());
+	afterEach(() => vi.useRealTimers());
+
+	it('saves each page against its own blob and leaves the other alone', async () => {
+		const saveA = vi.fn(async (_text: string, _blob: string): Promise<SaveResult> => ({ ok: true, blob: 'a-b2' }));
+		const saveB = vi.fn(async (): Promise<SaveResult> => ({ ok: true, blob: 'b-b2' }));
+		const a = pageReview('docs/a.md', 'A1', saveA);
+		const b = pageReview('docs/b.md', 'B1', saveB);
+		a.hooks.change(edited);
+		await a.flush();
+		await b.flush();
+		expect(saveA).toHaveBeenCalledWith('Rewritten line.', 'docs/a.md-b1');
+		expect(saveB).not.toHaveBeenCalled();
+		expect(a.blob).toBe('a-b2');
+		expect(b.blob).toBe('docs/b.md-b1');
+		expect(b.pending).toBe(false);
+	});
+
+	it('holds approve while any page failed to save, naming that page alone', async () => {
+		const a = pageReview('docs/a.md', 'A1', async () => ({ ok: true, blob: 'a-b2' }));
+		const b = pageReview('docs/b.md', 'B1', async () => ({ ok: false, message: 'stale' }));
+		a.hooks.change(edited);
+		b.hooks.change(edited);
+		await a.flush();
+		await b.flush();
+		expect(heldBySave(a, 'approve')).toBeNull();
+		expect(heldBySave(b, 'approve')).toBe('Not approved: Not saved: stale');
+	});
+
+	it('keeps approve locked until a call on every page is answered', () => {
+		const a = pageReview('docs/a.md', 'A1', async () => ({ ok: true, blob: 'x' }));
+		const b = pageReview('docs/b.md', 'B1', async () => ({ ok: true, blob: 'y' }));
+		const open = () => [a, b].flatMap((r) => r.openCalls.map((n) => n.id));
+		expect(open()).toEqual(['A1', 'B1']);
+		a.choose('A1', 0);
+		expect(open()).toEqual(['B1']);
+		b.choose('B1', 1);
+		expect(open()).toEqual([]);
 	});
 });

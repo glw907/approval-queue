@@ -54,15 +54,10 @@ export interface EditorOptions {
 	/** A selection offers a Comment button where the margin is a drawer. */
 	commentable: boolean;
 	/**
-	 * A YAML file rather than markdown: set in the monospace face with no markdown marking, and each
-	 * wrapped line hangs at its own indentation so the nesting stays readable.
+	 * The page's text at the PR's merge base. Set, the editor shows the page's changes against it with
+	 * the old lines above the new ones, folds the unchanged runs, and opens on the first change.
 	 */
-	yaml?: boolean;
-	/**
-	 * The approved text of the file this review amends. Set, the editor shows the changes since it with
-	 * the approved lines above the new ones, folds the unchanged runs, and opens on the first change.
-	 */
-	amend?: string;
+	base?: string;
 	hooks: EditorHooks;
 }
 
@@ -234,9 +229,6 @@ function commentTip(opts: EditorOptions): Extension {
 }
 
 const line = (cls: string) => Decoration.line({ class: cls });
-/** A YAML line whose wrapped rows hang at its own indentation, so the nesting survives a wrap. */
-const hang = (indent: number, classes: string[]) =>
-	Decoration.line({ class: ['cm-yaml', ...classes].join(' '), attributes: { style: `--hang: ${indent}ch` } });
 const mark = (cls: string) => Decoration.mark({ class: cls });
 
 /**
@@ -244,7 +236,7 @@ const mark = (cls: string) => Decoration.mark({ class: cls });
  * purpose line, inline directives, code spans, and links. The fence scan needs the whole document,
  * since a line's container can open far above it, so it is cached and rerun on a change only.
  */
-function sourcePlugin(original: string, yaml: boolean) {
+function sourcePlugin(original: string) {
 	const originalLines = new Set(original.split('\n'));
 	return ViewPlugin.fromClass(
 		class {
@@ -272,12 +264,6 @@ function sourcePlugin(original: string, yaml: boolean) {
 						const classes: string[] = [];
 						const marks: Array<[number, number, string]> = [];
 						const role = this.scan.roles[i];
-						if (yaml) {
-							if (changes && tx.trim() && !originalLines.has(tx)) classes.push('cm-edited');
-							b.add(l.from, l.from, hang(/^ */.exec(tx)?.[0].length ?? 0, classes));
-							pos = l.to + 1;
-							continue;
-						}
 						if (front && l.from < front.to) classes.push('cm-front');
 						else if (role) {
 							classes.push('cm-fence');
@@ -350,16 +336,17 @@ export function createEditor(parent: HTMLElement, opts: EditorOptions): EditorVi
 				...keys,
 				...historyKeymap
 			]),
-			opts.yaml ? [] : [markdown({ base: markdownLanguage }), syntaxHighlighting(highlight)],
+			markdown({ base: markdownLanguage }),
+			syntaxHighlighting(highlight),
 			EditorView.lineWrapping,
 			markChangesField,
-			sourcePlugin(opts.original, opts.yaml ?? false),
+			sourcePlugin(opts.original),
 			highlightsExtension(opts),
 			commentTip(opts),
 			editable.of(editableExt(opts.readonly)),
-			opts.amend === undefined
+			opts.base === undefined
 				? []
-				: unifiedMergeView({ original: opts.amend, mergeControls: false, collapseUnchanged: { margin: 3, minSize: 4 } }),
+				: unifiedMergeView({ original: opts.base, mergeControls: false, collapseUnchanged: { margin: 3, minSize: 4 } }),
 			EditorView.scrollMargins.of(() => ({ top: 56, bottom: 140 })),
 			EditorView.contentAttributes.of({ 'aria-label': opts.label }),
 			EditorView.updateListener.of((u) => {
@@ -370,9 +357,9 @@ export function createEditor(parent: HTMLElement, opts: EditorOptions): EditorVi
 		]
 	});
 	if (Object.keys(opts.decided).length) view.dispatch({ effects: decidedEffect.of(opts.decided) });
-	const first = opts.amend === undefined ? undefined : getChunks(view.state)?.chunks[0];
+	const first = opts.base === undefined ? undefined : getChunks(view.state)?.chunks[0];
 	if (first) view.dispatch({ selection: { anchor: first.fromB } });
-	if (opts.amend !== undefined) openableFolds(view);
+	if (opts.base !== undefined) openableFolds(view);
 	return view;
 }
 

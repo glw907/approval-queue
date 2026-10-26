@@ -6,7 +6,7 @@ const css = readFileSync(new URL('./DocEditor.svelte', import.meta.url), 'utf8')
 	.replace(/\/\*[\s\S]*?\*\//g, '');
 
 // The classes CodeMirror draws as whole lines or block widgets, whose boxes it measures for its height map.
-const MEASURED = /\.(cm-line|cm-yaml|cm-edited|cm-front|cm-fence|cm-in-block|cm-l-h\d|cm-gone)\b/;
+const MEASURED = /\.(cm-line|cm-edited|cm-front|cm-fence|cm-in-block|cm-l-h\d|cm-gone)\b/;
 
 /** Splits `text` at each `sep` outside parentheses. */
 function splitTop(text: string, sep: RegExp): string[] {

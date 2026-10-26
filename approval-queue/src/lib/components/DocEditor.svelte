@@ -24,21 +24,19 @@ text drops a box left empty. Below 1260px a tap on a highlight opens the drawer 
 
 	interface Props {
 		review: DocReview;
-		/** The file name the bar shows, such as `debug-your-site.blueprint.md`. */
+		/** The file name the bar shows, such as `debug-your-site.md`. */
 		file: string;
 		/** The editable region's accessible name; it names the file, since a screen can hold several. */
 		label: string;
-		/** What the margin calls the document: "blueprint", "page", or a change document's kind. */
+		/** What the margin calls the document, such as "page". */
 		kindWord: string;
-		/** A YAML file, set in the monospace face with each wrapped line hanging at its indentation. */
-		yaml?: boolean;
-		/** The approved text this file amends. Set, the editor shows the diff since it, unchanged runs folded. */
-		amend?: string;
+		/** The page's text at the PR's merge base. Set, the editor shows the diff against it, unchanged runs folded. */
+		base?: string;
 		/** The margin's card heading level: 4 where the editor sits under its own document's h2, else 3. */
 		level?: 3 | 4;
 	}
 
-	let { review, file, label, kindWord, yaml = false, amend, level }: Props = $props();
+	let { review, file, label, kindWord, base, level }: Props = $props();
 
 	let host = $state<HTMLDivElement>();
 	let view = $state.raw<EditorView | null>(null);
@@ -55,8 +53,7 @@ text drops a box left empty. Below 1260px a tap on a highlight opens the drawer 
 			comments: $state.snapshot(review.ranges),
 			readonly: review.readonly,
 			commentable: review.canComment,
-			yaml,
-			amend,
+			base,
 			hooks: review.hooks
 		});
 		review.attach(v);
@@ -131,7 +128,7 @@ text drops a box left empty. Below 1260px a tap on a highlight opens the drawer 
 					Comment <kbd aria-hidden="true">Ctrl</kbd><kbd aria-hidden="true">Alt</kbd><kbd aria-hidden="true">M</kbd>
 				</button>
 			{/if}
-			{#if amend !== undefined && view}
+			{#if base !== undefined && view}
 				<button type="button" class="btn btn-link btn-sm linkbtn addc" onclick={() => uncollapseAll(view!)}>Show all unchanged lines</button>
 			{/if}
 			{#if review.editable}
@@ -142,7 +139,7 @@ text drops a box left empty. Below 1260px a tap on a highlight opens the drawer 
 		</div>
 		<!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events: the padding forwards a pointer press to the editor, which has its own keyboard focus, and a tap on a highlight opens its card, which Ctrl+Alt+N reaches from the keyboard -->
 		<div
-			class={['cm-host', yaml && 'yaml']}
+			class="cm-host"
 			bind:this={host}
 			onmousedown={focusFromPadding}
 			onpointerdown={pointerDown}
@@ -429,7 +426,7 @@ text drops a box left empty. Below 1260px a tap on a highlight opens the drawer 
 		font: 700 0.85rem/1.7 var(--font-mono);
 		color: var(--color-primary);
 	}
-	/* The amend view's folds and changes, on the theme's tokens so dark mode follows, with a left rule and a strikethrough so a removed line is not told from an added one by tint alone. */
+	/* The merge view's folds and changes, on the theme's tokens so dark mode follows, with a left rule and a strikethrough so a removed line is not told from an added one by tint alone. */
 	.cm-host :global(.cm-collapsedLines) {
 		color: var(--color-muted);
 		background: var(--color-base-200);
@@ -455,16 +452,6 @@ text drops a box left empty. Below 1260px a tap on a highlight opens the drawer 
 	}
 	.cm-host :global(.cm-deletedChunk .cm-deletedText) {
 		background: linear-gradient(var(--color-error), var(--color-error)) bottom / 100% 2px no-repeat !important;
-	}
-	.cm-host.yaml :global(.cm-scroller),
-	.cm-host.yaml :global(.cm-content) {
-		font-family: var(--font-mono) !important;
-		font-size: 0.8rem;
-		line-height: 1.6;
-	}
-	.cm-host.yaml :global(.cm-yaml) {
-		padding-left: calc(var(--hang) + 6px);
-		text-indent: calc(-1 * var(--hang));
 	}
 	.cm-host :global(.cm-link) {
 		color: var(--color-primary);

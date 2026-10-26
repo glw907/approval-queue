@@ -21,7 +21,7 @@ unplaced and hidden.
 
 	interface Props {
 		review: DocReview;
-		/** What the empty margin and a gone comment call the document: "blueprint", "page", or a change document's kind. */
+		/** What the empty margin and a gone comment call the document, such as "page". */
 		kindWord: string;
 		/** The level of the cards' headings; the margin's own title sits one above. Three under a page's h1, four under a section's h2 and the Comments h3. */
 		level?: 3 | 4;
