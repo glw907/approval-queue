@@ -37,17 +37,17 @@ const board = (sort?: string) =>
 
 describe('/', () => {
 	it('lists a seeded packet under its initiative, with its asks and repos', async () => {
-		await seedPacket(state.root, 'p1', PACKET, { initiative: 'drafter-ui', initiativeTitle: 'Drafter UI' });
+		await seedPacket(state.root, 'p1', PACKET, { initiative: 'sample-ui', initiativeTitle: 'Sample UI' });
 		const data = await board();
-		expect(data.rows).toMatchObject([{ id: 'p1', group: 'Drafter UI', asks: 2, repos: 1 }]);
+		expect(data.rows).toMatchObject([{ id: 'p1', group: 'Sample UI', asks: 2, repos: 1 }]);
 		expect(data.rows[0].rules).toContain('gate-failed');
 	});
 
 	it('marks a packet with an irreversible step, and only that packet', async () => {
-		await seedPacket(state.root, 'p1', PACKET, { initiative: 'drafter-ui', initiativeTitle: 'Drafter UI' });
+		await seedPacket(state.root, 'p1', PACKET, { initiative: 'sample-ui', initiativeTitle: 'Sample UI' });
 		await seedPacket(state.root, 'p2', PACKET.replace(/^1\. \[session\]/m, '1. [irreversible]'), {
-			initiative: 'drafter-ui',
-			initiativeTitle: 'Drafter UI',
+			initiative: 'sample-ui',
+			initiativeTitle: 'Sample UI',
 			created: '2026-10-11T11:00:00Z'
 		});
 		const { rows } = await board();
@@ -63,12 +63,12 @@ describe('/', () => {
 		['a packet.json that is not JSON', (dir: string) => writeFile(join(dir, 'packet.json'), '{nope')],
 		['a packet.json withdrawn mid-load', (dir: string) => rm(join(dir, 'packet.json'))]
 	])('names an unreadable packet in Single items instead of failing the board: %s', async (_name, damage) => {
-		await seedPacket(state.root, 'p1', PACKET, { initiative: 'drafter-ui', initiativeTitle: 'Drafter UI' });
+		await seedPacket(state.root, 'p1', PACKET, { initiative: 'sample-ui', initiativeTitle: 'Sample UI' });
 		await seedPacket(state.root, 'p2', PACKET, { created: '2026-10-11T11:00:00Z' });
 		await damage(join(state.root, 'items', 'p2'));
 		const { rows } = await board();
 		expect(rows).toMatchObject([
-			{ id: 'p1', group: 'Drafter UI' },
+			{ id: 'p1', group: 'Sample UI' },
 			{ id: 'p2', headline: 'p2', group: 'Single items', asks: 0, irreversible: false, single: 'Unreadable' }
 		]);
 	});

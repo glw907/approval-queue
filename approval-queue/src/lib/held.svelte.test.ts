@@ -16,12 +16,12 @@ function decision(id: string, outcome: HeldDecision['outcome'] = 'approve'): Hel
 	return {
 		id,
 		title: `Item ${id}`,
-		kind: 'blueprint',
-		subject: `the blueprint for ${id}`,
+		kind: 'docs',
+		subject: `the page ${id}`,
 		href: `http://127.0.0.1:7907/item/${id}?/${outcome}`,
 		form,
 		outcome,
-		toast: `Approved the blueprint for ${id}.`
+		toast: `Approved the page ${id}.`
 	};
 }
 
@@ -175,7 +175,7 @@ describe('Held', () => {
 		await vi.advanceTimersByTimeAsync(HOLD_MS);
 		expect(refresh).not.toHaveBeenCalled();
 		expect(store.failure).toEqual({
-			text: `The decision on the blueprint for a was not sent: ${message}`,
+			text: `The decision on the page a was not sent: ${message}`,
 			href: '/item/a',
 			link: 'Open it'
 		});
@@ -195,7 +195,7 @@ describe('Held', () => {
 		});
 		second.store.hold(decision('a'));
 		await vi.advanceTimersByTimeAsync(HOLD_MS);
-		expect(second.store.failure?.text).toBe('The decision on the blueprint for a was not sent: Failed to fetch');
+		expect(second.store.failure?.text).toBe('The decision on the page a was not sent: Failed to fetch');
 	});
 
 	it('keeps the item out of the queue while its post is in flight', async () => {
@@ -270,12 +270,13 @@ describe('seedFrom', () => {
 		expect(seed.note).toBe('');
 	});
 
-	it('reads a document review’s send-back note', () => {
+	it('reads a docs review’s send-back note from a post carrying two pages and a call', () => {
 		const form = new FormData();
-		form.set('blob', 'abc');
+		form.set('blob:docs/a.md', 'abc');
+		form.set('blob:docs/b.md', 'def');
 		form.set('call:B3', 'Keep it');
 		form.set('note', '- Still open: Why\n');
-		expect(seedFrom(form, 'blueprint')).toMatchObject({ note: '- Still open: Why\n', answers: {}, picks: [] });
+		expect(seedFrom(form, 'docs')).toMatchObject({ note: '- Still open: Why\n', answers: {}, verdicts: {}, picks: [] });
 	});
 });
 

@@ -25,31 +25,33 @@ const notes: PlacedNote[] = [
 	{
 		id: 'B3',
 		kind: 'decide',
-		anchor: 'a.p1',
+		file: 'docs/a.md',
+		anchor: { quote: 'one' },
 		title: 'Why',
 		body: [],
-		range: null,
+		range: [0, 0],
 		choices: [
-			{ label: 'Use the code reason', text: 'Rewritten line.', done: 'Used it' },
+			{ label: 'Use the code reason', done: 'Used it' },
 			{ label: 'Keep it', done: 'Kept it' }
 		]
 	},
 	{
 		id: 'Q1',
 		kind: 'question',
-		anchor: 'a.p2',
+		file: 'docs/a.md',
+		anchor: { quote: 'two' },
 		title: 'Keep it here?',
 		body: [],
-		range: null,
+		range: [0, 0],
 		choices: [{ label: 'Keep it here', done: 'Kept here' }]
 	}
 ];
 
 function review(blob: string, save: ReviewInit['save'] = async () => ({ ok: true, blob: 'saved' }), doc = 'Old line.') {
-	return new DocReview({ doc, original: 'Old line.', blob, notes, save, remember: KEY });
+	return new DocReview({ doc, original: 'Old line.', blob, file: 'docs/a.md', notes, save, remember: KEY });
 }
 
-/** What the editor's change hook is handed when a choice rewrites its line. */
+/** What the editor's change hook is handed after an edit. */
 const edited = { state: { doc: { toString: () => 'Rewritten line.' } } } as unknown as EditorView;
 
 describe('DocReview remembered choices', () => {
@@ -76,41 +78,6 @@ describe('DocReview remembered choices', () => {
 		expect(review('b2').decided).toEqual({});
 	});
 
-	it('opens a choice again when the rewrite it made was never saved', async () => {
-		const failing = async (): Promise<SaveResult> => ({ ok: false, message: 'refused' });
-		const r = review('b1', failing);
-		r.hooks.change(edited);
-		r.choose('B3', 0);
-		expect(review('b1').decided).toEqual({});
-		await r.flush();
-		expect(review('b1').decided).toEqual({});
-	});
-
-	it('stores a rewriting choice against the blob its save returned', async () => {
-		const r = review('b1');
-		r.hooks.change(edited);
-		r.choose('B3', 0);
-		await r.flush();
-		expect(review('b1').decided).toEqual({});
-		expect(review('saved', undefined, 'Rewritten line.').decided).toEqual({ B3: 0 });
-	});
-
-	it('keeps a rewriting choice open after a failed save, whatever is chosen next', async () => {
-		const failing = async (): Promise<SaveResult> => ({ ok: false, message: 'refused' });
-		const r = review('b1', failing);
-		r.hooks.change(edited);
-		r.choose('B3', 0);
-		await r.flush();
-		r.choose('Q1', 0);
-		expect(review('b1').decided).not.toHaveProperty('B3');
-	});
-
-	it('recalls a rewriting choice only when the loaded file holds its text', () => {
-		localStorage.setItem(KEY, JSON.stringify({ blob: 'b1', decided: { B3: 0, Q1: 0 } }));
-		expect(review('b1').decided).toEqual({ Q1: 0 });
-		expect(review('b1', undefined, 'Rewritten line.').decided).toEqual({ B3: 0, Q1: 0 });
-	});
-
 	it('reports every saved pause as all edits saved', async () => {
 		const r = review('b1');
 		r.hooks.change(edited);
@@ -121,7 +88,7 @@ describe('DocReview remembered choices', () => {
 	// The panel opens the note, closes it, and opens it again; `text` and `drafted` are its two fields.
 	it('rebuilds an untouched send-back draft when a call was answered while the note was closed', () => {
 		const r = review('b1');
-		const draft = () => sendBackDraft(r.openCalls, r.changedLines, 'plan');
+		const draft = () => sendBackDraft(r.openCalls, r.changedLines, 'page');
 		let text = noteStart('', '', draft());
 		const drafted = text;
 		expect(text).toBe('- Still open: Why\n- Still open: Keep it here?\n');
@@ -133,7 +100,7 @@ describe('DocReview remembered choices', () => {
 
 	it('treats a send-back draft Undo restored untouched as untouched, so a call answered since rebuilds it', () => {
 		const r = review('b1');
-		const draft = () => sendBackDraft(r.openCalls, r.changedLines, 'plan');
+		const draft = () => sendBackDraft(r.openCalls, r.changedLines, 'page');
 		const restored = draft();
 		const drafted = restoredDrafted(restored, draft());
 		r.choose('Q1', 0);
@@ -142,18 +109,18 @@ describe('DocReview remembered choices', () => {
 
 	it('treats a restored send-back note that differs from the rebuilt draft as typed', () => {
 		const r = review('b1');
-		const typed = `${sendBackDraft(r.openCalls, 0, 'plan')}Tighten the second section.`;
-		const drafted = restoredDrafted(typed, sendBackDraft(r.openCalls, 0, 'plan'));
+		const typed = `${sendBackDraft(r.openCalls, 0, 'page')}Tighten the second section.`;
+		const drafted = restoredDrafted(typed, sendBackDraft(r.openCalls, 0, 'page'));
 		r.choose('Q1', 0);
-		expect(noteStart(typed, drafted, sendBackDraft(r.openCalls, 0, 'plan'))).toBe(typed);
+		expect(noteStart(typed, drafted, sendBackDraft(r.openCalls, 0, 'page'))).toBe(typed);
 	});
 
 	it('keeps a send-back note the reader has typed in', () => {
 		const r = review('b1');
-		const drafted = sendBackDraft(r.openCalls, 0, 'plan');
+		const drafted = sendBackDraft(r.openCalls, 0, 'page');
 		r.choose('Q1', 0);
 		const typed = `${drafted}Tighten the second section.`;
-		expect(noteStart(typed, drafted, sendBackDraft(r.openCalls, 0, 'plan'))).toBe(typed);
+		expect(noteStart(typed, drafted, sendBackDraft(r.openCalls, 0, 'page'))).toBe(typed);
 	});
 
 	it('holds a decision back while the last save failed, naming the decision', async () => {
@@ -182,13 +149,14 @@ describe('DocReview remembered choices', () => {
 });
 
 describe('DocReview comments', () => {
-	const anchor = (from: number, to: number) => ({ quote: 'x', prefix: '', suffix: '', from, to, commit: 'c' });
+	const anchor = (from: number, to: number) => ({ quote: 'x', prefix: '', suffix: '', from, to, commit: 'c', file: 'docs/a.md' });
 	const doc = 'One line.\nTwo line.';
 	const make = (comment?: ReviewInit['comment']) =>
 		new DocReview({
 			doc,
 			original: doc,
 			blob: 'b1',
+			file: 'docs/a.md',
 			notes: [],
 			save: async () => ({ ok: true, blob: 'b2' }),
 			comments: [
@@ -245,7 +213,7 @@ describe('DocReview comments', () => {
 });
 
 describe('DocReview comment removal and its Undo', () => {
-	const anchor = (from: number, to: number) => ({ quote: 'x', prefix: '', suffix: '', from, to, commit: 'c' });
+	const anchor = (from: number, to: number) => ({ quote: 'x', prefix: '', suffix: '', from, to, commit: 'c', file: 'docs/a.md' });
 	const doc = 'One line.\nTwo line.';
 	const stored = [
 		{ id: 'C1', text: 'First', anchor: anchor(0, 3) },
@@ -276,6 +244,7 @@ describe('DocReview comment removal and its Undo', () => {
 			doc,
 			original: doc,
 			blob: 'b1',
+			file: 'docs/a.md',
 			notes: [],
 			save: async () => ({ ok: true, blob: 'b2' }),
 			comments: stored.map((c) => ({ ...c, placed: { from: c.anchor.from, to: c.anchor.to } })),
@@ -310,7 +279,7 @@ describe('DocReview comment removal and its Undo', () => {
 		view.state = EditorState.create({ doc: 'Added.\n' + doc });
 		desk.toastUndo?.();
 		await r.settled();
-		expect(asked.at(-1)).toMatchObject({ op: 'add', text: 'Second', from: '17', to: '20' });
+		expect(asked.at(-1)).toMatchObject({ op: 'add', text: 'Second', from: '17', to: '20', file: 'docs/a.md', blob: expect.any(String) });
 	});
 
 	it('says so, and posts nothing, when the text a deleted comment was on is gone', async () => {
@@ -381,5 +350,51 @@ describe('DocReview comment removal and its Undo', () => {
 		await first;
 		await second;
 		expect(settled).toBe(true);
+	});
+});
+
+describe('two pages on one screen', () => {
+	const pageNotes = (file: string, id: string): PlacedNote[] => [{ ...notes[0], id, file }];
+	const pageReview = (file: string, id: string, save: ReviewInit['save']) =>
+		new DocReview({ doc: 'Old line.', original: 'Old line.', blob: `${file}-b1`, notes: pageNotes(file, id), save, file });
+
+	beforeEach(() => vi.useFakeTimers());
+	afterEach(() => vi.useRealTimers());
+
+	it('saves each page against its own blob and leaves the other alone', async () => {
+		const saveA = vi.fn(async (_text: string, _blob: string): Promise<SaveResult> => ({ ok: true, blob: 'a-b2' }));
+		const saveB = vi.fn(async (): Promise<SaveResult> => ({ ok: true, blob: 'b-b2' }));
+		const a = pageReview('docs/a.md', 'A1', saveA);
+		const b = pageReview('docs/b.md', 'B1', saveB);
+		a.hooks.change(edited);
+		await a.flush();
+		await b.flush();
+		expect(saveA).toHaveBeenCalledWith('Rewritten line.', 'docs/a.md-b1');
+		expect(saveB).not.toHaveBeenCalled();
+		expect(a.blob).toBe('a-b2');
+		expect(b.blob).toBe('docs/b.md-b1');
+		expect(b.pending).toBe(false);
+	});
+
+	it('holds approve while any page failed to save, naming that page alone', async () => {
+		const a = pageReview('docs/a.md', 'A1', async () => ({ ok: true, blob: 'a-b2' }));
+		const b = pageReview('docs/b.md', 'B1', async () => ({ ok: false, message: 'stale' }));
+		a.hooks.change(edited);
+		b.hooks.change(edited);
+		await a.flush();
+		await b.flush();
+		expect(heldBySave(a, 'approve')).toBeNull();
+		expect(heldBySave(b, 'approve')).toBe('Not approved: Not saved: stale');
+	});
+
+	it('keeps approve locked until a call on every page is answered', () => {
+		const a = pageReview('docs/a.md', 'A1', async () => ({ ok: true, blob: 'x' }));
+		const b = pageReview('docs/b.md', 'B1', async () => ({ ok: true, blob: 'y' }));
+		const open = () => [a, b].flatMap((r) => r.openCalls.map((n) => n.id));
+		expect(open()).toEqual(['A1', 'B1']);
+		a.choose('A1', 0);
+		expect(open()).toEqual(['B1']);
+		b.choose('B1', 1);
+		expect(open()).toEqual([]);
 	});
 });

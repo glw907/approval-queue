@@ -4,9 +4,9 @@ import { parsePacket } from '#lib/packet.ts';
 
 /** The head each fixture PR is queued at; a PR not listed gets `ddd444`. */
 export const HEADS: Record<string, string> = {
-	'glw907/drafter#41': 'aaa111',
-	'glw907/drafter#42': 'bbb222',
-	'glw907/drafter#43': 'ccc333'
+	'glw907/sample#41': 'aaa111',
+	'glw907/sample#42': 'bbb222',
+	'glw907/sample#43': 'ccc333'
 };
 
 /**
@@ -35,7 +35,7 @@ export async function seedPacket(root: string, id: string, markdown: string, met
 	}
 	await writeFile(
 		join(dir, 'item.json'),
-		JSON.stringify({ id, kind: 'packet', repo: 'glw907/drafter', title: 't', created: '2026-10-11T10:00:00Z', ...meta })
+		JSON.stringify({ id, kind: 'packet', repo: 'glw907/sample', title: 't', created: '2026-10-11T10:00:00Z', ...meta })
 	);
 }
 
@@ -44,8 +44,8 @@ export const SINCE_PATCH = 'diff --git a/notes.md b/notes.md\n--- a/notes.md\n++
 
 /**
  * Writes a packet that resends what `earlier` sent back, as the command lays it out: `revises` in
- * `item.json`, a `since.patch` on glw907/drafter#41 (its head moved), and a `since.json` gone marker on
- * glw907/drafter#42 (force-pushed). When `sentBack` is given the earlier item's `decision.json` holds it;
+ * `item.json`, a `since.patch` on glw907/sample#41 (its head moved), and a `since.json` gone marker on
+ * glw907/sample#42 (force-pushed). When `sentBack` is given the earlier item's `decision.json` holds it;
  * with none, the earlier item has no decision on disk.
  */
 export async function seedRevision(
@@ -60,8 +60,8 @@ export async function seedRevision(
 			item: earlier,
 			revision: 2,
 			parts: [
-				{ ref: 'glw907/drafter#41', head: 'aaa000' },
-				{ ref: 'glw907/drafter#42', head: 'bbb000' }
+				{ ref: 'glw907/sample#41', head: 'aaa000' },
+				{ ref: 'glw907/sample#42', head: 'bbb000' }
 			]
 		}
 	});

@@ -4,7 +4,7 @@ import { REGISTER_PATH } from './brief.ts';
 import { descriptionDefects, descriptionParagraphs, parsePacket, titleDefects } from './packet.ts';
 
 const baseline = readFileSync(new URL('./fixtures/packet-baseline.md', import.meta.url), 'utf8');
-const designExists = (repo: string, path: string) => repo === 'drafter' && path === 'docs/specs/notes-design.md';
+const designExists = (repo: string, path: string) => repo === 'sample' && path === 'docs/specs/notes-design.md';
 
 /** The baseline with one edit; the edit must hit, so a typo here cannot pass as a clean refusal. */
 function edited(from: string | RegExp, to: string): string {
@@ -20,7 +20,7 @@ function refusal(markdown: string): string {
 	return result.messages.join('\n');
 }
 
-const ASK1 = 'ask 1 (Merge the drafter PR whose lint check failed?)';
+const ASK1 = 'ask 1 (Merge the sample PR whose lint check failed?)';
 
 describe('the baseline packet', () => {
 	const result = parsePacket(baseline, { designExists });
@@ -28,13 +28,13 @@ describe('the baseline packet', () => {
 	const { packet } = result;
 
 	it('parses the title, description, and not-checked text', () => {
-		expect(packet.headline).toBe('Drafter release notes, first stage');
+		expect(packet.headline).toBe('Sample release notes, first stage');
 		expect(packet.background).toBe(
-			'The drafter initiative replaces hand-written release notes with generated ones. This packet carries the last pass of the first stage. The earlier packet landed the template engine.'
+			'The sample initiative replaces hand-written release notes with generated ones. This packet carries the last pass of the first stage. The earlier packet landed the template engine.'
 		);
 		expect(packet.summary).toEqual([
-			'The pass is ready to land as two drafter PRs and one design. One PR failed a lint check, and one question is yours to settle first.',
-			'Approving merges each approved PR in order and publishes the drafter release. You refresh your registry login before the publish.'
+			'The pass is ready to land as two sample PRs and one design. One PR failed a lint check, and one question is yours to settle first.',
+			'Approving merges each approved PR in order and publishes the sample release. You refresh your registry login before the publish.'
 		]);
 		expect(packet.notChecked).toBe("The release notes were not read on the registry's preview page.");
 	});
@@ -42,7 +42,7 @@ describe('the baseline packet', () => {
 	it('parses the tagged steps', () => {
 		expect(packet.steps).toEqual([
 			{ n: 1, tag: 'session', text: 'Merge each approved PR in the order listed.' },
-			{ n: 2, tag: 'irreversible', text: 'Publish the drafter release to the package registry.' },
+			{ n: 2, tag: 'irreversible', text: 'Publish the sample release to the package registry.' },
 			{ n: 3, tag: 'you', label: 'refresh your registry login', text: 'Run the publish login before step 2.' }
 		]);
 	});
@@ -50,16 +50,16 @@ describe('the baseline packet', () => {
 	it('parses each ask’s fields', () => {
 		expect(packet.asks).toHaveLength(2);
 		const [first, second] = packet.asks;
-		expect(first.question).toBe('Merge the drafter PR whose lint check failed?');
+		expect(first.question).toBe('Merge the sample PR whose lint check failed?');
 		expect(first.rule).toBe('gate-failed');
-		expect(first.part).toMatchObject({ ref: 'glw907/drafter#41', kind: 'pr', number: 41 });
+		expect(first.part).toMatchObject({ ref: 'glw907/sample#41', kind: 'pr', number: 41 });
 		expect(first.recommended).toBe(2);
 		expect(first.reason).toContain('waives');
 		expect(first.summary).toContain('PR 41 changes the note template');
 		expect(first.background).toContain('A lint check scans every file');
 		expect(first.factsLead).toBe('The only failure is in a generated file.');
 		expect(first.facts).toEqual([
-			{ text: 'The lint check reports one error, in `notes.generated.ts`', source: 'glw907/drafter#41' },
+			{ text: 'The lint check reports one error, in `notes.generated.ts`', source: 'glw907/sample#41' },
 			{ text: 'The waiver policy lists generated files', source: 'docs/policy.md' }
 		]);
 		expect(first.choices.map((c) => [c.label, c.verdict])).toEqual([
@@ -79,15 +79,15 @@ describe('the baseline packet', () => {
 
 	it('parses the routine rows and exposes every part with its kind', () => {
 		expect(packet.routine.map((r) => [r.part.ref, r.part.kind, r.verdict])).toEqual([
-			['glw907/drafter#42', 'pr', 'approve'],
-			['glw907/drafter:docs/specs/notes-design.md', 'design', 'approve'],
+			['glw907/sample#42', 'pr', 'approve'],
+			['glw907/sample:docs/specs/notes-design.md', 'design', 'approve'],
 			['step:1', 'step', 'session']
 		]);
 		expect(packet.routine[0].fact).toBe('All checks pass and the review verdict is accept.');
 		expect(packet.parts.map((p) => [p.part.ref, p.in])).toEqual([
-			['glw907/drafter#41', 'ask'],
-			['glw907/drafter#42', 'routine'],
-			['glw907/drafter:docs/specs/notes-design.md', 'routine'],
+			['glw907/sample#41', 'ask'],
+			['glw907/sample#42', 'routine'],
+			['glw907/sample:docs/specs/notes-design.md', 'routine'],
 			['step:1', 'routine']
 		]);
 	});
@@ -102,7 +102,7 @@ describe('refusals, one edit each', () => {
 	it('refuses a missing title, a title with closing punctuation, and one over 80 characters', () => {
 		expect(refusal(baseline.replace(/^# .*\n/, ''))).toContain('missing title');
 		expect(refusal(edited('first stage\n', 'first stage.\n'))).toContain('drop its closing punctuation');
-		expect(refusal(edited('first stage\n', `${'x'.repeat(60)}\n`))).toContain('the title runs 83 characters; keep it to 80');
+		expect(refusal(edited('first stage\n', `${'x'.repeat(60)}\n`))).toContain('the title runs 82 characters; keep it to 80');
 	});
 
 	it('accepts a description of two paragraphs', () => {
@@ -221,14 +221,14 @@ describe('refusals, one edit each', () => {
 	});
 
 	it('refuses a ref not in canonical form, a step outside the plan, and a missing design', () => {
-		expect(refusal(edited('glw907/drafter#42', 'drafter#42'))).toContain('`drafter#42` is not a canonical ref');
-		expect(refusal(edited('Part: glw907/drafter#41', 'Part: #41 Note template (drafter)'))).toContain('is not a canonical ref');
+		expect(refusal(edited('glw907/sample#42', 'sample#42'))).toContain('`sample#42` is not a canonical ref');
+		expect(refusal(edited('Part: glw907/sample#41', 'Part: #41 Note template (sample)'))).toContain('is not a canonical ref');
 		expect(refusal(edited('| step:1 |', '| step:9 |'))).toContain('`step:9` is outside the plan');
-		expect(refusal(edited('notes-design.md |', 'missing-design.md |'))).toContain('the design `glw907/drafter:docs/specs/missing-design.md` does not exist');
+		expect(refusal(edited('notes-design.md |', 'missing-design.md |'))).toContain('the design `glw907/sample:docs/specs/missing-design.md` does not exist');
 	});
 
 	it('refuses a part listed twice', () => {
-		expect(refusal(edited('| glw907/drafter#42 |', '| glw907/drafter#41 |'))).toContain('`glw907/drafter#41` is listed twice');
+		expect(refusal(edited('| glw907/sample#42 |', '| glw907/sample#41 |'))).toContain('`glw907/sample#41` is listed twice');
 	});
 
 	it('refuses a Routine that is not one table with the header', () => {
@@ -238,16 +238,16 @@ describe('refusals, one edit each', () => {
 	});
 
 	it('refuses a routine row with a different cell count, naming the row', () => {
-		expect(refusal(edited('| Nothing in it needs a call. |', '|'))).toContain('routine row 1 (glw907/drafter#42) has 3 cells; it needs 4');
+		expect(refusal(edited('| Nothing in it needs a call. |', '|'))).toContain('routine row 1 (glw907/sample#42) has 3 cells; it needs 4');
 	});
 
 	it('refuses a routine verdict outside its kind’s verdicts', () => {
-		expect(refusal(edited('#42 | approve', '#42 | session'))).toContain('routine row 1 (glw907/drafter#42): a pr takes approve, hold, send-back, not `session`');
+		expect(refusal(edited('#42 | approve', '#42 | session'))).toContain('routine row 1 (glw907/sample#42): a pr takes approve, hold, send-back, not `session`');
 		expect(refusal(edited('step:1 | session', 'step:1 | approve'))).toContain('a step takes session, you, skip');
 	});
 
 	it('refuses a packet with no PR or design part', () => {
-		const text = edited(/^## Ask: Merge[\s\S]*?(?=## Ask: Which)/m, '').replace(/^\| glw907\/drafter[#:].*\n/gm, '');
+		const text = edited(/^## Ask: Merge[\s\S]*?(?=## Ask: Which)/m, '').replace(/^\| glw907\/sample[#:].*\n/gm, '');
 		expect(refusal(text)).toContain('a packet holds at least one PR or design');
 	});
 });

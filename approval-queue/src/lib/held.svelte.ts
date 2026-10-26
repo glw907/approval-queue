@@ -15,7 +15,7 @@ export interface HeldDecision {
 	id: string;
 	title: string;
 	kind: typeof desk.page;
-	/** The item as the toasts name it, such as "the blueprint for Troubleshoot your site". */
+	/** The item as the toasts name it, such as "cairn-cms #150". */
 	subject: string;
 	/** The absolute form action `enhance` supplied, such as `http://127.0.0.1:7907/item/x?/approve`. */
 	href: string;

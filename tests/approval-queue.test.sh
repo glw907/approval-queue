@@ -260,7 +260,7 @@ live_revisions=$revisions_seen
 cp "${REGISTER:-$HOME/.claude/docs/voice/approval-brief.md}" "$root/register-revision.md"
 {
   printf '\n````packet\n'
-  sed -e 's#glw907/drafter:docs/specs/notes-design.md#glw907/drafter\#43#' \
+  sed -e 's#glw907/sample:docs/specs/notes-design.md#glw907/sample\#43#' \
     -e 's/^## If you approve/## What changed\n- Split the template change out of PR 41.\n\n## If you approve/' \
     approval-queue/src/lib/fixtures/packet-baseline.md
   printf '````\n'

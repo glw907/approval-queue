@@ -12,7 +12,6 @@ import {
 	jumpTo,
 	lineTop,
 	noteRanges,
-	replaceNoteText,
 	setCommentRange,
 	setCurrent,
 	setDecided,
@@ -48,14 +47,14 @@ export interface ReviewInit {
 	 * for a decided item, whose choices come from its decision.
 	 */
 	remember?: string;
-	/** The text takes no edits at all, as in a change review: a choice records its answer only. */
+	/** The text takes no edits at all, as for a page missing from the worktree: a choice records its answer only. */
 	readonly?: boolean;
 	comments?: PlacedComment[];
 	threads?: PlacedThread[];
 	/** Posts one op to the item's `comment` action; without it the comments are read only. */
 	comment?: (fields: Record<string, string>) => Promise<CommentAnswer>;
-	/** A change review's document path, which its comments name; absent on a blueprint or page, whose adds name the blob. */
-	file?: string;
+	/** The page's path, which its comments name. */
+	file: string;
 	/** The id of this document's comment margin, which is the drawer below 1260px. */
 	margin?: string;
 }
@@ -140,11 +139,9 @@ const wide = () => matchMedia(WIDE_MARGIN).matches;
 
 /**
  * The stored choices, when they were stored against `blob` and still name one of these notes'
- * choices. A choice that rewrites its line comes back only when `doc` holds the rewrite, whatever
- * the store says: a reload that lost the edit opens the call again rather than approve it beside a
- * file that lacks its text.
+ * choices.
  */
-function recalled(key: string | undefined, notes: PlacedNote[], blob: string, doc: string): Record<string, number> {
+function recalled(key: string | undefined, notes: PlacedNote[], blob: string): Record<string, number> {
 	if (!key) return {};
 	let stored: unknown;
 	try {
@@ -158,7 +155,7 @@ function recalled(key: string | undefined, notes: PlacedNote[], blob: string, do
 		Object.entries(stored.decided).filter(([id, i]) => {
 			if (typeof i !== 'number') return false;
 			const c = notes.find((n) => n.id === id && isCall(n))?.choices?.[i];
-			return c !== undefined && (c.text === undefined || doc.includes(c.text));
+			return c !== undefined;
 		})
 	);
 }
@@ -217,9 +214,9 @@ export class DocReview {
 
 	readonly notes: PlacedNote[];
 	readonly original: string;
-	readonly file: string | undefined;
+	readonly file: string;
 	readonly margin: string;
-	/** Whether the text is the reviewer's to edit at all; a change review never is. */
+	/** Whether the text is the reviewer's to edit at all; a page missing from the worktree never is. */
 	readonly editable: boolean;
 	private readonly originalLines: Set<string>;
 	private readonly saver: ReviewInit['save'];
@@ -246,7 +243,7 @@ export class DocReview {
 		this.remember = init.remember;
 		this.editable = !init.readonly;
 		this.readonly = !this.editable;
-		this.decided = init.decided ?? recalled(init.remember, init.notes, init.blob, init.doc);
+		this.decided = init.decided ?? recalled(init.remember, init.notes, init.blob);
 		this.resolved = recalledResolved(init.remember, init.notes);
 		this.starts = Object.fromEntries(init.notes.map((n) => [n.id, n.range?.[0] ?? null]));
 		const end = init.doc.length;
@@ -367,7 +364,7 @@ export class DocReview {
 		return this.view?.hasFocus ?? false;
 	}
 
-	/** Sets whether text edits are taken; a review that takes none, as a change's, stays so. */
+	/** Sets whether text edits are taken; a review that takes none, as a missing page's, stays so. */
 	setReadonly(readonly: boolean) {
 		this.readonly = !this.editable || readonly;
 	}
@@ -430,18 +427,17 @@ export class DocReview {
 		}
 	}
 
-	/** Records a call's choice; a choice with text rewrites the anchored line, one marked `edit` selects it to rewrite. */
+	/** Records a call's choice and puts the cursor at the note's anchor. */
 	choose(id: string, index: number) {
 		const note = this.notes.find((n) => n.id === id);
 		const c = note?.choices?.[index];
 		if (!note || !c || this.locked) return;
 		const view = this.view;
-		if (view && c.text !== undefined && !this.readonly) replaceNoteText(view, id, c.text);
 		this.setChoices({ ...this.decided, [id]: index });
 		desk.announce(`Decided: ${c.done}`);
 		const r: Range | null = view ? noteRanges(view)[id] : null;
 		if (view && r) {
-			view.dispatch({ selection: c.edit && !this.readonly ? { anchor: r[0], head: r[1] } : { anchor: r[0] } });
+			view.dispatch({ selection: { anchor: r[0] } });
 			view.focus();
 		}
 	}
@@ -745,16 +741,12 @@ export class DocReview {
 	 * answer comes, since the text may have moved meanwhile.
 	 */
 	private async add(text: string, range: Range, fromDraft = false): Promise<string | null> {
-		const fields: Record<string, string> = { op: 'add', text, from: String(range[0]), to: String(range[1]) };
-		if (this.file !== undefined) fields.file = this.file;
-		else {
-			await this.flush();
-			if (this.saveFailed) {
-				desk.flash(this.saveStatus);
-				return null;
-			}
-			fields.blob = this.blob;
+		await this.flush();
+		if (this.saveFailed) {
+			desk.flash(this.saveStatus);
+			return null;
 		}
+		const fields = { op: 'add', text, from: String(range[0]), to: String(range[1]), file: this.file, blob: this.blob };
 		const answer = await this.post(fields);
 		if (!answer.ok) {
 			desk.flash(`The comment was not saved: ${answer.message}`);
@@ -820,7 +812,7 @@ export class DocReview {
 		const range = this.ranges[key];
 		const view = this.view;
 		if (!c || !range || !view || refuseOpenBox()) return;
-		const anchor = range[1] > range[0] ? anchorAt(view.state.doc.toString(), range[0], range[1], '') : null;
+		const anchor = range[1] > range[0] ? anchorAt(view.state.doc.toString(), range[0], range[1], '', '') : null;
 		const keys = this.cards.map((card) => card.key);
 		if (!(await this.exclusive(() => this.send({ op: 'delete', id })))) return;
 		if (this.currentCard === key) this.setCurrentCard(null);

@@ -23,7 +23,7 @@ this session" until the queue reload lists it there itself.
 
 	let { children, data } = $props();
 
-	const KINDS = { pr: 'PR', design: 'Design', triage: 'Triage', packet: 'Packet', blueprint: 'Blueprint', page: 'Page', change: 'Change' };
+	const KINDS = { pr: 'PR', design: 'Design', triage: 'Triage', packet: 'Packet', docs: 'Docs' };
 	const OUTCOMES = { approve: 'Approved', reject: 'Sent back', submit: 'Submitted', defer: 'Deferred' };
 	const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
@@ -124,17 +124,7 @@ this session" until the queue reload lists it there itself.
 					sendBack
 				]
 			},
-			blueprint: { title: 'On a blueprint', rows: editorRows('Approve the blueprint') },
-			page: { title: 'On a page', rows: editorRows('Approve the page') },
-			change: {
-				title: 'On a change',
-				rows: [
-					{ keys: ['F8'], text: 'Next call for you' },
-					...commentRows('Approve the change'),
-					sendBack,
-					{ keys: ['/'], text: 'Filter the code files by path', single: true }
-				]
-			},
+			docs: { title: 'On a docs review', rows: editorRows('Approve the pages') },
 			triage: {
 				title: 'On a triage',
 				rows: [

@@ -1,8 +1,8 @@
-# Drafter release notes, second stage
+# Sample release notes, second stage
 
-The drafter initiative replaces hand-written release notes with generated ones. This packet carries the second stage. A gate is the set of checks and the review a PR must pass.
+The sample initiative replaces hand-written release notes with generated ones. This packet carries the second stage. A gate is the set of checks and the review a PR must pass.
 
-The stage lands as three drafter PRs. Approving merges the two that pass cleanly. PR 41 failed a check and one question is yours, so the packet needs your answers before it lands.
+The stage lands as three sample PRs. Approving merges the two that pass cleanly. PR 41 failed a check and one question is yours, so the packet needs your answers before it lands.
 
 ## If you approve
 1. [session] Merge each approved PR in the order listed.
@@ -11,9 +11,9 @@ The stage lands as three drafter PRs. Approving merges the two that pass cleanly
 ## Not checked
 The generated notes were not read on the live project page.
 
-## Ask: Merge the drafter PR whose lint check failed?
+## Ask: Merge the sample PR whose lint check failed?
 Rule: gate-failed
-Part: glw907/drafter#41
+Part: glw907/sample#41
 Recommended: 2
 Reason: The failing check is a style rule the repo waives for generated files.
 Summary: PR 41 changes the note template and fails one lint check. The failure is in a generated file.
@@ -21,7 +21,7 @@ Summary: PR 41 changes the note template and fails one lint check. The failure i
 Background: A lint check scans every file for style rules. Generated files are exempt by policy, but the check config predates that policy.
 
 Facts: The only failure is in a generated file.
-- The lint check reports one error, in `notes.generated.ts` (`glw907/drafter#41`)
+- The lint check reports one error, in `notes.generated.ts` (`glw907/sample#41`)
 
 Choices:
 - Merge anyway: merges the PR with the lint check red; a revert PR undoes it [approve]
@@ -52,6 +52,6 @@ Choices:
 ## Routine
 | Part | Verdict | Fact | Why |
 |---|---|---|---|
-| glw907/drafter#42 | approve | All checks pass and the review verdict is accept. | Nothing in it needs a call. |
-| glw907/drafter#43 | approve | All checks pass and the review verdict is accept. | Nothing in it needs a call. |
+| glw907/sample#42 | approve | All checks pass and the review verdict is accept. | Nothing in it needs a call. |
+| glw907/sample#43 | approve | All checks pass and the review verdict is accept. | Nothing in it needs a call. |
 | step:1 | session | The merge order is fixed by the plan. | The session can revert a merge. |

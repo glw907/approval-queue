@@ -1,0 +1,40 @@
+[
+	{
+		"id": "N1",
+		"file": "docs/guide/water-a-houseplant.md",
+		"kind": "info",
+		"anchor": { "quote": "runs from the drainage holes", "prefix": "until water ", "suffix": ". Empty" },
+		"title": "The fact check corrected the wording",
+		"body": ["The page said the water runs out of the holes. `src/watering.ts:1` has the pot drain through them."],
+		"was": "Pour slowly until water runs out of the drainage holes.",
+		"now": "Pour slowly until water runs from the drainage holes."
+	},
+	{
+		"id": "N2",
+		"file": "docs/guide/water-a-houseplant.md",
+		"kind": "decide",
+		"anchor": { "quote": "ten minutes" },
+		"title": "How long the saucer stands",
+		"body": ["The fact check found no source for the ten minutes."],
+		"sides": [
+			{ "who": "Fact check", "text": "No source gives a time." },
+			{ "who": "Author", "text": "Ten minutes is the common advice." }
+		],
+		"choices": [
+			{ "label": "Apply the fix", "done": "The session drops the time." },
+			{ "label": "Keep the text", "done": "The page stands as written." }
+		]
+	},
+	{
+		"id": "N3",
+		"file": "docs/guide/repot-a-houseplant.md",
+		"kind": "question",
+		"anchor": { "quote": "one size up" },
+		"title": "Name a pot material?",
+		"body": ["The page says nothing about clay or plastic."],
+		"choices": [
+			{ "label": "Leave it out", "done": "The page stays as written." },
+			{ "label": "Add a line", "done": "The session adds a line on materials." }
+		]
+	}
+]

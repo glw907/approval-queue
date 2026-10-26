@@ -31,25 +31,10 @@ vi.mock('#lib/server/items.ts', async (importOriginal) => {
 	};
 });
 
-import {
-	CHANGE_DOCS,
-	git,
-	PAGE_DOC,
-	PAGE_FILE,
-	PAGE_HEAD,
-	PAGE_PR,
-	SAMPLE_DOC,
-	SAMPLE_FILE,
-	seedBlueprintItem,
-	seedChangeItem,
-	seedDescription,
-	seedPageItem,
-	seedPageRepo,
-	seedRepo
-} from '#lib/fixtures/seed-blueprint.ts';
+import { git, REPOT, REPOT_HEAD, seedDocsItem, seedDocsRepo, WATER, WATER_HEAD } from '#lib/fixtures/seed-docs.ts';
 import { seedPacket, seedRevision, SINCE_PATCH } from '#lib/fixtures/seed-packet.ts';
-import { anchorAt, type Thread } from '#lib/editor/comments.ts';
-import { queued } from '#lib/server/blueprint.ts';
+import { anchorAt } from '#lib/editor/comments.ts';
+import { queued } from '#lib/server/docs.ts';
 import { fileGroups } from '#lib/diff.ts';
 import { actions, load } from './+page.server.ts';
 
@@ -453,7 +438,7 @@ describe('load', () => {
 
 describe('a packet', () => {
 	/** Two asks (#41 bound as gate-failed, one with no part), routine #42 and #43, and step 1. */
-	const PACKET = fixture('packet-baseline.md').replace('glw907/drafter:docs/specs/notes-design.md', 'glw907/drafter#43');
+	const PACKET = fixture('packet-baseline.md').replace('glw907/sample:docs/specs/notes-design.md', 'glw907/sample#43');
 	const WITHDRAWN = 'This item was withdrawn by its session; nothing was recorded';
 	const noDecision = () => expect(readFile(join(state.root, 'items', ID, 'decision.json'), 'utf8')).rejects.toThrow();
 	const fingerprint = async () => ((await load({ params: { id: ID } } as never)) as { fingerprint: string }).fingerprint;
@@ -462,8 +447,8 @@ describe('a packet', () => {
 	async function fields(over: Record<string, string | null> = {}): Promise<[string, string][]> {
 		return Object.entries({
 			fingerprint: await fingerprint(),
-			'part:glw907/drafter#42': 'hold',
-			'part:glw907/drafter#43': 'approve',
+			'part:glw907/sample#42': 'hold',
+			'part:glw907/sample#43': 'approve',
 			'part:step:1': 'session',
 			'ask:1': 'Merge anyway',
 			'ask:2': 'Beta',
@@ -479,18 +464,18 @@ describe('a packet', () => {
 		expect(data).toMatchObject({ kind: 'packet', decided: false, irreversible: true, irreversibleSteps: [2] });
 		expect(data.fingerprint).toMatch(/^[0-9a-f]{64}$/);
 		expect(data.asks.map((a: any) => [a.index, a.rule, a.part, a.choices.length])).toEqual([
-			[1, 'gate-failed', 'glw907/drafter#41', 3],
+			[1, 'gate-failed', 'glw907/sample#41', 3],
 			[2, 'owner-call', null, 2]
 		]);
 		expect(data.routine.map((r: any) => [r.ref, r.verdict])).toEqual([
-			['glw907/drafter#42', 'approve'],
-			['glw907/drafter#43', 'approve'],
+			['glw907/sample#42', 'approve'],
+			['glw907/sample#43', 'approve'],
 			['step:1', 'session']
 		]);
 		expect(data.parts.map((p: any) => [p.ref, p.lane, p.head])).toEqual([
-			['glw907/drafter#41', 'ask', 'aaa111'],
-			['glw907/drafter#42', 'routine', 'bbb222'],
-			['glw907/drafter#43', 'routine', 'ccc333'],
+			['glw907/sample#41', 'ask', 'aaa111'],
+			['glw907/sample#42', 'routine', 'bbb222'],
+			['glw907/sample#43', 'routine', 'ccc333'],
 			['step:1', 'routine', undefined]
 		]);
 	});
@@ -502,7 +487,7 @@ describe('a packet', () => {
 		await seedPacket(state.root, ID, fixture('packet-baseline.md'));
 		await writeFile(join(state.root, 'items', ID, 'parts', '0', 'diff.patch'), patch);
 		const data = (await load({ params: { id: ID } } as never)) as Record<string, any>;
-		const pr = data.parts.find((p: any) => p.ref === 'glw907/drafter#41');
+		const pr = data.parts.find((p: any) => p.ref === 'glw907/sample#41');
 		expect(pr.totals).toEqual({ files: 2, adds: 3, dels: 1 });
 		const design = data.parts.find((p: any) => p.kind === 'design');
 		expect(design.docHtml).toContain('<h1');
@@ -522,8 +507,8 @@ describe('a packet', () => {
 		const SENT_BACK = {
 			note: 'Split this.',
 			calls: [
-				{ ref: 'glw907/drafter#41', verdict: 'hold' },
-				{ ask: 1, question: 'Merge the drafter PR whose lint check failed?', choice: 'Hold' }
+				{ ref: 'glw907/sample#41', verdict: 'hold' },
+				{ ask: 1, question: 'Merge the sample PR whose lint check failed?', choice: 'Hold' }
 			]
 		};
 
@@ -535,10 +520,10 @@ describe('a packet', () => {
 			expect(data.sentBack).toEqual(SENT_BACK);
 			expect(data.whatChanged).toEqual(['Split the template change out of PR 41.']);
 			const since = (ref: string) => data.parts.find((p: any) => p.ref === ref).since;
-			expect(since('glw907/drafter#41').groups).toEqual(fileGroups(SINCE_PATCH));
-			expect(since('glw907/drafter#41').groups[0].files.map((f: any) => f.path)).toEqual(['notes.md']);
-			expect(since('glw907/drafter#42')).toEqual({ gone: true });
-			expect(data.parts.find((p: any) => p.ref === 'glw907/drafter#43')).not.toHaveProperty('since');
+			expect(since('glw907/sample#41').groups).toEqual(fileGroups(SINCE_PATCH));
+			expect(since('glw907/sample#41').groups[0].files.map((f: any) => f.path)).toEqual(['notes.md']);
+			expect(since('glw907/sample#42')).toEqual({ gone: true });
+			expect(data.parts.find((p: any) => p.ref === 'glw907/sample#43')).not.toHaveProperty('since');
 		});
 
 		it('leaves sentBack out when the earlier item has no decision on disk', async () => {
@@ -569,9 +554,9 @@ describe('a packet', () => {
 		expect(await decision()).toEqual({
 			decision: 'approve',
 			parts: [
-				{ ref: 'glw907/drafter#41', verdict: 'approve' },
-				{ ref: 'glw907/drafter#42', verdict: 'hold' },
-				{ ref: 'glw907/drafter#43', verdict: 'approve' },
+				{ ref: 'glw907/sample#41', verdict: 'approve' },
+				{ ref: 'glw907/sample#42', verdict: 'hold' },
+				{ ref: 'glw907/sample#43', verdict: 'approve' },
 				{ ref: 'step:1', verdict: 'session' }
 			],
 			asks: [
@@ -583,14 +568,14 @@ describe('a packet', () => {
 
 	it('a held ask-bound part is written held', async () => {
 		await call('approve', await fields({ 'ask:1': 'Hold' }));
-		expect((await decision()).parts[0]).toEqual({ ref: 'glw907/drafter#41', verdict: 'hold' });
+		expect((await decision()).parts[0]).toEqual({ ref: 'glw907/sample#41', verdict: 'hold' });
 	});
 
 	it.each([
 		['an unanswered ask', { 'ask:1': null }],
 		['a label the ask does not hold', { 'ask:2': 'Stable soon' }],
-		['a missing part', { 'part:glw907/drafter#42': null }],
-		['an unknown ref', { 'part:glw907/drafter#99': 'approve' }],
+		['a missing part', { 'part:glw907/sample#42': null }],
+		['an unknown ref', { 'part:glw907/sample#99': 'approve' }],
 		['a verdict outside the kind', { 'part:step:1': 'hold' }],
 		['a stale fingerprint', { fingerprint: 'stale' }],
 		['a missing irreversible confirmation', { irreversible: null }]
@@ -603,7 +588,7 @@ describe('a packet', () => {
 		const post = await fields();
 		await call('approve', post);
 		expect(await call('approve', post)).toMatchObject({ status: 409, data: { message: 'Already decided' } });
-		expect((await decision()).parts[1]).toEqual({ ref: 'glw907/drafter#42', verdict: 'hold' });
+		expect((await decision()).parts[1]).toEqual({ ref: 'glw907/sample#42', verdict: 'hold' });
 	});
 
 	it('two posts racing write one decision and answer the other 409', async () => {
@@ -613,13 +598,13 @@ describe('a packet', () => {
 	});
 
 	it('a reject carries the screen’s calls, and refuses nothing for its fields', async () => {
-		await call('reject', [...(await fields({ 'part:glw907/drafter#42': 'send-back', 'ask:2': null, fingerprint: 'stale' })), ['note', 'not now']]);
+		await call('reject', [...(await fields({ 'part:glw907/sample#42': 'send-back', 'ask:2': null, fingerprint: 'stale' })), ['note', 'not now']]);
 		const sent = await decision();
 		expect(sent).toMatchObject({ decision: 'reject', note: 'not now' });
 		expect(sent.calls).toEqual([
-			{ ref: 'glw907/drafter#41', verdict: 'approve' },
-			{ ref: 'glw907/drafter#42', verdict: 'send-back' },
-			{ ref: 'glw907/drafter#43', verdict: 'approve' },
+			{ ref: 'glw907/sample#41', verdict: 'approve' },
+			{ ref: 'glw907/sample#42', verdict: 'send-back' },
+			{ ref: 'glw907/sample#43', verdict: 'approve' },
 			{ ref: 'step:1', verdict: 'session' },
 			{ ask: 1, question: expect.any(String), choice: 'Merge anyway' },
 			{ ask: 2, question: expect.any(String), choice: null }
@@ -688,7 +673,7 @@ describe('a packet', () => {
 		expect(data.decided).toBe(true);
 		expect(data.decision).toMatchObject({
 			decision: 'approve',
-			parts: expect.arrayContaining([{ ref: 'glw907/drafter#42', verdict: 'hold' }]),
+			parts: expect.arrayContaining([{ ref: 'glw907/sample#42', verdict: 'hold' }]),
 			asks: [
 				{ index: 1, choice: 'Merge anyway' },
 				{ index: 2, choice: 'Beta' }
@@ -701,105 +686,219 @@ describe('a packet', () => {
 	});
 });
 
-describe('a blueprint', () => {
+const SOIL = 'Dry soil at that depth means the plant needs water.';
+const SAUCER = 'Empty the saucer after ten minutes.';
+const span = (doc: string, text: string): [string, string][] => [
+	['from', String(doc.indexOf(text))],
+	['to', String(doc.indexOf(text) + text.length)]
+];
+const stored = async (id = ID) => JSON.parse(await readFile(join(state.root, 'items', id, 'comments.json'), 'utf8'));
+const loaded = async (id = ID) => (await load({ params: { id } } as never)) as Record<string, any>;
+
+describe('a docs review', () => {
 	let repo: string;
-	let base: string;
+	let blobs: { water: string; repot: string };
+	let head: string;
 	beforeEach(async () => {
-		repo = await mkdtemp(join(tmpdir(), 'approval-queue-route-repo-'));
-		base = await seedRepo(repo);
-		await seedBlueprintItem(state.root, ID, repo, base);
+		repo = await mkdtemp(join(tmpdir(), 'approval-queue-route-docs-'));
+		blobs = seedDocsRepo(repo);
+		head = git(repo, 'rev-parse', 'HEAD');
+		await seedDocsItem(state.root, ID, repo);
 	});
 	afterEach(() => rm(repo, { recursive: true, force: true }));
 
-	const answered = (blob: string): [string, string][] => [
-		['call:D1', "Use the code's cause"],
-		['call:Q1', 'Fold it in'],
-		['blob', blob]
+	const answered = (water = blobs.water, repot = blobs.repot): [string, string][] => [
+		['call:N2', 'Keep the text'],
+		['call:N3', 'Leave it out'],
+		[`blob:${WATER}`, water],
+		[`blob:${REPOT}`, repot]
 	];
+	const save = (file: string, text: string, blob: string) => call('save', [['file', file], ['text', text], ['blob', blob]]);
 
-	it('load returns the file at HEAD, its blob, the front matter, and each note on its anchor', async () => {
-		const data = (await load({ params: { id: ID } } as never)) as Record<string, any>;
+	it('load returns the pages at HEAD with their merge-base text and blob, and each note on its quote in its own page', async () => {
+		const data = await loaded();
 		expect(data).toMatchObject({
-			kind: 'blueprint',
-			doc: SAMPLE_DOC,
-			original: SAMPLE_DOC,
-			blob: base,
-			page: 'Fix a slow build',
-			pageType: 'troubleshooting',
-			missing: false
+			kind: 'docs',
+			ref: 'glw907/sample#7',
+			head,
+			link: { url: 'https://github.com/glw907/sample/pull/7', head: 'repot-page', base: 'main' },
+			description: ['The guide had no repotting page.', 'This adds one and tightens the watering step.']
 		});
-		const d1 = data.notes.find((n: { id: string }) => n.id === 'D1');
-		expect(SAMPLE_DOC.slice(d1.range[0], d1.range[1])).toBe('Every image is resized on every build.');
-		expect(data.notes.find((n: { id: string }) => n.id === 'X1').range).toBeNull();
+		expect(data.pages.map((p: { path: string; blob: string; missing: boolean }) => [p.path, p.blob, p.missing])).toEqual([
+			[WATER, blobs.water, false],
+			[REPOT, blobs.repot, false]
+		]);
+		expect(data.pages[0].doc).toBe(WATER_HEAD);
+		expect(data.pages[0].base).toContain('runs out of the drainage holes');
+		expect(data.pages[1].base).toBe('');
+		const quoted = (page: { doc: string; notes: Array<{ id: string; range: [number, number] }> }) =>
+			page.notes.map((n) => [n.id, page.doc.slice(n.range[0], n.range[1])]);
+		expect(quoted(data.pages[0])).toEqual([
+			['N1', 'runs from the drainage holes'],
+			['N2', 'ten minutes']
+		]);
+		expect(quoted(data.pages[1])).toEqual([['N3', 'one size up']]);
 	});
 
-	it('load returns the description paragraphs and the round, and leaves both out of an older item', async () => {
-		const before = (await load({ params: { id: ID } } as never)) as Record<string, any>;
-		expect('description' in before).toBe(false);
-		expect('revision' in before).toBe(false);
+	it('load returns the code diff without the pages', async () => {
+		const data = await loaded();
+		expect(data.groups.flatMap((g: { files: Array<{ path: string }> }) => g.files.map((f) => f.path))).toEqual(['src/watering.ts']);
+		expect(data.totals).toEqual({ files: 1, adds: 1, dels: 1 });
+		expect(data).not.toHaveProperty('revision');
+		expect(data).not.toHaveProperty('since');
+		expect(data).not.toHaveProperty('approved');
+	});
+
+	it('load returns the round and the diff since the send-back of a revision', async () => {
 		await rm(join(state.root, 'items', ID), { recursive: true });
-		await seedBlueprintItem(state.root, ID, repo, base, undefined, { revises: { item: '20261010T100000-1', revision: 3 } });
-		await seedDescription(state.root, ID, 'The build is slow.\n\nThis plan caches the step.\nApproving it starts the work.\n');
-		const data = (await load({ params: { id: ID } } as never)) as Record<string, any>;
-		expect(data.description).toEqual(['The build is slow.', 'This plan caches the step. Approving it starts the work.']);
+		await seedDocsItem(state.root, ID, repo, { revises: { item: '20261010T100000-1', revision: 3, commit: head } });
+		await writeFile(join(state.root, 'items', ID, 'since.patch'), SINCE_PATCH);
+		const data = await loaded();
 		expect(data.revision).toBe(3);
+		expect(data.since.groups[0].files[0]).toMatchObject({ path: 'notes.md', adds: 1, dels: 1 });
+		await rm(join(state.root, 'items', ID, 'since.patch'));
+		await writeFile(join(state.root, 'items', ID, 'since.json'), '{"gone":true}');
+		expect((await loaded()).since).toEqual({ gone: true });
 	});
 
-	it('save commits the text in the worktree and answers the new blob; a stale base answers 409', async () => {
-		const text = SAMPLE_DOC.replace('a minute', 'two minutes');
-		const saved = (await call('save', [['text', text], ['base', base]])) as { blob: string; commit: string };
-		expect(saved.blob).toBe(git(repo, 'rev-parse', `HEAD:${SAMPLE_FILE}`));
+	it('load returns the diff since the approve of an amend, and no round', async () => {
+		await rm(join(state.root, 'items', ID), { recursive: true });
+		await seedDocsItem(state.root, ID, repo, { amends: { commit: head } });
+		await writeFile(join(state.root, 'items', ID, 'approved.patch'), SINCE_PATCH);
+		const data = await loaded();
+		expect(data.approved.groups[0].files[0].path).toBe('notes.md');
+		expect(data).not.toHaveProperty('revision');
+		expect(data).not.toHaveProperty('since');
+	});
+
+	it('load shows the queued copy of each page, marked missing, when the worktree is gone', async () => {
+		await rm(repo, { recursive: true, force: true });
+		const data = await loaded();
+		expect(data.pages.map((p: { doc: string; blob: string; missing: boolean }) => [p.doc, p.blob, p.missing])).toEqual([
+			[WATER_HEAD, '', true],
+			[REPOT_HEAD, '', true]
+		]);
+	});
+
+	it('save commits that page alone in the worktree and answers its new blob; a stale blob answers 409', async () => {
+		const text = WATER_HEAD.replace('top inch', 'top two inches');
+		const saved = (await save(WATER, text, blobs.water)) as { blob: string; commit: string };
+		expect(saved.blob).toBe(git(repo, 'rev-parse', `HEAD:${WATER}`));
 		expect(saved.commit).toBe(git(repo, 'rev-parse', 'HEAD'));
-		expect(await readFile(join(repo, SAMPLE_FILE), 'utf8')).toBe(text);
-		expect(await call('save', [['text', `${text}x`], ['base', base]])).toMatchObject({ status: 409 });
+		expect(git(repo, 'log', '-1', '--format=%s')).toBe(`Edit ${WATER} in review`);
+		expect(git(repo, 'show', '--name-only', '--format=', 'HEAD')).toBe(WATER);
+		expect(await readFile(join(repo, WATER), 'utf8')).toBe(text);
+		expect(await save(WATER, `${text}x`, blobs.water)).toMatchObject({ status: 409 });
+		expect(git(repo, 'rev-list', '--count', 'HEAD')).toBe('3');
 	});
 
-	it('approve after a save records the calls and the commit and blob at HEAD, and a second post answers 409', async () => {
-		const saved = (await call('save', [['text', `${SAMPLE_DOC}more\n`], ['base', base]])) as { blob: string };
-		await call('approve', answered(saved.blob));
-		expect(await decision()).toEqual({
-			decision: 'approve',
-			calls: [
-				{ id: 'D1', choice: "Use the code's cause" },
-				{ id: 'Q1', choice: 'Fold it in' }
-			],
-			waived: [],
-			commit: git(repo, 'rev-parse', 'HEAD'),
-			blob: saved.blob,
-			comments: [],
-			threads: []
-		});
-		expect(await call('approve', answered(saved.blob))).toMatchObject({ status: 409 });
+	it('load returns the queued text beside a saved edit, so a reload still counts the edit', async () => {
+		const text = WATER_HEAD.replace('top inch', 'top two inches');
+		await save(WATER, text, blobs.water);
+		const data = await loaded();
+		const water = data.pages.find((p: { path: string }) => p.path === WATER);
+		expect(water.doc).toBe(text);
+		expect(water.queued).toBe(WATER_HEAD);
 	});
 
-	it('approve with an open call, or against a stale blob, answers 400 and writes nothing', async () => {
-		expect(await call('approve', [['call:Q1', 'Keep it'], ['blob', base]])).toMatchObject({ status: 400 });
-		await call('save', [['text', `${SAMPLE_DOC}more\n`], ['base', base]]);
-		expect(await call('approve', answered(base))).toMatchObject({ status: 400 });
-		await expect(decision()).rejects.toThrow();
+	it('save is checked against the blob of the page it names, not another', async () => {
+		expect(await save(WATER, `${WATER_HEAD}x`, blobs.repot)).toMatchObject({ status: 409 });
+		expect(await save(REPOT, `${REPOT_HEAD}x`, blobs.repot)).toMatchObject({ blob: expect.any(String) });
 	});
 
-	it('reject writes the note', async () => {
-		await call('reject', [['note', 'Fold the event section in.']]);
-		expect(await decision()).toEqual({ decision: 'reject', note: 'Fold the event section in.', comments: [], threads: [] });
+	it('save naming no page the review carries, or posting no file, answers 400', async () => {
+		expect(await save('docs/other.md', 'x', blobs.water)).toMatchObject({ status: 400 });
+		expect(await call('save', [['text', 'x'], ['blob', blobs.water]])).toMatchObject({ status: 400 });
+	});
+
+	it('save on a page no longer committed answers 409', async () => {
+		git(repo, 'rm', '-q', REPOT);
+		git(repo, 'commit', '-q', '-m', 'Drop the page');
+		expect(await save(REPOT, 'x', blobs.repot)).toMatchObject({ status: 409 });
 	});
 
 	it('a save on a decided item answers 404 and commits nothing', async () => {
-		await call('approve', answered(base));
-		const head = git(repo, 'rev-parse', 'HEAD');
-		await expect(call('save', [['text', `${SAMPLE_DOC}late\n`], ['base', base]])).rejects.toMatchObject({ status: 404 });
+		await call('approve', answered());
+		await expect(save(WATER, `${WATER_HEAD}late\n`, blobs.water)).rejects.toMatchObject({ status: 404 });
 		expect(git(repo, 'rev-parse', 'HEAD')).toBe(head);
 	});
 
-	it('an approve on a missing item answers 404', async () => {
-		await expect(call('approve', answered(base), '20261011T100000-9')).rejects.toMatchObject({ status: 404 });
-		await expect(call('approve', answered(base), '20261011T100000-9')).rejects.toMatchObject({ status: 404 });
+	it('approve after saves records the calls, the commit at HEAD, and the comments; a second post answers 409', async () => {
+		const water = (await save(WATER, `${WATER_HEAD}more\n`, blobs.water)) as { blob: string };
+		await call('approve', answered(water.blob));
+		expect(await decision()).toEqual({
+			decision: 'approve',
+			commit: git(repo, 'rev-parse', 'HEAD'),
+			calls: [
+				{ id: 'N2', choice: 'Keep the text' },
+				{ id: 'N3', choice: 'Leave it out' }
+			],
+			comments: (await stored()).comments,
+			threads: []
+		});
+		expect((await decision()).commit).not.toBe(head);
+		expect(await call('approve', answered(water.blob))).toMatchObject({ status: 409 });
 	});
 
-	it('an approve waits behind a save already on the file’s queue, and a save queued after it commits nothing', async () => {
-		// A step held open on the file's queue stands in for a save mid-commit, so the order is fixed.
+	it('approve with no edit names the PR head as its commit', async () => {
+		await call('approve', answered());
+		expect((await decision()).commit).toBe(head);
+	});
+
+	it('approve with a call open, or an unknown call, answers 400 and writes nothing', async () => {
+		expect(await call('approve', answered().filter(([k]) => k !== 'call:N3'))).toMatchObject({ status: 400 });
+		expect(await call('approve', [...answered(), ['call:N1', 'x']])).toMatchObject({ status: 400 });
+		await expect(decision()).rejects.toThrow();
+	});
+
+	it('approve against a stale blob for any page answers 400 and writes nothing', async () => {
+		await save(REPOT, `${REPOT_HEAD}more\n`, blobs.repot);
+		expect(await call('approve', answered())).toMatchObject({ status: 400 });
+		expect(await call('approve', answered().filter(([k]) => k !== `blob:${WATER}`))).toMatchObject({ status: 400 });
+		await expect(decision()).rejects.toThrow();
+	});
+
+	it('approve with a page changed but not committed answers 400 and writes nothing', async () => {
+		await writeFile(join(repo, REPOT), 'dirty');
+		expect(await call('approve', answered())).toMatchObject({ status: 400 });
+		await expect(decision()).rejects.toThrow();
+	});
+
+	it('approve with a page no longer committed answers 409 and writes nothing', async () => {
+		git(repo, 'rm', '-q', REPOT);
+		git(repo, 'commit', '-q', '-m', 'Drop the page');
+		expect(await call('approve', answered())).toMatchObject({ status: 409 });
+		await expect(decision()).rejects.toThrow();
+	});
+
+	it('reject writes the note, the worktree commit, the calls made so far, and the comments', async () => {
+		const saved = (await save(WATER, `${WATER_HEAD}more\n`, blobs.water)) as { commit: string };
+		await call('reject', [['note', 'Name the pot material.'], ['call:N2', 'Apply the fix'], ['call:N3', 'Maybe'], ['call:N1', 'x']]);
+		expect(await decision()).toEqual({
+			decision: 'reject',
+			note: 'Name the pot material.',
+			commit: saved.commit,
+			calls: [{ id: 'N2', choice: 'Apply the fix' }],
+			comments: (await stored()).comments,
+			threads: []
+		});
+	});
+
+	it('reject with no call answered writes no calls, and with the worktree gone names the queued head', async () => {
+		await rm(repo, { recursive: true, force: true });
+		await call('reject', [['note', '']]);
+		expect(await decision()).toEqual({ decision: 'reject', note: '', commit: head, comments: (await stored()).comments, threads: [] });
+	});
+
+	it('load of a decided item carries its decision', async () => {
+		await call('approve', answered());
+		expect(await loaded()).toMatchObject({ decided: true, decision: { decision: 'approve', commit: head } });
+	});
+
+	it('an approve waits behind a save on any page’s queue, and a save queued after it commits nothing', async () => {
+		// A step held open on the second page's queue stands in for a save mid-commit, so the order is fixed.
 		let release = () => {};
-		const held = queued(repo, SAMPLE_FILE, () => new Promise<void>((r) => (release = r)));
+		const held = queued(repo, () => new Promise<void>((r) => (release = r)));
 		const settle = (p: Promise<unknown>) => {
 			const out = { done: false };
 			p.then(
@@ -808,11 +907,11 @@ describe('a blueprint', () => {
 			);
 			return out;
 		};
-		const approve = Promise.resolve(call('approve', answered(base)));
+		const approve = Promise.resolve(call('approve', answered()));
 		const approving = settle(approve);
 		await new Promise((r) => setTimeout(r, 100));
-		const save = Promise.resolve(call('save', [['text', `${SAMPLE_DOC}raced\n`], ['base', base]]));
-		const saving = settle(save);
+		const late = Promise.resolve(save(WATER, `${WATER_HEAD}raced\n`, blobs.water));
+		const saving = settle(late);
 		await new Promise((r) => setTimeout(r, 100));
 		expect(approving.done).toBe(false);
 		expect(saving.done).toBe(false);
@@ -821,428 +920,187 @@ describe('a blueprint', () => {
 		release();
 		await held;
 		await approve;
-		await expect(save).rejects.toMatchObject({ status: 404 });
-		const written = await decision();
-		expect(written.commit).toBe(git(repo, 'rev-parse', 'HEAD'));
-		expect(written.blob).toBe(base);
-		expect(git(repo, 'rev-list', '--count', 'HEAD')).toBe('1');
+		await expect(late).rejects.toMatchObject({ status: 404 });
+		expect((await decision()).commit).toBe(head);
+		expect(git(repo, 'rev-list', '--count', 'HEAD')).toBe('2');
+	});
+
+	describe('comments', () => {
+		const add = (text: string, quote = SOIL, file = WATER, blob = blobs.water, doc = WATER_HEAD) =>
+			call('comment', [['op', 'add'], ['text', text], ['file', file], ['blob', blob], ...span(doc, quote)]);
+
+		it('add anchors the comment into the named page committed at the posted blob, and load places it on that page only', async () => {
+			const answer = await add('Say how deep a knuckle is.\r\nIn centimetres.');
+			const from = WATER_HEAD.indexOf(SOIL);
+			const comment = { id: 'C3', text: 'Say how deep a knuckle is.\nIn centimetres.', anchor: anchorAt(WATER_HEAD, from, from + SOIL.length, head, WATER) };
+			expect(answer).toMatchObject({ id: 'C3', comments: [expect.objectContaining({ id: 'C2' }), comment] });
+			expect((await stored()).next).toBe(4);
+			const data = await loaded();
+			expect(data.pages[0].comments.map((c: { id: string }) => c.id)).toEqual(['C2', 'C3']);
+			expect(data.pages[0].comments[1].placed).toEqual({ from, to: from + SOIL.length });
+			expect(data.pages[1].comments).toEqual([]);
+		});
+
+		it('add into the second page anchors into that page’s text', async () => {
+			const quote = 'Choose a pot one size up';
+			await add('Which size?', quote, REPOT, blobs.repot, REPOT_HEAD);
+			const [comment] = (await stored()).comments.slice(-1);
+			expect(comment.anchor).toMatchObject({ quote, file: REPOT, commit: head });
+			expect((await loaded()).pages[1].comments.map((c: { id: string }) => c.id)).toEqual(['C3']);
+		});
+
+		it('load re-places a comment after a save moves its text, and shows a deleted one as unplaced', async () => {
+			await add('One.');
+			await add('Two.', SAUCER);
+			const moved = WATER_HEAD.replace('## Check the soil\n', '## Check the soil\n\nA new paragraph.\n').replace(SAUCER, 'Gone.');
+			await save(WATER, moved, blobs.water);
+			const [, soil, saucer] = (await loaded()).pages[0].comments;
+			expect(moved.slice(soil.placed.from, soil.placed.to)).toBe(SOIL);
+			expect(soil.placed.from).not.toBe(soil.anchor.from);
+			expect(saucer.placed).toBeNull();
+		});
+
+		it('add against a stale blob answers 409, naming no page 400, and a bad range 400', async () => {
+			const saved = (await save(WATER, `${WATER_HEAD}more\n`, blobs.water)) as { blob: string };
+			expect(await add('Late.')).toMatchObject({ status: 409 });
+			expect(await add('x', SOIL, 'docs/other.md', saved.blob)).toMatchObject({ status: 400 });
+			expect(await call('comment', [['op', 'add'], ['text', 'x'], ['blob', saved.blob], ...span(WATER_HEAD, SOIL)])).toMatchObject({ status: 400 });
+			expect(await call('comment', [['op', 'add'], ['text', 'x'], ['file', WATER], ['blob', saved.blob], ['from', '5'], ['to', '5']])).toMatchObject({ status: 400 });
+			expect(await call('comment', [['op', 'add'], ['text', 'x'], ['file', WATER], ['blob', saved.blob], ['from', '0'], ['to', '99999']])).toMatchObject({ status: 400 });
+			expect(await add('   ', SOIL, WATER, saved.blob)).toMatchObject({ status: 400 });
+			expect(await call('comment', [['op', 'nope']])).toMatchObject({ status: 400 });
+			expect(await add('Fresh.', SOIL, WATER, saved.blob)).toMatchObject({ id: 'C3' });
+		});
+
+		it('add on a page no longer committed answers 409', async () => {
+			git(repo, 'rm', '-q', REPOT);
+			git(repo, 'commit', '-q', '-m', 'Drop the page');
+			expect(await add('Gone.', 'Choose a pot', REPOT, blobs.repot, REPOT_HEAD)).toMatchObject({ status: 409 });
+		});
+
+		it('every op on a decided item answers 404 and writes nothing', async () => {
+			await add('Before.');
+			await call('approve', answered());
+			const before = await stored();
+			for (const fields of [
+				[['op', 'add'], ['text', 'After.'], ['file', WATER], ['blob', blobs.water], ...span(WATER_HEAD, SOIL)],
+				[['op', 'edit'], ['id', 'C2'], ['text', 'x']],
+				[['op', 'delete'], ['id', 'C2']]
+			] as [string, string][][]) {
+				await expect(call('comment', fields)).rejects.toMatchObject({ status: 404 });
+			}
+			expect(await stored()).toEqual(before);
+		});
+
+		it('edit and delete act on a comment, and a deleted id is never reused', async () => {
+			await add('One.');
+			await add('Two.', SAUCER);
+			expect(await call('comment', [['op', 'edit'], ['id', 'C3'], ['text', 'One, edited.']])).toMatchObject({ id: 'C3' });
+			expect(await call('comment', [['op', 'delete'], ['id', 'C4']])).toMatchObject({ id: 'C4' });
+			expect(await add('Three.', SAUCER)).toMatchObject({ id: 'C5' });
+			expect((await stored()).comments.map((c: { id: string; text: string }) => [c.id, c.text])).toEqual([
+				['C2', 'Say which inch.'],
+				['C3', 'One, edited.'],
+				['C5', 'Three.']
+			]);
+			expect(await call('comment', [['op', 'edit'], ['id', 'C4'], ['text', 'x']])).toMatchObject({ status: 400 });
+			expect(await call('comment', [['op', 'delete'], ['id', 'C9']])).toMatchObject({ status: 400 });
+			expect(await call('comment', [['op', 'edit'], ['id', 'C3'], ['text', ' ']])).toMatchObject({ status: 400 });
+		});
+
+		it('on a re-queued item with no comments saved, a new comment takes an id past every thread, and load places the thread on its page', async () => {
+			await rm(join(state.root, 'items', ID, 'comments.json'));
+			expect(await add('New.')).toMatchObject({ id: 'C2' });
+			const data = await loaded();
+			const [thread] = JSON.parse(await readFile(join(state.root, 'items', ID, 'replies.json'), 'utf8'));
+			expect(data.pages[0].threads).toEqual([]);
+			expect(data.pages[1].threads).toEqual([{ ...thread, placed: { from: thread.anchor.from, to: thread.anchor.to }, reply: '', resolved: false }]);
+		});
+
+		it('reply, resolve, and reopen act on a thread, and an empty reply removes Geoff’s', async () => {
+			await call('comment', [['op', 'reply'], ['id', 'C1'], ['text', 'Thanks.']]);
+			expect((await stored()).threads).toEqual([{ id: 'C1', reply: 'Thanks.' }]);
+			await call('comment', [['op', 'resolve'], ['id', 'C1']]);
+			expect((await loaded()).pages[1].threads.map((t: { reply: string; resolved: boolean }) => [t.reply, t.resolved])).toEqual([['Thanks.', true]]);
+			await call('comment', [['op', 'reopen'], ['id', 'C1']]);
+			await call('comment', [['op', 'reply'], ['id', 'C1'], ['text', '']]);
+			expect((await stored()).threads).toEqual([]);
+			expect(await call('comment', [['op', 'reply'], ['id', 'C2'], ['text', 'x']])).toMatchObject({ status: 400 });
+			expect(await call('comment', [['op', 'resolve'], ['id', 'C7']])).toMatchObject({ status: 400 });
+		});
+
+		it('approve carries the comments and only the threads Geoff replied to', async () => {
+			await add('New.');
+			await call('comment', [['op', 'reply'], ['id', 'C1'], ['text', 'Fair.']]);
+			await call('approve', answered());
+			const written = await decision();
+			expect(written).toMatchObject({ decision: 'approve', commit: head, threads: [{ id: 'C1', reply: 'Fair.' }] });
+			expect(written.comments).toEqual((await stored()).comments);
+			expect(written.comments.map((c: { id: string }) => c.id)).toEqual(['C2', 'C3']);
+		});
+
+		it('approve leaves out a thread Geoff only resolved', async () => {
+			await call('comment', [['op', 'resolve'], ['id', 'C1']]);
+			await call('approve', answered());
+			expect((await decision()).threads).toEqual([]);
+		});
+
+		describe('posted while a decision waits on a page’s queue', () => {
+			// A step held open on the page's queue stands in for a save mid-commit, so the order is fixed.
+			let release = () => {};
+			let held: Promise<void>;
+			beforeEach(() => {
+				held = queued(repo, () => new Promise<void>((r) => (release = r)));
+			});
+			const tick = () => new Promise((r) => setTimeout(r, 50));
+
+			it('is refused with 404 when the decision was queued first, never dropped', async () => {
+				const approve = Promise.resolve(call('approve', answered()));
+				await tick();
+				const comment = Promise.resolve(add('Raced.'));
+				await tick();
+				release();
+				await held;
+				await approve;
+				await expect(comment).rejects.toMatchObject({ status: 404 });
+				expect((await decision()).comments.map((c: { id: string }) => c.id)).toEqual(['C2']);
+			});
+
+			it('is carried when it was queued first', async () => {
+				const comment = Promise.resolve(add('First.'));
+				await tick();
+				const reject = Promise.resolve(call('reject', [['note', 'n']]));
+				await tick();
+				await expect(decision()).rejects.toThrow();
+				release();
+				await held;
+				expect(await comment).toMatchObject({ id: 'C3' });
+				await reject;
+				expect((await decision()).comments.map((c: { text: string }) => c.text)).toEqual(['Say which inch.', 'First.']);
+			});
+		});
+
+		it('a CRLF page anchors in LF, so the quote is the line the editor shows', async () => {
+			await writeFile(join(repo, WATER), WATER_HEAD.replace(/\n/g, '\r\n'));
+			git(repo, 'commit', '-q', '-am', 'Use CRLF');
+			const blob = git(repo, 'rev-parse', `HEAD:${WATER}`);
+			const answer = (await add('Hm.', SOIL, WATER, blob)) as { comments: Array<{ anchor: { quote: string; from: number; suffix: string } }> };
+			const { anchor } = answer.comments.at(-1)!;
+			expect(anchor.quote).toBe(SOIL);
+			expect(anchor.from).toBe(WATER_HEAD.indexOf(SOIL));
+			expect(anchor.suffix).not.toContain('\r');
+		});
 	});
 });
 
-describe('a page', () => {
-	let repo: string;
-	let base: string;
-	beforeEach(async () => {
-		repo = await mkdtemp(join(tmpdir(), 'approval-queue-route-page-'));
-		base = await seedPageRepo(repo);
-		await seedPageItem(state.root, ID, repo, base);
-	});
-	afterEach(() => rm(repo, { recursive: true, force: true }));
-
-	const answered = (blob: string): [string, string][] => [
-		['call:D1', 'Keep the author\'s wording'],
-		['call:Q1', 'Keep it'],
-		['blob', blob]
-	];
-
-	it('load returns the description paragraphs and the round of a page', async () => {
-		await rm(join(state.root, 'items', ID), { recursive: true });
-		await seedPageItem(state.root, ID, repo, base, undefined, { revises: { item: '20261010T100000-1', revision: 2 } });
-		await seedDescription(state.root, ID, 'The page explains the build.\n\nApproving it merges the pull request.\n');
-		const data = (await load({ params: { id: ID } } as never)) as Record<string, any>;
-		expect(data.description).toEqual(['The page explains the build.', 'Approving it merges the pull request.']);
-		expect(data.revision).toBe(2);
-	});
-
-	it('load returns the page at HEAD, its pull request and head, and each note on its page anchor', async () => {
-		const data = (await load({ params: { id: ID } } as never)) as Record<string, any>;
-		expect(data).toMatchObject({
-			kind: 'page',
-			doc: PAGE_DOC,
-			blob: base,
-			page: 'Fix a slow build',
-			pageType: 'troubleshooting',
-			pr: { ref: PAGE_PR, url: 'https://github.com/glw907/sample/pull/7', head: PAGE_HEAD }
-		});
-		const text = (id: string) => {
-			const r = data.notes.find((n: { id: string }) => n.id === id).range;
-			return PAGE_DOC.slice(r[0], r[1]);
-		};
-		expect(text('D1')).toBe('Every image is resized on every build because the cache key includes the build time.');
-		expect(text('Q1')).toMatch(/^\| Step \| Typical time \|/);
-	});
-
-	it('a blueprint loads with no pull request', async () => {
-		await seedBlueprintItem(state.root, '20261011T100000-2', repo, base);
-		const data = (await load({ params: { id: '20261011T100000-2' } } as never)) as Record<string, any>;
-		expect(data).toMatchObject({ kind: 'blueprint', pr: null });
-	});
-
-	it('save commits the text with the review message; a stale base answers 409', async () => {
-		const text = PAGE_DOC.replace('a minute', 'two minutes');
-		const saved = (await call('save', [['text', text], ['base', base]])) as { blob: string };
-		expect(saved.blob).toBe(git(repo, 'rev-parse', `HEAD:${PAGE_FILE}`));
-		expect(git(repo, 'log', '-1', '--format=%s')).toBe(`Edit ${PAGE_FILE} in review`);
-		expect(await call('save', [['text', `${text}x`], ['base', base]])).toMatchObject({ status: 409 });
-	});
-
-	it('approve records the calls, the waived dispute, and the commit and blob at HEAD, and a second post answers 409', async () => {
-		await call('approve', answered(base));
-		expect(await decision()).toEqual({
-			decision: 'approve',
-			calls: [
-				{ id: 'D1', choice: "Keep the author's wording" },
-				{ id: 'Q1', choice: 'Keep it' }
-			],
-			waived: [{ id: 'D1', choice: "Keep the author's wording", reason: "Kept the author's wording" }],
-			commit: git(repo, 'rev-parse', 'HEAD'),
-			blob: base,
-			comments: [],
-			threads: []
-		});
-		expect(await call('approve', answered(base))).toMatchObject({ status: 409 });
-		await expect(call('save', [['text', PAGE_DOC], ['base', base]])).rejects.toMatchObject({ status: 404 });
-	});
-
-	it('approve with an open call, or against a stale blob, answers 400 and writes nothing', async () => {
-		expect(await call('approve', [['call:Q1', 'Keep it'], ['blob', base]])).toMatchObject({ status: 400 });
-		await call('save', [['text', `${PAGE_DOC}more\n`], ['base', base]]);
-		expect(await call('approve', answered(base))).toMatchObject({ status: 400 });
-		await expect(decision()).rejects.toThrow();
-	});
-
-	it('reject writes the note', async () => {
-		await call('reject', [['note', 'Say what the table measures.']]);
-		expect(await decision()).toEqual({ decision: 'reject', note: 'Say what the table measures.', comments: [], threads: [] });
-	});
-});
-
-describe('a change', () => {
-	beforeEach(() => seedChangeItem(state.root, ID));
-
-	it('load returns each changed document with its diff and notes, and the code diff without them', async () => {
-		const data = (await load({ params: { id: ID } } as never)) as Record<string, any>;
-		expect(data).toMatchObject({ kind: 'change', ref: 'glw907/cairn-cms#77', head: PAGE_HEAD });
-		expect(data.docs.map((d: { path: string }) => d.path)).toEqual(CHANGE_DOCS.map((d) => d.path));
-		expect(data.docs.map((d: { file: { adds: number } }) => d.file.adds)).toEqual([24, 1, 1]);
-		expect(data.groups.flatMap((g: { files: Array<{ path: string }> }) => g.files.map((f) => f.path))).toEqual(['drafter.toml']);
-		expect(data.totals).toEqual({ files: 1, adds: 3, dels: 1 });
-		const share = data.docs[2];
-		expect(share.notes.map((n: { id: string }) => n.id)).toEqual(['L1']);
-		const r = share.notes[0].range;
-		expect(share.doc.slice(r[0], r[1])).toMatch(/^The file reads `PUBLIC_ORIGIN`[\s\S]*\[Debug your site\]\(debug-your-site\.md#eventplatform-is-undefined\)[\s\S]*checks\.$/);
-		const audit = data.docs[1];
-		expect(audit.doc.slice(audit.notes[0].range[0]).startsWith('The engine, installed by the setup command')).toBe(true);
-		expect(audit.original).not.toBe(audit.doc);
-	});
-
-	it('approve records only the calls, and a second post answers 409', async () => {
-		await call('approve', [['call:Q1', 'Keep it']]);
-		expect(await decision()).toEqual({ decision: 'approve', calls: [{ id: 'Q1', choice: 'Keep it' }], comments: [], threads: [] });
-		expect(await call('approve', [['call:Q1', 'Keep it']])).toMatchObject({ status: 409 });
-	});
-
-	it('approve with the call open, or an unknown call, answers 400 and writes nothing', async () => {
-		expect(await call('approve', [])).toMatchObject({ status: 400 });
-		expect(await call('approve', [['call:Q1', 'Keep it'], ['call:L1', 'x']])).toMatchObject({ status: 400 });
-		await expect(decision()).rejects.toThrow();
-	});
-
-	it('reject writes the note, and save is refused', async () => {
-		expect(await call('save', [['text', 'x'], ['base', 'y']])).toMatchObject({ status: 400 });
-		await call('reject', [['note', 'Keep the old text.']]);
-		expect(await decision()).toEqual({ decision: 'reject', note: 'Keep the old text.', comments: [], threads: [] });
-	});
-
-	it('reject records the calls made so far, leaving out an unknown call or label', async () => {
-		await call('reject', [['note', ''], ['call:Q1', 'Keep it'], ['call:L1', 'x']]);
-		expect(await decision()).toEqual({
-			decision: 'reject',
-			note: '',
-			calls: [{ id: 'Q1', choice: 'Keep it' }],
-			comments: [],
-			threads: []
-		});
-	});
-});
-
-const COMMENTS_DOC = fixture('comments/comments.blueprint.md');
-const COMMENTS_NOTES = fixture('comments/notes.json');
-const SOIL = 'Dry soil at that depth means the plant needs water.';
-const ROW = 'The pot has no drainage hole, so the roots sit in water.';
-const span = (doc: string, text: string): [string, string][] => [
-	['from', String(doc.indexOf(text))],
-	['to', String(doc.indexOf(text) + text.length)]
-];
-const stored = async (id = ID) => JSON.parse(await readFile(join(state.root, 'items', id, 'comments.json'), 'utf8'));
-const loaded = async (id = ID) => (await load({ params: { id } } as never)) as Record<string, any>;
-
-/** A `--replies` file's threads, anchored into `doc` at `commit`. */
-async function seedReplies(doc: string, commit: string, file?: string, id = ID): Promise<Thread[]> {
-	const thread = (tid: string, status: Thread['status'], quote: string): Thread => {
-		const from = doc.indexOf(quote);
-		return { id: tid, status, text: `Reply to ${tid}.`, quote, anchor: anchorAt(doc, from, from + quote.length, commit, file) };
-	};
-	const threads = [thread('C1', 'done', SOIL), thread('C2', 'kept', ROW)];
-	await writeFile(join(state.root, 'items', id, 'replies.json'), JSON.stringify(threads));
-	return threads;
-}
-
-describe('comments on a blueprint', () => {
-	let repo: string;
-	let base: string;
-	let head: string;
-	beforeEach(async () => {
-		repo = await mkdtemp(join(tmpdir(), 'approval-queue-route-comments-'));
-		base = await seedRepo(repo, COMMENTS_DOC);
-		head = git(repo, 'rev-parse', 'HEAD');
-		await seedBlueprintItem(state.root, ID, repo, base, COMMENTS_NOTES);
-	});
-	afterEach(() => rm(repo, { recursive: true, force: true }));
-
-	const add = (text: string, quote = SOIL, blob = base, doc = COMMENTS_DOC) =>
-		call('comment', [['op', 'add'], ['text', text], ['blob', blob], ...span(doc, quote)]);
-	const answered: [string, string][] = [['call:D1', "Keep the author's wording"]];
-
-	it('add anchors the comment into the file committed at the posted blob, and load places it', async () => {
-		const answer = await add('Say how deep a knuckle is.\r\nIn centimetres.');
-		const from = COMMENTS_DOC.indexOf(SOIL);
-		const comment = { id: 'C1', text: 'Say how deep a knuckle is.\nIn centimetres.', anchor: anchorAt(COMMENTS_DOC, from, from + SOIL.length, head) };
-		expect(answer).toEqual({ id: 'C1', comments: [comment], threads: [] });
-		expect(await stored()).toEqual({ comments: [comment], threads: [], next: 2 });
-		expect(comment.anchor.quote).toBe(SOIL);
-		expect((await loaded()).comments).toEqual([{ ...comment, placed: { from, to: from + SOIL.length } }]);
-	});
-
-	it('load re-places a comment after a save moves its text, and shows a deleted one as unplaced', async () => {
-		await add('One.');
-		await add('Two.', ROW);
-		const moved = COMMENTS_DOC.replace('## Check the soil\n', '## Check the soil\n\nA new paragraph.\n').replace(ROW, 'Gone.');
-		await call('save', [['text', moved], ['base', base]]);
-		const [soil, row] = (await loaded()).comments;
-		expect(moved.slice(soil.placed.from, soil.placed.to)).toBe(SOIL);
-		expect(soil.placed.from).not.toBe(soil.anchor.from);
-		expect(row.placed).toBeNull();
-	});
-
-	it('add against a stale blob answers 409, and against a range outside the file 400', async () => {
-		const saved = (await call('save', [['text', `${COMMENTS_DOC}more\n`], ['base', base]])) as { blob: string };
-		expect(await add('Late.')).toMatchObject({ status: 409 });
-		expect(await call('comment', [['op', 'add'], ['text', 'x'], ['blob', saved.blob], ['from', '5'], ['to', '5']])).toMatchObject({ status: 400 });
-		expect(await call('comment', [['op', 'add'], ['text', 'x'], ['blob', saved.blob], ['from', '0'], ['to', '99999']])).toMatchObject({ status: 400 });
-		expect(await add('   ', SOIL, saved.blob)).toMatchObject({ status: 400 });
-		expect(await call('comment', [['op', 'nope']])).toMatchObject({ status: 400 });
-		expect(await add('Fresh.', SOIL, saved.blob)).toMatchObject({ id: 'C1' });
-	});
-
-	it('add on a file no longer committed answers 409', async () => {
-		git(repo, 'rm', '-q', SAMPLE_FILE);
-		git(repo, 'commit', '-q', '-m', 'Remove the blueprint');
-		expect(await add('Gone.')).toMatchObject({ status: 409 });
-	});
-
-	it('every op on a decided item answers 404 and writes nothing', async () => {
-		await add('Before.');
-		await call('approve', [...answered, ['blob', base]]);
-		const before = await stored();
-		for (const fields of [
-			[['op', 'add'], ['text', 'After.'], ['blob', base], ...span(COMMENTS_DOC, SOIL)],
-			[['op', 'edit'], ['id', 'C1'], ['text', 'x']],
-			[['op', 'delete'], ['id', 'C1']]
-		] as [string, string][][]) {
-			await expect(call('comment', fields)).rejects.toMatchObject({ status: 404 });
+describe('an item of a removed kind', () => {
+	it.each(['blueprint', 'page', 'change'])('answers 404 to the load and every post, decided or not (%s)', async (kind) => {
+		await seed(ID, { kind, repo: 'r', title: 't', created: 'c' }, { 'doc.md': '# doc' });
+		for (const run of [() => load({ params: { id: ID } } as never), () => call('approve'), () => call('reject'), () => call('comment', [['op', 'delete']]), () => call('save'), () => call('defer')]) {
+			await expect(Promise.resolve().then(run)).rejects.toMatchObject({ status: 404 });
 		}
-		expect(await stored()).toEqual(before);
-	});
-
-	it('edit and delete act on a comment, and a deleted id is never reused', async () => {
-		await add('One.');
-		await add('Two.', ROW);
-		expect(await call('comment', [['op', 'edit'], ['id', 'C1'], ['text', 'One, edited.']])).toMatchObject({ id: 'C1' });
-		expect(await call('comment', [['op', 'delete'], ['id', 'C2']])).toMatchObject({ id: 'C2' });
-		expect(await add('Three.', ROW)).toMatchObject({ id: 'C3' });
-		expect((await stored()).comments.map((c: { id: string; text: string }) => [c.id, c.text])).toEqual([
-			['C1', 'One, edited.'],
-			['C3', 'Three.']
-		]);
-		expect(await call('comment', [['op', 'edit'], ['id', 'C2'], ['text', 'x']])).toMatchObject({ status: 400 });
-		expect(await call('comment', [['op', 'delete'], ['id', 'C9']])).toMatchObject({ status: 400 });
-		expect(await call('comment', [['op', 'edit'], ['id', 'C1'], ['text', ' ']])).toMatchObject({ status: 400 });
-	});
-
-	it('on a re-queued item, a new comment takes an id past every thread, and load places each thread', async () => {
-		const threads = await seedReplies(COMMENTS_DOC, head);
-		expect(await add('New.')).toMatchObject({ id: 'C3' });
-		const data = await loaded();
-		expect(data.threads).toEqual(
-			threads.map((t) => ({ ...t, placed: { from: t.anchor.from, to: t.anchor.to }, reply: '', resolved: false }))
-		);
-	});
-
-	it('reply, resolve, and reopen act on a thread, and an empty reply removes Geoff’s', async () => {
-		await seedReplies(COMMENTS_DOC, head);
-		await call('comment', [['op', 'reply'], ['id', 'C1'], ['text', 'Thanks.']]);
-		await call('comment', [['op', 'resolve'], ['id', 'C2']]);
-		expect((await stored()).threads).toEqual([{ id: 'C1', reply: 'Thanks.' }, { id: 'C2', resolved: true }]);
-		expect((await loaded()).threads.map((t: { reply: string; resolved: boolean }) => [t.reply, t.resolved])).toEqual([
-			['Thanks.', false],
-			['', true]
-		]);
-		await call('comment', [['op', 'reopen'], ['id', 'C2']]);
-		await call('comment', [['op', 'reply'], ['id', 'C1'], ['text', '']]);
-		expect((await stored()).threads).toEqual([]);
-		await add('Mine.');
-		expect(await call('comment', [['op', 'reply'], ['id', 'C3'], ['text', 'x']])).toMatchObject({ status: 400 });
-		expect(await call('comment', [['op', 'resolve'], ['id', 'C7']])).toMatchObject({ status: 400 });
-	});
-
-	it('approve carries the comments and only the threads Geoff replied to', async () => {
-		await seedReplies(COMMENTS_DOC, head);
-		await add('New.');
-		await call('comment', [['op', 'reply'], ['id', 'C2'], ['text', 'Fair.']]);
-		await call('comment', [['op', 'resolve'], ['id', 'C1']]);
-		await call('approve', [...answered, ['blob', base]]);
-		const written = await decision();
-		expect(written).toMatchObject({ decision: 'approve', commit: head, blob: base, threads: [{ id: 'C2', reply: 'Fair.' }] });
-		expect(written.comments).toEqual((await stored()).comments);
-		expect(written.comments.map((c: { id: string }) => c.id)).toEqual(['C3']);
-	});
-
-	it('reject carries the comments and replies with the note and the calls made', async () => {
-		await seedReplies(COMMENTS_DOC, head);
-		await add('New.');
-		await call('comment', [['op', 'reply'], ['id', 'C1'], ['text', 'Not quite.']]);
-		await call('reject', [['note', ''], ...answered]);
-		expect(await decision()).toEqual({
-			decision: 'reject',
-			note: '',
-			calls: [{ id: 'D1', choice: "Keep the author's wording" }],
-			comments: (await stored()).comments,
-			threads: [{ id: 'C1', reply: 'Not quite.' }]
-		});
-	});
-
-	describe('a comment posted while a decision waits on the file’s queue', () => {
-		// A step held open on the file's queue stands in for a save mid-commit, so the order is fixed.
-		let release = () => {};
-		let held: Promise<void>;
-		beforeEach(() => {
-			held = queued(repo, SAMPLE_FILE, () => new Promise<void>((r) => (release = r)));
-		});
-		const tick = () => new Promise((r) => setTimeout(r, 50));
-
-		it('is refused with 404 when the decision was queued first, never dropped', async () => {
-			const approve = Promise.resolve(call('approve', [...answered, ['blob', base]]));
-			await tick();
-			const comment = Promise.resolve(add('Raced.'));
-			await tick();
-			release();
-			await held;
-			await approve;
-			await expect(comment).rejects.toMatchObject({ status: 404 });
-			expect((await decision()).comments).toEqual([]);
-		});
-
-		it('is carried when it was queued first', async () => {
-			const comment = Promise.resolve(add('First.'));
-			await tick();
-			const reject = Promise.resolve(call('reject', [['note', 'n']]));
-			await tick();
-			await expect(decision()).rejects.toThrow();
-			release();
-			await held;
-			expect(await comment).toMatchObject({ id: 'C1' });
-			await reject;
-			expect((await decision()).comments.map((c: { text: string }) => c.text)).toEqual(['First.']);
-		});
-	});
-
-	it('a CRLF file anchors in LF, so the quote is the line the editor shows', async () => {
-		const crlf = COMMENTS_DOC.replace(/\n/g, '\r\n');
-		await writeFile(join(repo, SAMPLE_FILE), crlf);
-		git(repo, 'commit', '-q', '-am', 'Use CRLF');
-		const blob = git(repo, 'rev-parse', `HEAD:${SAMPLE_FILE}`);
-		const answer = (await add('Hm.', SOIL, blob)) as { comments: Array<{ anchor: { quote: string; from: number; suffix: string } }> };
-		const [{ anchor }] = answer.comments;
-		expect(anchor.quote).toBe(SOIL);
-		expect(anchor.from).toBe(COMMENTS_DOC.indexOf(SOIL));
-		expect(anchor.suffix).not.toContain('\r');
-	});
-});
-
-describe('comments on a page', () => {
-	let repo: string;
-	let base: string;
-	beforeEach(async () => {
-		repo = await mkdtemp(join(tmpdir(), 'approval-queue-route-page-comments-'));
-		base = await seedPageRepo(repo);
-		await seedPageItem(state.root, ID, repo, base);
-	});
-	afterEach(() => rm(repo, { recursive: true, force: true }));
-
-	const quote = 'Every image is resized on every build';
-
-	it('approve and reject both carry the comments, anchored at the commit HEAD names', async () => {
-		await call('comment', [['op', 'add'], ['text', 'Why?'], ['blob', base], ...span(PAGE_DOC, quote)]);
-		const [comment] = (await stored()).comments;
-		expect(comment.anchor).toMatchObject({ quote, commit: git(repo, 'rev-parse', 'HEAD') });
-		expect(comment.anchor).not.toHaveProperty('file');
-		await call('reject', [['note', 'See the comment.']]);
-		expect(await decision()).toEqual({ decision: 'reject', note: 'See the comment.', comments: [comment], threads: [] });
-
-		await seedPageItem(state.root, '20261011T100000-2', repo, base);
-		const two = '20261011T100000-2';
-		await call('comment', [['op', 'add'], ['text', 'Why?'], ['blob', base], ...span(PAGE_DOC, quote)], two);
-		await call('approve', [['call:D1', "Keep the author's wording"], ['call:Q1', 'Keep it'], ['blob', base]], two);
-		const approved = JSON.parse(await readFile(join(state.root, 'items', two, 'decision.json'), 'utf8'));
-		expect(approved).toMatchObject({ decision: 'approve', blob: base, comments: [comment], threads: [] });
-	});
-});
-
-describe('comments on a change', () => {
-	beforeEach(() => seedChangeItem(state.root, ID));
-	const docOf = (k: number) => fixture(`change/head/${CHANGE_DOCS[k].path}`);
-	const quote = 'The engine, installed by the setup command';
-	const addTo = (k: number, text = 'Why?') =>
-		call('comment', [['op', 'add'], ['text', text], ['file', CHANGE_DOCS[k].path], ...span(docOf(k), quote)]);
-
-	it('add anchors into the named document at the change’s head, and load places it on that document only', async () => {
-		const answer = (await addTo(1)) as { comments: Array<{ anchor: Record<string, unknown> }> };
-		const from = docOf(1).indexOf(quote);
-		expect(answer.comments[0].anchor).toEqual(anchorAt(docOf(1), from, from + quote.length, PAGE_HEAD, CHANGE_DOCS[1].path));
-		const data = await loaded();
-		expect(data.docs.map((d: { comments: unknown[] }) => d.comments.length)).toEqual([0, 1, 0]);
-		expect(data.docs[1].comments[0].placed).toEqual({ from, to: from + quote.length });
-	});
-
-	it('add naming no document the change carries answers 400, and needs no blob', async () => {
-		expect(await call('comment', [['op', 'add'], ['text', 'x'], ['file', 'docs/other.md'], ['from', '0'], ['to', '3']])).toMatchObject({ status: 400 });
-		expect(await call('comment', [['op', 'add'], ['text', 'x'], ['from', '0'], ['to', '3']])).toMatchObject({ status: 400 });
-	});
-
-	it('load places each thread on the document its anchor names', async () => {
-		const doc = docOf(1);
-		const from = doc.indexOf(quote);
-		const thread: Thread = { id: 'C1', status: 'answered', text: 'It is.', quote, anchor: anchorAt(doc, from, from + quote.length, PAGE_HEAD, CHANGE_DOCS[1].path) };
-		await writeFile(join(state.root, 'items', ID, 'replies.json'), JSON.stringify([thread]));
-		const data = await loaded();
-		expect(data.docs[1].threads).toEqual([{ ...thread, placed: { from, to: from + quote.length }, reply: '', resolved: false }]);
-		expect(data.docs[0].threads).toEqual([]);
-		expect(await addTo(1)).toMatchObject({ id: 'C2' });
-	});
-
-	it('approve and reject both carry the comments', async () => {
-		await addTo(1);
-		const { comments } = await stored();
-		await call('approve', [['call:Q1', 'Keep it']]);
-		expect(await decision()).toEqual({ decision: 'approve', calls: [{ id: 'Q1', choice: 'Keep it' }], comments, threads: [] });
-		await expect(addTo(1)).rejects.toMatchObject({ status: 404 });
-
-		await seedChangeItem(state.root, '20261011T100000-2');
-		const two = '20261011T100000-2';
-		await call('comment', [['op', 'add'], ['text', 'Why?'], ['file', CHANGE_DOCS[1].path], ...span(docOf(1), quote)], two);
-		await call('reject', [['note', 'n']], two);
-		expect(JSON.parse(await readFile(join(state.root, 'items', two, 'decision.json'), 'utf8'))).toEqual({ decision: 'reject', note: 'n', comments, threads: [] });
+		await writeFile(join(state.root, 'items', ID, 'decision.json'), '{"decision":"approve"}');
+		await expect(load({ params: { id: ID } } as never)).rejects.toMatchObject({ status: 404 });
 	});
 });
 
@@ -1325,24 +1183,8 @@ describe('defer', () => {
 	});
 });
 
-describe('an amend', () => {
-	const seedBlueprint = (meta: object, files: Record<string, string>) =>
-		seed(ID, { kind: 'blueprint', worktree: join(state.root, 'gone'), file: 'blueprints/b.blueprint.md', blob: 'new', ...meta }, { 'doc.md': '---\npage: B\n---\n\nNow.\n', ...files });
-	const data = async () => (await load({ params: { id: ID } } as never)) as unknown as { amend?: { blob: string; original: string } };
-
-	it('carries the approved blob and text beside the document', async () => {
-		await seedBlueprint({ amends: 'abc123' }, { 'approved.md': '---\npage: B\n---\r\n\r\nBefore.\r\n' });
-		expect((await data()).amend).toEqual({ blob: 'abc123', original: '---\npage: B\n---\n\nBefore.\n' });
-	});
-
-	it('carries no amend for a full review', async () => {
-		await seedBlueprint({}, {});
-		expect(await data()).not.toHaveProperty('amend');
-	});
-});
-
 describe('a packet whose packet.json does not parse', () => {
-	const PACKET = fixture('packet-baseline.md').replace('glw907/drafter:docs/specs/notes-design.md', 'glw907/drafter#43');
+	const PACKET = fixture('packet-baseline.md').replace('glw907/sample:docs/specs/notes-design.md', 'glw907/sample#43');
 	const WITHDRAWN = 'This item was withdrawn by its session; nothing was recorded';
 	beforeEach(async () => {
 		await seedPacket(state.root, ID, PACKET);

@@ -1,6 +1,6 @@
-// Geoff's comments on a document review and the author's replies to them, with the anchor that ties
+// Geoff's comments on a docs review and the author's replies to them, with the anchor that ties
 // each to its text. Pure functions, shared by the server (which builds and re-places the anchors) and
-// the editor. Every offset is into LF-normalized text, as `readBlueprint` and `readChange` read it.
+// the editor. Every offset is into LF-normalized text, as `readDocs` reads it.
 
 /** How the author answered a comment: made the change, kept the text with a reason, or answered a question. */
 export type ReplyStatus = 'done' | 'kept' | 'answered';
@@ -15,10 +15,10 @@ export interface Anchor {
 	suffix: string;
 	from: number;
 	to: number;
-	/** The commit the text was read at: the posted blob's on a blueprint or page, `meta.head` on a change. */
+	/** The worktree HEAD the text was read at. */
 	commit: string;
-	/** A change review's document path; absent on a blueprint or page. */
-	file?: string;
+	/** The changed page the anchor belongs to, as its path at the PR's head. */
+	file: string;
 }
 
 export interface Comment {
@@ -40,7 +40,7 @@ export interface Thread {
 export const CONTEXT = 32;
 
 /** The anchor of `doc.slice(from, to)`; the caller has checked the range lies inside `doc`. */
-export function anchorAt(doc: string, from: number, to: number, commit: string, file?: string): Anchor {
+export function anchorAt(doc: string, from: number, to: number, commit: string, file: string): Anchor {
 	return {
 		quote: doc.slice(from, to),
 		prefix: doc.slice(Math.max(0, from - CONTEXT), from),
@@ -48,7 +48,7 @@ export function anchorAt(doc: string, from: number, to: number, commit: string, 
 		from,
 		to,
 		commit,
-		...(file !== undefined && { file })
+		file
 	};
 }
 

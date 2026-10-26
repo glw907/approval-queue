@@ -6,25 +6,25 @@ import { collapsedStart, collapsedStarts } from './setup.ts';
 const lines = (n: number, edit?: [number, string]) =>
 	Array.from({ length: n }, (_, i) => (edit && edit[0] === i ? edit[1] : `line ${i + 1}`)).join('\n');
 
-const amend = (approved: string, current: string) =>
+const merged = (base: string, current: string) =>
 	EditorState.create({
 		doc: current,
-		extensions: unifiedMergeView({ original: approved, mergeControls: false, collapseUnchanged: { margin: 3, minSize: 4 } })
+		extensions: unifiedMergeView({ original: base, mergeControls: false, collapseUnchanged: { margin: 3, minSize: 4 } })
 	});
 
-describe('the amend review', () => {
-	const approved = lines(40);
+describe('the merge view', () => {
+	const original = lines(40);
 	const current = lines(40, [19, 'line 20, reworded']);
 
 	it('finds one changed chunk, at the reworded line', () => {
-		const state = amend(approved, current);
+		const state = merged(original, current);
 		const chunks = getChunks(state)?.chunks ?? [];
 		expect(chunks).toHaveLength(1);
 		expect(state.doc.lineAt(chunks[0].fromB).text).toBe('line 20, reworded');
 	});
 
 	it('folds the unchanged runs more than three lines from the change, and no others', () => {
-		const state = amend(approved, current);
+		const state = merged(original, current);
 		const at = (n: number) => state.doc.line(n).from;
 		expect(collapsedStart(state, at(1))).toBe(at(1));
 		expect(collapsedStart(state, at(16))).toBe(at(1));
@@ -36,7 +36,7 @@ describe('the amend review', () => {
 	});
 
 	it('opens a run with the start it reports', () => {
-		let state = amend(approved, current);
+		let state = merged(original, current);
 		const start = collapsedStart(state, state.doc.line(5).from);
 		expect(start).not.toBeNull();
 		state = state.update({ effects: uncollapseUnchanged.of(start as number) }).state;
@@ -45,7 +45,7 @@ describe('the amend review', () => {
 	});
 
 	it('lists every fold, and opening them all leaves none', () => {
-		let state = amend(approved, current);
+		let state = merged(original, current);
 		const starts = collapsedStarts(state);
 		expect(starts).toEqual([state.doc.line(1).from, state.doc.line(24).from]);
 		state = state.update({ effects: starts.map((s) => uncollapseUnchanged.of(s)) }).state;

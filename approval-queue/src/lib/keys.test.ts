@@ -35,7 +35,7 @@ describe('keyAction', () => {
 	it('opens the note on r, and focuses the filter on / for a PR or a change only', () => {
 		expect(keyAction('r', none, ctx({ page: 'design' }))).toBe('open-note');
 		expect(keyAction('/', none, base)).toBe('focus-filter');
-		expect(keyAction('/', none, ctx({ page: 'change' }))).toBe('focus-filter');
+		expect(keyAction('/', none, ctx({ page: 'docs' }))).toBe('focus-filter');
 		expect(keyAction('/', none, ctx({ page: 'design' }))).toBeNull();
 	});
 
@@ -54,7 +54,7 @@ describe('keyAction', () => {
 	});
 
 	it('goes to the board on b from any page, and not with single keys off or while typing', () => {
-		for (const page of ['pr', 'packet', 'triage', 'blueprint'] as const) expect(keyAction('b', none, ctx({ page }))).toBe('board');
+		for (const page of ['pr', 'packet', 'triage', 'docs'] as const) expect(keyAction('b', none, ctx({ page }))).toBe('board');
 		expect(keyAction('b', none, ctx({ singleKeys: false }))).toBeNull();
 		expect(keyAction('b', none, ctx({ typing: true }))).toBeNull();
 		expect(keyAction('b', { ...none, ctrl: true }, base)).toBeNull();
@@ -66,7 +66,7 @@ describe('keyAction', () => {
 		expect(keyAction('4', none, packet)).toBeNull();
 		expect(keyAction('1', none, ctx({ page: 'packet', held: true }))).toBeNull();
 		expect(keyAction('1', none, ctx({ page: 'packet', typing: true }))).toBeNull();
-		expect(keyAction('1', none, ctx({ page: 'blueprint' }))).toBeNull();
+		expect(keyAction('1', none, ctx({ page: 'docs' }))).toBeNull();
 	});
 
 	it('moves the queue with j and k on any page', () => {
@@ -116,7 +116,7 @@ describe('keyAction', () => {
 		expect(keyAction('r', none, packet)).toBe('open-note');
 	});
 
-	it.each(['blueprint', 'page', 'change', 'pr', 'design'] as const)(
+	it.each(['docs', 'pr', 'design'] as const)(
 		'approves a %s review on Mod+Enter from the editor, locked or not, and never on a single key',
 		(page) => {
 			const mod = { ...none, ctrl: true };
@@ -166,19 +166,19 @@ describe('keyAction', () => {
 	});
 
 	it('saves and cancels an open comment box on Ctrl+Enter and Escape, ahead of the note and Approve', () => {
-		const open = ctx({ page: 'blueprint', typing: true, commentOpen: true });
+		const open = ctx({ page: 'docs', typing: true, commentOpen: true });
 		expect(keyAction('Enter', { ...none, ctrl: true }, open)).toBe('save-comment');
 		expect(keyAction('Enter', { ...none, meta: true }, open)).toBe('save-comment');
 		expect(keyAction('Escape', none, open)).toBe('cancel-comment');
-		expect(keyAction('Escape', none, ctx({ page: 'blueprint', noteOpen: true }))).toBe('close-note');
+		expect(keyAction('Escape', none, ctx({ page: 'docs', noteOpen: true }))).toBe('close-note');
 	});
 
 	it('takes the comment chords on a document page only, from the editor and with single keys off', () => {
 		const chord = (code: string) => ({ ...none, ctrl: true, alt: true, code });
-		const t = ctx({ page: 'page', typing: true, singleKeys: false });
+		const t = ctx({ page: 'docs', typing: true, singleKeys: false });
 		expect(keyAction('m', chord('KeyM'), t)).toBe('comment');
-		expect(keyAction('M', chord('KeyM'), ctx({ page: 'blueprint' }))).toBe('comment');
-		expect(keyAction('n', chord('KeyN'), ctx({ page: 'change' }))).toBe('next-comment');
+		expect(keyAction('M', chord('KeyM'), ctx({ page: 'docs' }))).toBe('comment');
+		expect(keyAction('n', chord('KeyN'), ctx({ page: 'docs' }))).toBe('next-comment');
 		expect(keyAction('p', chord('KeyP'), t)).toBe('prev-comment');
 		expect(keyAction('m', chord('KeyM'), ctx({ page: 'pr' }))).toBeNull();
 		expect(keyAction('m', { ...chord('KeyM'), shift: true }, t)).toBeNull();
@@ -186,7 +186,7 @@ describe('keyAction', () => {
 	});
 
 	it('follows the letter the layout types, and falls back to the physical key for any other character', () => {
-		const t = ctx({ page: 'blueprint', typing: true });
+		const t = ctx({ page: 'docs', typing: true });
 		// Option+M on macOS gives "µ", and AltGr layouts give their own characters.
 		expect(keyAction('µ', { ...none, ctrl: true, alt: true, code: 'KeyM' }, t)).toBe('comment');
 		// A Dvorak-style layout types these letters from other physical keys.

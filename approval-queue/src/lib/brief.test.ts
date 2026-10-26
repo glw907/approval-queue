@@ -99,13 +99,13 @@ describe('parseBrief fixtures', () => {
 		expect(b.details[0].body).toContain('`claude-approval-queue-reminder`');
 	});
 
-	it('parses the drafter Pass 0 triage', () => {
-		const result = validateTriage(fixture('drafter-pass-0-triage.json'));
+	it('parses a sample triage', () => {
+		const result = validateTriage(fixture('sample-triage.json'));
 		if (!result.ok) throw new Error(result.messages.join('\n'));
 		const { triage } = result;
-		expect(triage.headline).toBe('One follow-up needs doing before the next docs run.');
+		expect(triage.headline).toBe('One follow-up needs doing before the next release.');
 		expect(triage.rows.map((r) => r.proposed)).toEqual(['now', 'defer', 'defer', 'defer', 'defer', 'drop', 'drop', 'drop']);
-		expect(triage.rows[0].detail).toContain('`<slug>.plan.md`');
+		expect(triage.rows[0].detail).toContain('`<name>.json`');
 	});
 });
 

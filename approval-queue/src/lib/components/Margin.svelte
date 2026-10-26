@@ -21,13 +21,11 @@ unplaced and hidden.
 
 	interface Props {
 		review: DocReview;
-		/** What the empty margin and a gone comment call the document: "blueprint", "page", or a change document's kind. */
-		kindWord: string;
 		/** The level of the cards' headings; the margin's own title sits one above. Three under a page's h1, four under a section's h2 and the Comments h3. */
 		level?: 3 | 4;
 	}
 
-	let { review, kindWord, level = 3 }: Props = $props();
+	let { review, level = 3 }: Props = $props();
 
 	let layer = $state<HTMLDivElement>();
 	let wide = $state(true);
@@ -144,11 +142,11 @@ unplaced and hidden.
 						onresolve={() => review.resolveNote(note.id, true)}
 					/>
 				{:else}
-					<CommentCard {review} {card} {kindWord} {current} {level} />
+					<CommentCard {review} {card} {current} {level} />
 				{/if}
 			</div>
 		{:else}
-			<p class="mempty">Select text in the {kindWord} to comment on it. Your comments appear here, beside the text they’re about.</p>
+			<p class="mempty">Select text in the page to comment on it. Your comments appear here, beside the text they’re about.</p>
 		{/each}
 		{#if showAdd && addTop !== null}
 			<button

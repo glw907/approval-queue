@@ -12,10 +12,23 @@
 
 ## Medium
 
-- [ ] **#53** Refuse a `.blueprint.yaml` in `blueprint` and `anchors` `#improvement` `#approval-queue` `#initiative:docs-system` *(2026-10-25)*
+- [ ] **#58** A docs review's page controls: F8 order, a new page's diff button, and the added-text underline `#improvement` `#approval-queue` `#initiative:docs-system` *(2026-10-26)*
+  F8 ("next call") always starts at the page after the last one used, so with two open calls on page 1 and one on page 2 it goes page 1, page 2, page 1. A new page (`base` empty) still offers "Show all unchanged lines" with nothing to unfold. Added text takes a solid underline like a link, so a whole new paragraph can read as a link. Found in the svelte and accessibility reviews of the docs cutover (PR #12).
+- [ ] **#57** A docs review's comment and send-back edges `#improvement` `#approval-queue` `#initiative:docs-system` *(2026-10-26)*
+  A new comment takes its range before the flush that precedes the post, so text that moves during the flush leaves it stale. The send-back post names `blob:<path>` fields the reject action never reads. The `p.bg.bg-flat` callouts in `DocsView.svelte` are home-grown beside the stock `alert` the missing-page notice uses. Browser localStorage keys `desk.calls.*` are never cleaned up. Found in the reviews of the docs cutover (PR #12).
+- [ ] **#56** `readReplies` duplicates the `replies.json` read in `readDocs` `#improvement` `#approval-queue` `#initiative:docs-system` *(2026-10-26)*
+  `readDocs` has only the item directory, so it cannot call `readReplies(root, id)`; merge the two so one reader serves the route and the comment store.
+- [ ] **#55** Normalize the docs command's tool-failure exit codes `#improvement` `#approval-queue` `#initiative:docs-system` *(2026-10-26)*
+  `fetch_pr` exits with `gh`'s own status (4 for auth, 127 for a missing `gh`) where the contract's refusals table says 1, and the notes and replies checks run after the `gh` fetch, so a malformed notes file exits 1 instead of 2 while `gh` is down. A docs item's `pr.json` also carries `ref`, `head`, and `state`, which the `pr` kind's does not.
+- [x] **#54** Run the docs review's end-to-end check again after the close fixes `#improvement` `#approval-queue` `#initiative:docs-system` *(2026-10-26)*
+  The scratch-PR check ran before the close review's fixes (a per-worktree save queue, the queued text as the edit count's base, a locked approve for a missing page). Unit and route tests cover each, and no browser run has seen them. The next real docs review exercises them first.
+  Done: rerun on head 0af23a1 with scratch PR #13 passed (two pages saved back to back, the edit count survived a reload, steps 2 to 8 held).
+- [x] **#53** Refuse a `.blueprint.yaml` in `blueprint` and `anchors` `#improvement` `#approval-queue` `#initiative:docs-system` *(2026-10-25)*
   Geoff rejected the Claude Code blueprint at approval for being `.blueprint.yaml`, a retired format, and `approval-queue blueprint` queued it without a word. `approval-queue anchors` prints nothing for one, so its notes anchor only by quote. Refuse a YAML blueprint in both with the `drafter convert markdown` command to run, matching drafter #115. Record: ~/Projects/initiatives/docs-system/research/2026-10-25-claude-code-page/RESUME.md (friction 11, 16)
-- [ ] **#52** Check a change review's notes before queuing `#improvement` `#approval-queue` `#initiative:docs-system` *(2026-10-25)*
+  Dropped: the docs-as-code cutover (PR #12) removed the kind.
+- [x] **#52** Check a change review's notes before queuing `#improvement` `#approval-queue` `#initiative:docs-system` *(2026-10-25)*
   `approval-queue notes --check <file> <notes.json>` validates the page and blueprint shape only, so a change review's notes, which carry a `file` beside an index anchor, fail it with "unknown field file", and `kind: "change"` fails as an unknown kind. The only check left was queuing the change itself (cairn batch 5, glw907/cairn-cms#142). Accept a change notes file in `--check`, or add `notes --check --change <owner/repo#n>`, and document the change note's shape, which the blueprint skill describes only in one sentence.
+  Dropped: the docs-as-code cutover (PR #12) removed the kind.
 - [ ] **#51** Say when a refusal appears on the rail, and keep a bad `refused.json` from hiding its row `#improvement` `#approval-queue` `#initiative:docs-system` *(2026-10-25)*
   A refusal shows as "Refused" on the 2-second poll after the toast has said the decision went through, and nothing announces it to a screen reader. A `refused.json` that does not parse throws a `SyntaxError` in `listDecided`, which drops the decided row altogether (svelte review of the batch 4 friction pass).
 
