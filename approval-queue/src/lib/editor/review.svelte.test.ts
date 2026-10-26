@@ -48,7 +48,7 @@ const notes: PlacedNote[] = [
 ];
 
 function review(blob: string, save: ReviewInit['save'] = async () => ({ ok: true, blob: 'saved' }), doc = 'Old line.') {
-	return new DocReview({ doc, original: 'Old line.', blob, notes, save, remember: KEY });
+	return new DocReview({ doc, original: 'Old line.', blob, file: 'docs/a.md', notes, save, remember: KEY });
 }
 
 /** What the editor's change hook is handed after an edit. */
@@ -279,7 +279,7 @@ describe('DocReview comment removal and its Undo', () => {
 		view.state = EditorState.create({ doc: 'Added.\n' + doc });
 		desk.toastUndo?.();
 		await r.settled();
-		expect(asked.at(-1)).toMatchObject({ op: 'add', text: 'Second', from: '17', to: '20' });
+		expect(asked.at(-1)).toMatchObject({ op: 'add', text: 'Second', from: '17', to: '20', file: 'docs/a.md', blob: expect.any(String) });
 	});
 
 	it('says so, and posts nothing, when the text a deleted comment was on is gone', async () => {

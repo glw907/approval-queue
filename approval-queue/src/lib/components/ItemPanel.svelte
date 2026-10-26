@@ -467,9 +467,9 @@ for that save first, and closing the tab then asks before leaving.
 	/** The open item's outline, which the rail shows under the item: the pages, each marked when it holds an open call. */
 	const outlineEntries = $derived.by((): OutlineEntry[] =>
 		docReviews.map((r, i) => ({
-			key: r.file ?? String(i),
+			key: r.file,
 			n: String(i + 1),
-			text: r.file?.split('/').pop() ?? '',
+			text: r.file.split('/').pop() ?? r.file,
 			level: 2,
 			href: `#doc-${i}`,
 			cur: currentDoc === i,
@@ -708,7 +708,7 @@ for that save first, and closing the tab then asks before leaving.
 					desk.announce(refusal);
 					return;
 				}
-				if (action.search !== '?/defer' && r.file !== undefined) formData.set(`blob:${r.file}`, r.blob);
+				if (action.search !== '?/defer') formData.set(`blob:${r.file}`, r.blob);
 			}
 			const outcome =
 				action.search === '?/approve'
@@ -943,7 +943,7 @@ for that save first, and closing the tab then asks before leaving.
 				{#if packet}
 					<input type="hidden" name="fingerprint" value={packet.fingerprint} />
 				{:else if docReviews.length}
-					{#each docReviews as docReview (docReview)}{#if docReview.file !== undefined}<input type="hidden" name="blob:{docReview.file}" value={docReview.blob} />{/if}{/each}
+					{#each docReviews as docReview (docReview)}<input type="hidden" name="blob:{docReview.file}" value={docReview.blob} />{/each}
 					{#each docReviews as docReview (docReview)}
 						{#each docReview.calls as call (call.id)}
 							{#if docReview.decided[call.id] !== undefined}

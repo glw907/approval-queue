@@ -54,7 +54,7 @@ export interface ReviewInit {
 	/** Posts one op to the item's `comment` action; without it the comments are read only. */
 	comment?: (fields: Record<string, string>) => Promise<CommentAnswer>;
 	/** The page's path, which its comments name. */
-	file?: string;
+	file: string;
 	/** The id of this document's comment margin, which is the drawer below 1260px. */
 	margin?: string;
 }
@@ -214,7 +214,7 @@ export class DocReview {
 
 	readonly notes: PlacedNote[];
 	readonly original: string;
-	readonly file: string | undefined;
+	readonly file: string;
 	readonly margin: string;
 	/** Whether the text is the reviewer's to edit at all; a change review never is. */
 	readonly editable: boolean;
@@ -741,16 +741,12 @@ export class DocReview {
 	 * answer comes, since the text may have moved meanwhile.
 	 */
 	private async add(text: string, range: Range, fromDraft = false): Promise<string | null> {
-		const fields: Record<string, string> = { op: 'add', text, from: String(range[0]), to: String(range[1]) };
-		if (this.file !== undefined) fields.file = this.file;
-		else {
-			await this.flush();
-			if (this.saveFailed) {
-				desk.flash(this.saveStatus);
-				return null;
-			}
-			fields.blob = this.blob;
+		await this.flush();
+		if (this.saveFailed) {
+			desk.flash(this.saveStatus);
+			return null;
 		}
+		const fields = { op: 'add', text, from: String(range[0]), to: String(range[1]), file: this.file, blob: this.blob };
 		const answer = await this.post(fields);
 		if (!answer.ok) {
 			desk.flash(`The comment was not saved: ${answer.message}`);
