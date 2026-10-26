@@ -64,7 +64,7 @@ On the docs kind, Geoff can select text and comment on it. Each comment is saved
 - `comments`: every comment Geoff left, always present and possibly empty. A comment is `{id, text, anchor}`.
 - `threads`: `[{id, reply}]`, one for each of the author's replies that Geoff answered. A reply he resolved without answering, or left alone, is not listed: it resolves at the decision.
 
-An anchor is `{quote, prefix, suffix, from, to, commit, file?}`. `quote` is the selected text, `prefix` and `suffix` are up to 32 characters on each side of it, and `from` and `to` are its offsets, end exclusive, into the file with its line endings read as LF. `commit` is the worktree `HEAD` when the comment was saved. `file` names the page. An anchor is never moved at decision time. The author re-places it in the current file by the same steps the screen uses:
+An anchor is `{quote, prefix, suffix, from, to, commit, file}`. `quote` is the selected text, `prefix` and `suffix` are up to 32 characters on each side of it, and `from` and `to` are its offsets, end exclusive, into the file with its line endings read as LF. `commit` is the worktree `HEAD` when the comment was saved. `file` names the page. An anchor is never moved at decision time. The author re-places it in the current file by the same steps the screen uses:
 
 1. The offsets, if the text between them is still `quote`.
 2. The one place where `prefix + quote + suffix` occurs.
@@ -74,12 +74,12 @@ An anchor is `{quote, prefix, suffix, from, to, commit, file?}`. `quote` is the 
 The author answers every comment, after a send-back or before acting on an approve. A send-back's answers come back when the author queues the item again with `--replies <replies.json>`, a JSON array of threads:
 
 ```json
-[{"id":"C1","status":"done","text":"<the author's reply>","quote":"<the comment's quote>","anchor":{"quote":"...","prefix":"...","suffix":"...","from":120,"to":168,"commit":"<sha>"}}]
+[{"id":"C1","status":"done","text":"<the author's reply>","quote":"<the comment's quote>","anchor":{"quote":"...","prefix":"...","suffix":"...","from":120,"to":168,"commit":"<sha>","file":"docs/guide/x.md"}}]
 ```
 
 `id`, `quote`, and `anchor` are the comment's own, copied from the decision. `status` is `done` (the author made the change), `kept` (the author left the text as it was, and says why in `text`), or `answered` (the comment was a question, and `text` answers it). Each thread names its page in `anchor.file`, and that page must be one the review carries. The command refuses a file that is not an array of threads in this shape, or that uses an id twice, and accepts an empty array. The screen shows each reply on its comment's card, placed by the steps above, and a thread whose text is gone shows its original quote. Only Geoff resolves a thread. A new comment on the re-queued item takes an id past every thread's, so the ids never collide.
 
-The decision log line of each of these kinds gains `comments`, the number of comments, and `replies`, the number of `threads`.
+The decision log line of a `docs` review gains `comments`, the number of comments, and `replies`, the number of `threads`.
 
 ## After a hand-over: pid, withdraw, defer, collect, and the claim
 
