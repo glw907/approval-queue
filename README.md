@@ -1,11 +1,11 @@
 # approval-queue
 
-Approval Queue: a local SvelteKit app and a command that put a packet (one session hand-over of asks and routine parts) or a single item (a PR, a design, or a triage list) in front of Geoff and print his decision as JSON. The app serves on `127.0.0.1:7907`; set `APPROVAL_QUEUE_PORT` to use another port, which the command passes to the build, so a build serves only the port it was made with.
+Approval Queue: a local SvelteKit app and a command that put a packet (one session hand-over of asks and routine parts) or a single item (a PR, a design, a triage list, or a docs review) in front of Geoff and print his decision as JSON. The app serves on `127.0.0.1:7907`; set `APPROVAL_QUEUE_PORT` to use another port, which the command passes to the build, so a build serves only the port it was made with.
 
 ## Layout
 
 - `approval-queue/` is the SvelteKit app (Svelte 5, DaisyUI, adapter-node).
-- `bin/.local/bin/approval-queue` is the command: `approval-queue <pr|design|triage> <repo> <title> <source>`, `approval-queue packet [--check] <initiative> <file>`, `approval-queue blueprint <worktree> <title> <file> --description <file> [--notes <notes.json>] [--replies <replies.json>]`, `approval-queue page <worktree> <title> <file> --pr <owner/repo#n> --description <file> [--notes <notes.json>] [--replies <replies.json>]`, `approval-queue change <owner/repo#n> <title> [--notes <notes.json>] [--replies <replies.json>]`, `approval-queue withdraw <id>`, `approval-queue pending`, `approval-queue notes --check <file> <notes.json>`, `approval-queue notes <id> <notes.json>`, or `approval-queue collect <id>`. The queuing forms check the item's brief, the packet file, the blueprint, or the page, queues it under `~/.local/state/approval-queue/items/`, starts the app if it isn't up, prints `approval-queue: queued <id> at <url>` on stderr (stdout holds only the decision JSON), opens a tab, and waits for `decision.json`.
+- `bin/.local/bin/approval-queue` is the command: `approval-queue <pr|design|triage> <repo> <title> <source>`, `approval-queue packet [--check] <initiative> <file>`, `approval-queue docs <worktree> <owner/repo#n> <title> --description <file> [--notes <notes.json>] [--replies <replies.json>]`, `approval-queue withdraw <id>`, `approval-queue pending`, `approval-queue notes --check <worktree> <notes.json>`, `approval-queue notes <id> <notes.json>`, or `approval-queue collect <id>`. The queuing forms check the item's brief, the packet file, or the docs review's inputs, queue it under `~/.local/state/approval-queue/items/`, starts the app if it isn't up, prints `approval-queue: queued <id> at <url>` on stderr (stdout holds only the decision JSON), opens a tab, and waits for `decision.json`.
 - `bin/.local/bin/claude-approval-queue-reminder` is the PostToolUse hook script that reminds a session to include a new PR in its hand-over packet.
 - `docs/decision-review/` holds the monthly decision review's prompt and its log.
 - `tests/` holds the shell tests, and `tests/fixtures/e2e-brief.md` is the brief the end-to-end check hands over.
@@ -59,12 +59,12 @@ Every decision also appends one line per part, plus one per ask with no part, to
 
 ### Comments and replies
 
-On the blueprint, page, and change kinds, Geoff can select text and comment on it. Each comment is saved to the item when he presses Save, and it goes to the author with either decision. The text of a box still open is not saved. Both the approve and the send-back JSON carry two fields:
+On the docs kind, Geoff can select text and comment on it. Each comment is saved to the item when he presses Save, and it goes to the author with either decision. The text of a box still open is not saved. Both the approve and the send-back JSON carry two fields:
 
 - `comments`: every comment Geoff left, always present and possibly empty. A comment is `{id, text, anchor}`.
 - `threads`: `[{id, reply}]`, one for each of the author's replies that Geoff answered. A reply he resolved without answering, or left alone, is not listed: it resolves at the decision.
 
-An anchor is `{quote, prefix, suffix, from, to, commit, file?}`. `quote` is the selected text, `prefix` and `suffix` are up to 32 characters on each side of it, and `from` and `to` are its offsets, end exclusive, into the file with its line endings read as LF. `commit` is the commit the file was read at: HEAD when the comment was saved, for a blueprint or page, and the PR head the item was queued at, for a change. `file` names the document on a change and is absent otherwise. An anchor is never moved at decision time. The author re-places it in the current file by the same steps the screen uses:
+An anchor is `{quote, prefix, suffix, from, to, commit, file?}`. `quote` is the selected text, `prefix` and `suffix` are up to 32 characters on each side of it, and `from` and `to` are its offsets, end exclusive, into the file with its line endings read as LF. `commit` is the worktree `HEAD` when the comment was saved. `file` names the page. An anchor is never moved at decision time. The author re-places it in the current file by the same steps the screen uses:
 
 1. The offsets, if the text between them is still `quote`.
 2. The one place where `prefix + quote + suffix` occurs.
@@ -77,9 +77,7 @@ The author answers every comment, after a send-back or before acting on an appro
 [{"id":"C1","status":"done","text":"<the author's reply>","quote":"<the comment's quote>","anchor":{"quote":"...","prefix":"...","suffix":"...","from":120,"to":168,"commit":"<sha>"}}]
 ```
 
-`id`, `quote`, and `anchor` are the comment's own, copied from the decision. `status` is `done` (the author made the change), `kept` (the author left the text as it was, and says why in `text`), or `answered` (the comment was a question, and `text` answers it). Each thread on a change names its document in `anchor.file`, and that document must be one the change carries. The command refuses a file that is not an array of threads in this shape, or that uses an id twice, and accepts an empty array. The screen shows each reply on its comment's card, placed by the steps above, and a thread whose text is gone shows its original quote. Only Geoff resolves a thread. A new comment on the re-queued item takes an id past every thread's, so the ids never collide.
-
-A blueprint approve's answers come back on the page review. When the author queues the drafted page, it passes `page ... --replies <replies.json>` with one thread per blueprint comment. `id` and `quote` are the blueprint comment's. `anchor` is made against the page file at the commit the page is queued from, on the passage where the comment was applied, by the same `quote`, `prefix`, `suffix`, offset, and `commit` rules as above. Each reply then shows level with that passage. A thread whose comment changed nothing on the page anchors at the passage closest to it.
+`id`, `quote`, and `anchor` are the comment's own, copied from the decision. `status` is `done` (the author made the change), `kept` (the author left the text as it was, and says why in `text`), or `answered` (the comment was a question, and `text` answers it). Each thread names its page in `anchor.file`, and that page must be one the review carries. The command refuses a file that is not an array of threads in this shape, or that uses an id twice, and accepts an empty array. The screen shows each reply on its comment's card, placed by the steps above, and a thread whose text is gone shows its original quote. Only Geoff resolves a thread. A new comment on the re-queued item takes an id past every thread's, so the ids never collide.
 
 The decision log line of each of these kinds gains `comments`, the number of comments, and `replies`, the number of `threads`.
 
@@ -103,7 +101,7 @@ Takes a session's queued item off the board. It sends TERM to the waiting comman
 approval-queue collect <id>
 ```
 
-Prints and logs the decision of an item whose queuing command is gone, exactly as the queuing command would have. It waits for `decision.json` when there is none yet (a deferral does not end its wait), and its exit trap never removes `item.json`. If the item is withdrawn while it waits, it prints `approval-queue: <id> was withdrawn; nothing to collect` on stderr, nothing on stdout, and exits 1. The decision is logged once: before it appends, `collect` and the queuing command both look in `decisions.jsonl` for a line whose `packet` is the item's id, under the queue lock, so a second `collect`, or a `collect` racing the queuing command, prints the decision again and logs nothing more. It exits 2 for an id that does not match the id pattern or has no `item.json`, and 1 where the queuing command would (a page that changed or a change whose PR moved, a worktree removed since the queue). A `collect` whose check passes and logs an approve removes `refused.json`.
+Prints and logs the decision of an item whose queuing command is gone, exactly as the queuing command would have. It waits for `decision.json` when there is none yet (a deferral does not end its wait), and its exit trap never removes `item.json`. If the item is withdrawn while it waits, it prints `approval-queue: <id> was withdrawn; nothing to collect` on stderr, nothing on stdout, and exits 1. The decision is logged once: before it appends, `collect` and the queuing command both look in `decisions.jsonl` for a line whose `packet` is the item's id, under the queue lock, so a second `collect`, or a `collect` racing the queuing command, prints the decision again and logs nothing more. It exits 2 for an id that does not match the id pattern or has no `item.json`, and 1 where the queuing command would (a PR that moved, a worktree removed since the queue). A `collect` whose check passes and logs an approve removes `refused.json`.
 
 **pending.**
 
@@ -113,103 +111,122 @@ approval-queue pending
 
 Lists the decisions that wait for a `collect`: one line per item that has an `item.json` and a `decision.json`, no live waiter, and no line in `decisions.jsonl` whose `packet` is the item's id. A line is `<id>`, `<kind>`, `<decision>`, and `<title>` separated by tabs, oldest id first. It prints nothing when none waits, and exits 0 either way. It skips an item with a live waiter (the `pid` and `pidStart` rule above), a logged decision, a `refused.json` (the refusal went to the command that wrote it), a triage item (a triage decision is never logged), and an item with no `pid` (queued before pids existed, so a handled item cannot be told from a waiting one). It takes no arguments; any exits 2.
 
-**The refused state.** A page or change approve the waiting command refuses (see "The page kind" and "The change kind") writes `refused.json` in the item directory before the command exits 1: `{"at": "<ISO 8601 UTC>", "reason": "<sentence>"}`, through a temp file and `mv`. `decision.json` stays, and the app never writes `refused.json`. The rail's "Decided this session" shows the row as "Refused" with the reason under it, and `pending` skips the item. A page's reason is "The page changed on its pull request after it was queued, so the approval wasn't recorded. The session will queue it again."; a change's is "The pull request moved after it was queued, so the approval wasn't recorded. The session will queue it again." A later `collect` that passes the check and logs the approve removes the file.
+**The refused state.** A `docs` approve the waiting command refuses (see "The approve refusal") writes `refused.json` in the item directory before the command exits 1: `{"at": "<ISO 8601 UTC>", "reason": "<sentence>"}`, through a temp file and `mv`. `decision.json` stays, and the app never writes `refused.json`. The rail's "Decided this session" shows the row as "Refused" with the reason under it, and `pending` skips the item. The reason is "The pull request moved after it was queued, so the approval wasn't recorded. The session will queue it again." A later `collect` that passes the check and logs the approve removes the file.
 
 **The board mark.** An item whose pid is recorded but is not the waiting session, and that is not deferred, shows "No session is waiting for this." on the board: its decision is kept, and `collect` prints it.
 
 **The claim.** Only a browser that claimed itself counts as Geoff's open tab. Open `/claim` and press "Claim this browser": the button makes `claim.token` in the state directory on its first press (32 random bytes as hex, mode 0600) and sets the `desk-claim` cookie to it. Loading `/claim` sets nothing, so a link preload or an agent's page load never claims a browser. A poll that carries the cookie touches `tab.seen` and sets the cookie again, which pushes its 400-day lifetime out from the last use; a poll without it touches nothing. So a browser an agent drives never takes a new item's tab, and while no browser is claimed the command opens a tab for each new item, as it does when no tab is live. The token belongs to the state directory, so a throwaway instance never matches the live queue's cookie.
 
-## The blueprint kind
+## The docs kind
 
-A blueprint is a page plan Geoff reads and edits in place. The screen opens the file in an editor with each note from the author or the fact check under the line it is about, and every pause in typing (or Ctrl+S) writes the file and commits it with `Edit <file> in review`.
+A docs review is one pull request that changes documentation pages, read as a code review plus an editor for each page. The screen shows the PR, its code diff, and then each changed page as an editable diff against its merge-base text, with the author's notes and Geoff's comments beside the lines. Geoff edits the pages in place, comments, answers the author's calls, and approves, sends back, or defers.
 
 ```sh
-approval-queue blueprint <worktree> <title> <file> --description <file> [--notes <notes.json>] [--replies <replies.json>]
+approval-queue docs <worktree> <owner/repo#n> <title> --description <file> [--notes <notes.json>] [--replies <replies.json>]
 ```
 
-`<worktree>` is the top of a git worktree, and `<file>` is relative to it. The command refuses a file that is not a regular file committed at HEAD (a directory or a symlink is refused), a file with uncommitted changes, and a notes file that is not a JSON array of notes in the shape `{id, kind, anchor, title, body}`: `kind` is `info`, `decide`, or `question`, `body` is an array of paragraphs, and a note may add `was` and `now`, `sides` (`[{who, text}]`), and `choices` (`[{label, text?, done, edit?}]`). A `decide` or `question` note must carry choices. A note's `anchor` is a non-empty string, or an object `{quote, prefix?, suffix?}` with a non-empty `quote` and string `prefix` and `suffix`; the command refuses an empty quote, a `prefix` or `suffix` that is not a string, and any other key. Each refusal names the problem and exits 2 before anything is queued.
+`<worktree>` is the top of a git worktree of the PR's repository, checked out at the PR's head. Flags may sit anywhere after `docs`. The title follows a packet's rule: sentence case, no closing punctuation, at most 80 characters. The command fetches the PR, queues the item, starts the app if it is down, prints `approval-queue: queued <id> at <url>` on stderr, and waits. On a decision it prints one line of JSON on stdout and exits 0.
 
-A note's `anchor` is a name or a quote.
+A changed page is a file the PR's diff adds, modifies, or renames whose path at the head matches `docs/**/*.md`, `docs/internal/` included. A deleted page shows in the code diff only. The diff runs from GitHub's merge base to the head, so commits the base branch gained after the branch was cut never read as the PR's. A rename reads its old text from the old path. Both commits are read from the worktree with git, and one the worktree lacks is fetched from `origin` first.
 
-A name is a string: `<slug>.heading` for a heading, `<slug>.p<n>` for the nth bullet, numbered step, or `:::row` block under that heading, counting from 0, and `<slug>.p<n>.symptom`, `.cause`, or `.fix` for one part of a row. A name counts items, so it moves when an item above it is added or removed.
+### Refusals
 
-A quote is an object, `{"quote": "...", "prefix": "...", "suffix": "..."}`, with `quote` required and `prefix` and `suffix` optional strings. It can sit on any line, including a line inside a `:::reader` block, and it stays on its text when items move. The screen places it by the steps a comment uses, minus the offsets:
+Each refusal prints one line naming the problem on stderr and exits before anything is queued.
 
-1. The one place where `prefix + quote + suffix` occurs.
-2. The first occurrence of `quote`.
-3. Nowhere: the note shows at the top of the file.
+| Condition | Exit |
+| --- | --- |
+| Wrong argument count, an unknown flag, or a flag with no value (prints the usage) | 2 |
+| `<owner/repo#n>` is not that shape | 2 |
+| `--description` is missing, not a file, or not a background paragraph followed by one or two summary paragraphs, or the title is bad | 2 |
+| `<worktree>` is not a git worktree's top | 2 |
+| The worktree's `origin` is not `<owner/repo>` | 2 |
+| The worktree has uncommitted changes to tracked files | 2 |
+| The worktree's `HEAD` is not the PR's head | 2 |
+| The PR is merged or closed | 2 |
+| The PR changes no `docs/**/*.md` file that exists at its head (queue it with the `pr` form) | 2 |
+| A notes or replies file that is missing, not JSON, or not the shape below; a note or thread whose `file` names no changed page; a quote that matches more than once in its page | 2 |
+| The PR is already in a waiting item (a packet part, a `pr` item, or a `docs` item) | 2 |
+| `gh` cannot read the PR, its diff, or its merge base | 1 |
 
-Quote text that occurs once, or add a `prefix` or `suffix` that settles it. A quote is ambiguous when `prefix + quote + suffix` (a missing one reads as empty) does not occur exactly once and `quote` occurs more than once, overlapping occurrences included; queueing refuses it, naming the note, the quote, and how often it occurs. A quote that occurs nowhere is not refused.
+A draft PR is accepted, and pending checks are not refused.
 
-The slug is the heading's text as the page renders it (inline Markdown dropped, and named character references such as `&amp;` decoded the way cairn's parser decodes them, so `Q &amp; A` is `q--a`), run through `github-slugger`, the rule cairn's pages use for heading ids: lowercased, punctuation deleted, each space turned into a hyphen. An apostrophe is deleted, not turned into a hyphen, so `Set a section's starting state` is `set-a-sections-starting-state`. A heading that repeats an earlier slug takes `-1`, then `-2`, and a blueprint's `page` title takes the first slug only when the blueprint has no H1, since an H1 stands for the title: an H1 that repeats the title has the bare slug, and with no H1 a `##` heading that repeats the title takes `-1`. A note keyed `<slug>-1` to an H1 under the earlier rule still resolves, unless a heading's current slug holds the name. The first version of this tool turned each run of characters outside a-z and 0-9 into one hyphen (`set-a-section-s-starting-state`); notes written with that spelling still resolve, unless a heading's current slug holds the name. A note whose anchor names no place shows at the top of the file.
+### The notes file
 
-`approval-queue anchors <file>` prints a file's heading anchors, one per line, as `<slug>.heading`, a tab, and the heading's text, skipping front matter, code, and directive containers. A file ending in `.blueprint.md` is slugged as a blueprint; any other file as a page. It needs the app's `node_modules` (run `npm ci` in the app directory), which the other subcommands do not.
-
-`--replies` takes the author's answers to the comments of an earlier send-back, in the shape "Comments and replies" sets.
-
-### Checking and replacing notes
-
-`approval-queue notes --check <file> <notes.json>` runs the queue-time checks on one document without queueing anything: the notes shape (as a blueprint or page takes it) and the quote rule above, against `<file>`. Both paths are read as given, relative to the caller's directory. It prints nothing and exits 0 when the notes pass, and exits 2 with the same messages queueing prints when they do not, or when either file is missing. Queueing a blueprint or page runs the same checks, and a change takes no quote anchors, so it skips the quote rule.
-
-`approval-queue notes <id> <notes.json>` replaces a waiting item's notes, keeping its id, URL, `item.json`, and waiter. It prints `replaced the notes of <id> at <url>` on stdout. It exits 2, leaving `notes.json` as it was, for an id that is not an item id, an id with no queued item, a decided item, a kind other than blueprint, page, or change, and notes that fail the item's checks. A blueprint or page is checked against the file as the screen shows it: the worktree's HEAD copy of the queued file, else the queued `doc.md` when the worktree or file is gone. A change is checked against its changed documents: each note's `file` must name one. The item route reads `notes.json` on each load, so a tab already open shows the new notes on its next load.
-
-### The description
-
-`--description <file>` is required on the blueprint and page kinds. The file holds a background paragraph, then one or two summary paragraphs, as the packet's description does, and the screen shows them under the title, ahead of the status line. The title follows a packet's rule: a heading, no closing punctuation, at most 80 characters. A missing flag, a path that is not a file, a description with the wrong number of paragraphs, or a bad title exits 2 before anything is queued. The command saves the file as the item's `description.md`.
-
-A blueprint or page queued again after a send-back is a revision of it. The command looks up its log ref, `<repo>:<file>`, and writes `revises: {item, revision}` into `item.json`, and the screen shows "Revision N". These kinds need no `## What changed` section: their replies already answer each comment.
-
-Approve stays locked until every `decide` and `question` note has a choice. An approve prints:
+A JSON array of notes:
 
 ```json
-{"decision":"approve","file":"<file>","commit":"<HEAD at approval>","blob":"<git rev-parse commit:file>","calls":[{"id":"B3","choice":"<label>"}],"comments":[],"threads":[]}
+{
+  "id": "N1",
+  "file": "docs/guide/water-a-houseplant.md",
+  "kind": "info",
+  "anchor": {"quote": "once a week", "prefix": "Water it ", "suffix": " in summer"},
+  "title": "The interval was corrected",
+  "body": ["The page said every day. `src/watering.ts:12` waters once a week."],
+  "was": "Water it every day in summer",
+  "now": "Water it once a week in summer"
+}
 ```
 
-A send-back prints `{"decision":"reject","note":"<text>","calls":[...],"comments":[...],"threads":[...]}`, where `calls` holds the calls Geoff made before sending it back; the screen's button reads "Send back with note". Either way the decision log gains one line with `"kind": "blueprint"`, `"ref": "<repo>:<file>"`, the blob and commit, the `comments` and `replies` counts, and `waived`: each `decide` note answered with a choice that leaves the line as it was, with that choice's `done` text as the reason.
+- `id` is a non-empty string, unique in the file. `file` is a changed page's path. `kind` is `info`, `decide`, or `question`.
+- `anchor` is an object with a non-empty `quote`, optional string `prefix` and `suffix`, and no other key. The screen places it at the one place `prefix + quote + suffix` occurs, else at the first occurrence of `quote`, else at the top of the page. A quote that matches more than once with its context (a missing `prefix` or `suffix` reads as empty) is refused, naming the note, the quote, and the count. A quote that matches nowhere is not refused.
+- `title` is a string, and `body` is an array of paragraph strings.
+- A note may add `was` and `now` together, `sides` (`[{who, text}]`), and `choices` (`[{label, done}]`, where `done` says what the session will do on that choice). A `decide` or `question` note must carry choices, and approve stays locked until each has one.
+
+`approval-queue notes --check <worktree> <notes.json>` runs the queue-time checks without queueing, reading each note's page from the worktree's `HEAD`. It prints nothing and exits 0 when the notes pass, and exits 2 with the queue-time messages when they do not, or when a path is missing.
+
+`approval-queue notes <id> <notes.json>` replaces a waiting `docs` item's notes, keeping its id, URL, `item.json`, and waiter, and prints `replaced the notes of <id> at <url>`. It checks the notes against the pages as the screen shows them: the worktree's `HEAD` copy, else the copy queued. It exits 2, leaving `notes.json` as it was, for an id that is not an item id, an id with no queued item, a decided item, an item of another kind, and notes that fail the checks. The item route reads `notes.json` on each load, so an open tab shows the new notes on its next load.
+
+The quote check is `node approval-queue/src/check-notes.ts <dir> <notes.json>`: each note's `file` resolves under `<dir>`. It exits 0 with no output when every quote is unambiguous, 2 with one line per defect when not, and 1 when a file cannot be read.
+
+### The replies file
+
+`--replies` takes the author's answers to the comments of a send-back, in the shape "Comments and replies" sets. `anchor.file` must name a changed page. An empty array is accepted.
+
+### The screen
+
+The item opens with the title and description, then the PR (number, branch, checks) and its body, then the code diff (the PR's diff without the changed pages), then each changed page. Every pause in typing (or Ctrl+S) writes that page in the worktree and commits it alone with `Edit <path> in review`. A save is refused with 409 when the file's blob at `HEAD` is not the blob the screen holds. Geoff selects text to comment, and each comment saves on Save. Approve stays locked until every call is answered and every page is saved. A page whose worktree or file is gone shows the queued copy read-only.
+
+### The decision
+
+An approve prints, keys in this order:
+
+```json
+{"decision":"approve","pr":"<owner/repo#n>","head":"<PR head, unmoved since the queue>","commit":"<worktree HEAD at approval>","calls":[{"id":"N2","choice":"Apply the fix"}],"comments":[],"threads":[]}
+```
+
+`commit` equals `head` when Geoff made no edit, and is a descendant of it holding only his `Edit ... in review` commits when he did. A send-back prints `{"decision":"reject","note":"<text>","pr":...,"head":...,"commit":...,"calls":[...],"comments":[...],"threads":[...]}`, where `head` is the PR head as queued, `commit` is the worktree `HEAD` at the send-back, and `calls` holds only the calls Geoff answered; the screen's button reads "Send back with note". A defer prints `{"decision":"defer","id":"<id>"}`.
+
+Every approve and send-back appends one line to `decisions.jsonl`:
+
+```json
+{"time":"<ISO 8601 UTC>","packet":"<id>","initiative":null,"ref":"<owner/repo#n>","kind":"docs","lane":"single","verdict":"approve","head":"<sha>","commit":"<sha>","calls":[],"comments":0,"replies":0}
+```
+
+A send-back's line has `"verdict":"reject"`.
+
+### The approve refusal
+
+At an approve the command reads the PR's head. If it is not the head the item was queued at, the approve is refused: nothing is logged, `refused.json` is written (see "The refused state"), the rail shows the row as "Refused", and the command exits 1 with a line naming the PR and both heads. The session pulls the new head into the worktree and queues the item again. A head `gh` cannot read exits 1 with nothing logged and no `refused.json`, so the item stays in `pending` for a `collect` to retry. The app writes `decision.json` for an approve only when every page is committed and clean in the worktree, each page's posted blob is its blob at `HEAD`, and every call is answered.
+
+### Revisions
+
+A `docs` item queued after a send-back of the same PR is a revision. The command looks up the PR's latest counting reject line for `{"ref": "<owner/repo#n>", "kind": "docs"}` and writes `revises: {item, revision, commit}` into `item.json`, where `commit` is that line's. It saves what changed since as `since.patch` (`git diff <commit> HEAD`) when that commit is an ancestor of `HEAD`, else `since.json` as `{"gone": true}`. The screen shows "Revision N" and a "Since you sent it back" diff. A `docs` item needs no `## What changed` section: the replies answer each comment, and the description says what changed.
 
 ### The amend review
 
-A blueprint or page queued after an approve of the same file, and of the same kind, is an amend review. The command reads `decisions.jsonl` for the latest approve whose `kind` is the item's kind and whose `ref` is `<repo>:<file>`. When the worktree still holds that approve's blob, the command saves its text as `approved.md` in the item directory and writes `amends: <blob>` into `item.json`; a blob the worktree lacks queues a full review. The screen then shows what changed since the approved text, with the unchanged runs folded away. An amend can also be a revision, and both apply. Both the approve and the send-back JSON carry `"amends": "<blob>"` for an amend review. The log lines do not change.
+A `docs` item queued when the PR's latest `docs` line in `decisions.jsonl` is an approve (CI went red after the approve, say, and the session fixed forward) is an amend review. The command reads that line's `commit`, writes `amends: {"commit": "<sha>"}` into `item.json`, and saves `approved.patch` (`git diff <commit> HEAD`) when that commit is an ancestor of `HEAD`, else `approved.json` as `{"gone": true}`. The screen shows a "Since you approved" diff above the pages. An amend is never also a revision: the latest line decides.
 
-### approved
+### The item directory
 
-```sh
-approval-queue approved [--kind blueprint|page] <file> <blob>
-```
-
-Exits 0 when the decision log under `$XDG_STATE_HOME/approval-queue/` holds an approve of `<file>` (matched on the part of the ref after the repo) at `<blob>`, and 1 otherwise. Without `--kind` it matches only `"kind": "blueprint"` lines, which is the check a tool runs before it drafts from a blueprint; `--kind page` matches only page lines. A tool that builds from a document runs it against `git rev-parse HEAD:<file>`, so it builds only from the version Geoff approved.
-
-## The page kind
-
-A page is a drafted page Geoff reads and edits in place, riding with a pull request. The screen is the blueprint screen with the PR and its head shown, and the same editor, notes, and save-by-commit.
-
-```sh
-approval-queue page <worktree> <title> <file> --pr <owner/repo#n> --description <file> [--notes <notes.json>] [--replies <replies.json>]
-```
-
-The refusals and `--replies` are the blueprint's, plus a `--pr` that is not `owner/repo#n`; a PR whose head `gh pr view <n> -R <owner/repo> --json headRefOid` cannot read exits 1. A page's notes anchor by a name or a quote, as a blueprint's do (the slug rule, the alias, the quote steps, and `approval-queue anchors` are the same, except that a page's slugs take no title seed). A name is `<slug>.heading` for a heading or `<slug>.p<n>` for the nth paragraph, list item, or table under that heading, counting from 0 (a list item runs through its indented continuation; front matter, blank lines, code blocks, directive containers, and rules count for nothing). An approve prints the PR head read at approval:
+`item.json` is written last:
 
 ```json
-{"decision":"approve","file":"<file>","commit":"<HEAD at approval>","blob":"<blob>","pr":"<owner/repo#n>","head":"<PR head at approval>","calls":[{"id":"D1","choice":"<label>"}],"comments":[],"threads":[]}
+{"id":"<id>","kind":"docs","repo":"<owner/repo>","number":150,"title":"<title>","headline":"<title>","created":"<ISO 8601 UTC>","worktree":"/abs/path","head":"<sha>","base":"<merge-base sha>","pid":123,"pidStart":456}
 ```
 
-A send-back prints the blueprint's send-back JSON. The log line is the blueprint's with `"kind": "page"`, the `pr`, and, on an approve, the `head`. At approval the command reads the PR head, then the page's blob at that head (`gh api repos/<owner/repo>/contents/<path>?ref=<head>`) and compares it with the blob queued. Another page's commit moves the head and leaves the blob, so the approve passes and prints and logs the head just read. A blob that differs, or a page gone at the head (a 404), refuses: nothing is logged, `refused.json` is written (see "The refused state"), and the command exits 1 with a line naming the file and the PR. A head or blob that `gh` cannot read for any other reason exits 1 with nothing logged and no `refused.json`, so the item stays in `pending` for a `collect` to retry. A `collect` of an unlogged page approve runs the same check.
+The directory also holds `description.md`, `body.md` (the PR body), `pr.json`, `diff.patch` (the whole PR diff at `head`), `pages.json` (`[{"path": "docs/x.md", "from": "docs/old.md"}]`, `from` only on a rename), `pages/<k>/base.md` (the merge-base text, empty for a new page) and `pages/<k>/queued.md` (the text at `head`), `notes.json`, and, as the item calls for them, `replies.json`, `since.patch` or `since.json`, and `approved.patch` or `approved.json`. The app writes `comments.json`, `decision.json`, and `deferred.json`. The command writes `refused.json`.
 
-## The change kind
-
-A change is one review of a code PR that also edits blueprints and pages. The screen shows each changed document read-only as it is at the PR head, with its notes inline, the lines the change edited marked, and its own diff behind a row; the rest of the PR shows as the PR screen's Files row. Geoff decides the PR, and its author makes any edits.
-
-```sh
-approval-queue change <owner/repo#n> <title> [--notes <notes.json>] [--replies <replies.json>]
-```
-
-A changed file is a document when it is `blueprints/**/*.blueprint.md`, `.yaml`, or `.yml`, or a `.md` or `.mdx` file under `docs/` outside `docs/internal/`; a PR with none is refused (queue it with `pr`). The notes take the blueprint's shape plus a required `file` naming the document each anchors into, and a choice may not carry `text` or `edit`. A change note's `anchor` is a string only; a quote object is refused. A PR already waiting in the queue is refused. `--replies` takes the blueprint's shape, and each thread's `anchor.file` must name a document the change carries. An approve prints:
-
-```json
-{"decision":"approve","pr":"<owner/repo#n>","head":"<PR head at approval>","calls":[{"id":"Q1","choice":"<label>"}],"comments":[],"threads":[]}
-```
-
-A send-back prints the blueprint's send-back JSON. The log line has `"kind": "change"`, `"ref": "<owner/repo#n>"`, the `head` (at approval, or as queued for a send-back), the `comments` and `replies` counts, and, on an approve, the `calls`.
+Decided items of any other kind stay on disk, and the app neither lists nor serves them: `/item/<id>` answers 404, and `pending` and `collect` skip them.
 
 ## Gate
 

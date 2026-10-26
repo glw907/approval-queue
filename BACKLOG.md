@@ -12,10 +12,12 @@
 
 ## Medium
 
-- [ ] **#53** Refuse a `.blueprint.yaml` in `blueprint` and `anchors` `#improvement` `#approval-queue` `#initiative:docs-system` *(2026-10-25)*
+- [x] **#53** Refuse a `.blueprint.yaml` in `blueprint` and `anchors` `#improvement` `#approval-queue` `#initiative:docs-system` *(2026-10-25)*
   Geoff rejected the Claude Code blueprint at approval for being `.blueprint.yaml`, a retired format, and `approval-queue blueprint` queued it without a word. `approval-queue anchors` prints nothing for one, so its notes anchor only by quote. Refuse a YAML blueprint in both with the `drafter convert markdown` command to run, matching drafter #115. Record: ~/Projects/initiatives/docs-system/research/2026-10-25-claude-code-page/RESUME.md (friction 11, 16)
-- [ ] **#52** Check a change review's notes before queuing `#improvement` `#approval-queue` `#initiative:docs-system` *(2026-10-25)*
+  Dropped: the docs-as-code cutover (PR #PRNUM) removed the kind.
+- [x] **#52** Check a change review's notes before queuing `#improvement` `#approval-queue` `#initiative:docs-system` *(2026-10-25)*
   `approval-queue notes --check <file> <notes.json>` validates the page and blueprint shape only, so a change review's notes, which carry a `file` beside an index anchor, fail it with "unknown field file", and `kind: "change"` fails as an unknown kind. The only check left was queuing the change itself (cairn batch 5, glw907/cairn-cms#142). Accept a change notes file in `--check`, or add `notes --check --change <owner/repo#n>`, and document the change note's shape, which the blueprint skill describes only in one sentence.
+  Dropped: the docs-as-code cutover (PR #PRNUM) removed the kind.
 - [ ] **#51** Say when a refusal appears on the rail, and keep a bad `refused.json` from hiding its row `#improvement` `#approval-queue` `#initiative:docs-system` *(2026-10-25)*
   A refusal shows as "Refused" on the 2-second poll after the toast has said the decision went through, and nothing announces it to a screen reader. A `refused.json` that does not parse throws a `SyntaxError` in `listDecided`, which drops the decided row altogether (svelte review of the batch 4 friction pass).
 
