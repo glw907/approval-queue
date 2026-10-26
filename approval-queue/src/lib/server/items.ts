@@ -99,6 +99,8 @@ export interface DocsPage {
 	from?: string;
 	/** The page at the merge base, empty for a new page, which the review marks changed lines against. */
 	base: string;
+	/** The page as it was queued, which the review counts its edits against. */
+	queued: string;
 	/** The page as committed at the worktree's HEAD now, with its blob and that commit. */
 	doc: string;
 	blob: string;
@@ -381,12 +383,13 @@ async function readDocs(dir: string, meta: ItemMeta): Promise<ItemContent> {
 	for (const [k, { path, from }] of listed.entries()) {
 		const at = join(dir, 'pages', String(k));
 		const base = lf(await readFile(join(at, 'base.md'), 'utf8'));
-		const page = { path, ...(from && { from }), base };
+		const queued = lf(await readFile(join(at, 'queued.md'), 'utf8'));
+		const page = { path, ...(from && { from }), base, queued };
 		try {
 			const now = await committed(worktree, path);
 			pages.push({ ...page, doc: lf(now.text), blob: now.blob, commit: now.commit, missing: false });
 		} catch {
-			pages.push({ ...page, doc: lf(await readFile(join(at, 'queued.md'), 'utf8')), blob: '', commit: '', missing: true });
+			pages.push({ ...page, doc: queued, blob: '', commit: '', missing: true });
 		}
 	}
 	const since = meta.revises && (await readStoredPatch(dir, 'since'));

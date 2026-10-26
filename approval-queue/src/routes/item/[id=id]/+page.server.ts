@@ -9,7 +9,7 @@ import { checksSummary, reviewSection, reviewVerdict, technicalNotes, withoutBri
 import { nextItem } from '#lib/queue.ts';
 import { anchorAt, place, type Anchor, type Comment, type Thread } from '#lib/editor/comments.ts';
 import { placeNotes } from '#lib/editor/notes.ts';
-import { buildDocsApprove, commitText, isClean, queued, queuedEach, queuedItem, sentBackCalls } from '#lib/server/docs.ts';
+import { buildDocsApprove, commitText, isClean, queued, queuedItem, sentBackCalls } from '#lib/server/docs.ts';
 import { buildApprove, buildSentBackCalls, isIrreversible, packetFingerprint } from '#lib/server/packet-decision.ts';
 import {
 	carried,
@@ -269,6 +269,7 @@ async function loadItem(params: { id: string }) {
 				...(page.from && { from: page.from }),
 				doc: page.doc,
 				base: page.base,
+				queued: page.queued,
 				blob: page.blob,
 				missing: page.missing,
 				// Anchors resolve against the page as it is now, so a note follows a line an earlier save moved.
@@ -366,22 +367,18 @@ type Docs = Extract<ItemContent, { kind: 'docs' }>;
 
 /**
  * Runs `step` on a docs item read again behind every save and comment already queued, on the item's
- * queue and each page's, so the HEAD it reads is the one a decision names and the comments it reads
+ * queue and its worktree's, so the HEAD it reads is the one a decision names and the comments it reads
  * are all of them: a later save or comment answers 404.
  */
 function decidingDocs<T>(id: string, found: Docs, step: (content: Docs) => Promise<T>) {
 	return queuedItem(itemDir(id), () =>
-		queuedEach(
-			found.worktree,
-			found.pages.map((page) => page.path),
-			async () => {
-				const now = await readItem(APPROVAL_QUEUE_STATE, id);
-				if (!now) error(404, 'Not found');
-				if (now.decided) return fail(409, ALREADY_DECIDED);
-				if (now.content.kind !== 'docs') return fail(400, { message: 'Not a docs item' });
-				return step(now.content);
-			}
-		)
+		queued(found.worktree, async () => {
+			const now = await readItem(APPROVAL_QUEUE_STATE, id);
+			if (!now) error(404, 'Not found');
+			if (now.decided) return fail(409, ALREADY_DECIDED);
+			if (now.content.kind !== 'docs') return fail(400, { message: 'Not a docs item' });
+			return step(now.content);
+		})
 	);
 }
 
@@ -494,7 +491,7 @@ export const actions: Actions = {
 		if (!page) return fail(400, { message: 'Name a page this review carries' });
 		if (page.missing) return fail(409, { message: `${file} is no longer committed in its worktree` });
 		const { worktree } = content;
-		const saved = await queued(worktree, file, async () => {
+		const saved = await queued(worktree, async () => {
 			// An approve queued ahead of this save has decided the item, and the page stays as it approved it.
 			await readWaiting(params.id);
 			return commitText(worktree, file, text, blob);
@@ -533,7 +530,7 @@ export const actions: Actions = {
 			await writeComments(APPROVAL_QUEUE_STATE, params.id, applied.store);
 			return { id: applied.id, comments: applied.store.comments, threads: applied.store.threads };
 		};
-		return queuedItem(itemDir(params.id), () => (op === 'add' ? queued(content.worktree, field('file'), step) : step()));
+		return queuedItem(itemDir(params.id), () => (op === 'add' ? queued(content.worktree, step) : step()));
 	},
 	submit: async ({ params, request }) => {
 		const item = await readWaiting(params.id);

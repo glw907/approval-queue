@@ -40,8 +40,9 @@ export async function isClean(worktree: string, file: string): Promise<boolean> 
 
 export type Saved = { ok: true; blob: string; commit: string } | { ok: false; status: 409 | 500; message: string };
 
-// One writer at a time per file, so two quick saves never race on the worktree's index lock and an
-// approve never reads HEAD between a save's write and its commit.
+// One writer at a time per worktree: every save runs `git commit`, which takes the worktree's single
+// index lock and fails rather than waits, so saves to two pages of one worktree must not overlap. It
+// also keeps an approve from reading HEAD between a save's write and its commit.
 const fileQueues = new Map<string, Promise<unknown>>();
 // One writer at a time per item, so a comment never lands in `comments.json` after a decision has read it.
 const itemQueues = new Map<string, Promise<unknown>>();
@@ -56,21 +57,12 @@ function serial<T>(queues: Map<string, Promise<unknown>>, key: string, step: () 
 	return run;
 }
 
-/** Runs `step` after every earlier step on the same file has finished. */
-export const queued = <T>(worktree: string, file: string, step: () => Promise<T>): Promise<T> =>
-	serial(fileQueues, join(worktree, file), step);
-
-/**
- * Runs `step` once every earlier step on each of the files has finished, for a decision that reads
- * every page. The queues are taken in the order given, the item's page order, so two decisions
- * never wait on each other.
- */
-export const queuedEach = <T>(worktree: string, files: readonly string[], step: () => Promise<T>): Promise<T> =>
-	files.reduceRight((inner, file) => () => queued(worktree, file, inner), step)();
+/** Runs `step` after every earlier step on the same worktree has finished. */
+export const queued = <T>(worktree: string, step: () => Promise<T>): Promise<T> => serial(fileQueues, worktree, step);
 
 /**
  * Runs `step` after every earlier step on the same item directory has finished. A step that also
- * needs the file's queue takes it inside this one, never the other way round, so the two never
+ * needs the worktree's queue takes it inside this one, never the other way round, so the two never
  * wait on each other.
  */
 export const queuedItem = <T>(dir: string, step: () => Promise<T>): Promise<T> => serial(itemQueues, dir, step);
@@ -79,7 +71,7 @@ export const queuedItem = <T>(dir: string, step: () => Promise<T>): Promise<T> =
  * Writes the text to the file and commits it, when the file at HEAD is still the blob the text was
  * edited from. A different blob means the file changed outside the review, so the save is refused
  * (409) rather than overwriting it. Text that matches HEAD commits nothing. The caller holds the
- * file's queue, through `queued`.
+ * worktree's queue, through `queued`.
  */
 export async function commitText(worktree: string, file: string, text: string, base: string): Promise<Saved> {
 	let now: Committed;
@@ -104,9 +96,9 @@ export async function commitText(worktree: string, file: string, text: string, b
 	return { ok: true, blob: after.blob, commit: after.commit };
 }
 
-/** Saves one edit on the file's queue. */
+/** Saves one edit on the worktree's queue. */
 export const saveFile = (worktree: string, file: string, text: string, base: string): Promise<Saved> =>
-	queued(worktree, file, () => commitText(worktree, file, text, base));
+	queued(worktree, () => commitText(worktree, file, text, base));
 
 export type DocsApprove = { ok: true; decision: Decision } | { ok: false; message: string };
 

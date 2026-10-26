@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DOCS_NOTES, git, REPOT, seedDocsRepo, WATER, WATER_HEAD } from '#lib/fixtures/seed-docs.ts';
 import type { Note } from '#lib/editor/notes.ts';
-import { buildDocsApprove, committed, isClean, queuedEach, saveFile, sentBackCalls } from './docs.ts';
+import { buildDocsApprove, committed, isClean, queued, saveFile, sentBackCalls } from './docs.ts';
 
 const NOTES = JSON.parse(DOCS_NOTES) as Note[];
 
@@ -70,12 +70,24 @@ describe('saveFile', () => {
 	});
 });
 
-describe('queuedEach', () => {
-	it('holds every page’s queue, so a save on any of them waits for the step', async () => {
+describe('queued', () => {
+	it('commits two pages saved at once, without meeting the index lock', async () => {
+		const water = `${WATER_HEAD}w\n`;
+		const repot = `${await readFile(join(repo, REPOT), 'utf8')}r\n`;
+		const [a, b] = await Promise.all([
+			saveFile(repo, WATER, water, blobs.water),
+			saveFile(repo, REPOT, repot, blobs.repot)
+		]);
+		expect(a.ok).toBe(true);
+		expect(b.ok).toBe(true);
+		expect(git(repo, 'log', '-2', '--format=%s').split('\n').sort()).toEqual([`Edit ${REPOT} in review`, `Edit ${WATER} in review`]);
+	});
+
+	it('holds the worktree’s queue, so a save on any page waits for the step', async () => {
 		const order: string[] = [];
 		let open!: () => void;
 		const gate = new Promise<void>((resolve) => (open = resolve));
-		const step = queuedEach(repo, [WATER, REPOT], async () => {
+		const step = queued(repo, async () => {
 			order.push('start');
 			await gate;
 			order.push('end');
