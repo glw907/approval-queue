@@ -80,19 +80,22 @@ since its decision bar and outline read them too.
 
 {@render place()}
 
-{#each data.pages as page, i (page.path)}
+{#each reviews as review, i (review.file)}
+	{@const page = data.pages.find((p) => p.path === review.file)!}
 	<section class="sec" id="doc-{i}" aria-labelledby="doc-{i}-h">
 		<h2 id="doc-{i}-h">{name(page.path)}</h2>
 		<p class="sl"><code>{page.path}</code>{#if page.from}, renamed from <code>{page.from}</code>{/if}</p>
-		{#if page.missing}
-			<div role="status" class="alert alert-warning alert-soft">
+		{#if !review.editable && !data.decided}
+			<div class="alert alert-warning">
 				<span>The queue can no longer read <code>{page.path}</code> from the worktree’s latest commit. The editor shows the copy that was queued, and you can’t edit or comment on it. Send the review back to have the author restore it.</span>
 			</div>
+		{:else if !review.editable}
+			<p class="bg bg-flat">This page is no longer in the worktree.</p>
 		{/if}
 		<DocEditor
-			review={reviews[i]}
+			{review}
 			file={name(page.path)}
-			label="Page {name(page.path)}, markdown"
+			label="Page {name(page.path)}, markdown{review.editable ? '' : ', read only'}"
 			kindWord="page"
 			base={page.base}
 			level={4}

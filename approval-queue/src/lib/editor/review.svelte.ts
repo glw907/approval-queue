@@ -47,7 +47,7 @@ export interface ReviewInit {
 	 * for a decided item, whose choices come from its decision.
 	 */
 	remember?: string;
-	/** The text takes no edits at all, as in a change review: a choice records its answer only. */
+	/** The text takes no edits at all, as for a page missing from the worktree: a choice records its answer only. */
 	readonly?: boolean;
 	comments?: PlacedComment[];
 	threads?: PlacedThread[];
@@ -216,7 +216,7 @@ export class DocReview {
 	readonly original: string;
 	readonly file: string;
 	readonly margin: string;
-	/** Whether the text is the reviewer's to edit at all; a change review never is. */
+	/** Whether the text is the reviewer's to edit at all; a page missing from the worktree never is. */
 	readonly editable: boolean;
 	private readonly originalLines: Set<string>;
 	private readonly saver: ReviewInit['save'];
@@ -364,7 +364,7 @@ export class DocReview {
 		return this.view?.hasFocus ?? false;
 	}
 
-	/** Sets whether text edits are taken; a review that takes none, as a change's, stays so. */
+	/** Sets whether text edits are taken; a review that takes none, as a missing page's, stays so. */
 	setReadonly(readonly: boolean) {
 		this.readonly = !this.editable || readonly;
 	}

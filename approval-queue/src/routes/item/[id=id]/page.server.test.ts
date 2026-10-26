@@ -792,6 +792,15 @@ describe('a docs review', () => {
 		expect(git(repo, 'rev-list', '--count', 'HEAD')).toBe('3');
 	});
 
+	it('load returns the queued text beside a saved edit, so a reload still counts the edit', async () => {
+		const text = WATER_HEAD.replace('top inch', 'top two inches');
+		await save(WATER, text, blobs.water);
+		const data = await loaded();
+		const water = data.pages.find((p: { path: string }) => p.path === WATER);
+		expect(water.doc).toBe(text);
+		expect(water.queued).toBe(WATER_HEAD);
+	});
+
 	it('save is checked against the blob of the page it names, not another', async () => {
 		expect(await save(WATER, `${WATER_HEAD}x`, blobs.repot)).toMatchObject({ status: 409 });
 		expect(await save(REPOT, `${REPOT_HEAD}x`, blobs.repot)).toMatchObject({ blob: expect.any(String) });
@@ -889,7 +898,7 @@ describe('a docs review', () => {
 	it('an approve waits behind a save on any page’s queue, and a save queued after it commits nothing', async () => {
 		// A step held open on the second page's queue stands in for a save mid-commit, so the order is fixed.
 		let release = () => {};
-		const held = queued(repo, REPOT, () => new Promise<void>((r) => (release = r)));
+		const held = queued(repo, () => new Promise<void>((r) => (release = r)));
 		const settle = (p: Promise<unknown>) => {
 			const out = { done: false };
 			p.then(
@@ -1041,7 +1050,7 @@ describe('a docs review', () => {
 			let release = () => {};
 			let held: Promise<void>;
 			beforeEach(() => {
-				held = queued(repo, WATER, () => new Promise<void>((r) => (release = r)));
+				held = queued(repo, () => new Promise<void>((r) => (release = r)));
 			});
 			const tick = () => new Promise((r) => setTimeout(r, 50));
 

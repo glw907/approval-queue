@@ -260,7 +260,7 @@ for that save first, and closing the tab then asks before leaving.
 					(page) =>
 						new DocReview({
 							doc: page.doc,
-							original: page.doc,
+							original: page.queued,
 							blob: page.blob,
 							notes: page.notes,
 							save: (text, blob) => savePage(page.path, text, blob),
@@ -281,8 +281,10 @@ for that save first, and closing the tab then asks before leaving.
 	const decidedCount = $derived(docReviews.reduce((n, r) => n + Object.keys(r.decided).length, 0));
 	const changedLines = $derived(docReviews.reduce((n, r) => n + r.changedLines, 0));
 	const frozen = $derived(isDecided);
+	const pageGone = $derived(docReviews.some((r) => !r.editable));
+	const pageWord = $derived(docReviews.length === 1 ? 'page' : 'pages');
 
-	// A held or decided review takes no choices and no text edits.
+	// A decided review takes no choices and no text edits.
 	$effect(() => {
 		for (const r of docReviews) {
 			r.locked = frozen;
@@ -391,7 +393,7 @@ for that save first, and closing the tab then asks before leaving.
 			desk.announce(UNDONE);
 			if (restored.outcome === 'reject') {
 				// Only matters when openNote refuses: the restored note is the reader's own text unless it is still the draft.
-				drafted = restoredDrafted(noteText, sendBackDraft(openCalls, changedLines, 'page'));
+				drafted = restoredDrafted(noteText, sendBackDraft(openCalls, changedLines, pageWord));
 				void openNote();
 			}
 			else {
@@ -516,7 +518,7 @@ for that save first, and closing the tab then asks before leaving.
 
 	// Its own effect: a pick must not re-run the handler registration.
 	$effect(() => {
-		desk.approveLocked = data.kind === 'packet' ? openAsks.length > 0 : docReviews.length ? openCalls.length > 0 : decided.locked;
+		desk.approveLocked = data.kind === 'packet' ? openAsks.length > 0 : docReviews.length ? openCalls.length > 0 || pageGone : decided.locked;
 		return () => (desk.approveLocked = false);
 	});
 
@@ -613,7 +615,7 @@ for that save first, and closing the tab then asks before leaving.
 	/** Approve on a docs review: a locked press moves to the next open call; otherwise the last edit saves first. */
 	async function approveDoc() {
 		if (refuseOpenBox()) return;
-		if (docReviews.some((r) => !r.editable)) {
+		if (pageGone) {
 			desk.announce('Not approved: a page is no longer committed in its worktree. Send the review back instead.');
 			return;
 		}
@@ -639,7 +641,7 @@ for that save first, and closing the tab then asks before leaving.
 	async function openNote() {
 		if (refuseOpenBox()) return;
 		if (docReviews.length) {
-			const fresh = sendBackDraft(openCalls, changedLines, 'page');
+			const fresh = sendBackDraft(openCalls, changedLines, pageWord);
 			noteText = noteStart(noteText, drafted, fresh);
 			drafted = fresh;
 		}
@@ -1012,7 +1014,11 @@ for that save first, and closing the tab then asks before leaving.
 							<p class="s2">{packetSub}</p>
 						{:else if docReviews.length}
 							<p class="s1" role="status">
-								{openCalls.length ? `Make ${plural(openCalls.length, 'call')} to approve` : 'Ready to approve'}
+								{pageGone
+									? 'A page is gone from the worktree. Send it back'
+									: openCalls.length
+										? `Make ${plural(openCalls.length, 'call')} to approve`
+										: 'Ready to approve'}
 							</p>
 							<p class="s2">
 								{capital(
@@ -1068,13 +1074,13 @@ for that save first, and closing the tab then asks before leaving.
 								formaction="?/approve"
 								bind:this={approveButton}
 								aria-describedby="bar-state"
-								aria-disabled={openCalls.length > 0}
+								aria-disabled={openCalls.length > 0 || pageGone}
 								onclick={(e) => {
 									e.preventDefault();
 									approveDoc();
 								}}
 							>
-								Approve the pages <kbd aria-hidden="true">Ctrl</kbd><kbd aria-hidden="true">Enter</kbd>
+								Approve the {pageWord} <kbd aria-hidden="true">Ctrl</kbd><kbd aria-hidden="true">Enter</kbd>
 							</button>
 						{:else if data.kind === 'triage'}
 							<button class="btn btn-primary" aria-keyshortcuts="Control+Enter Meta+Enter" bind:this={submitButton}>
