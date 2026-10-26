@@ -6,3 +6,4 @@ Repot the sample plant every spring. Choose a pot one size larger.
 
 Trim dead leaves with clean scissors. Wipe the blades between plants.
  Edited.
+A line from the other clone.
