@@ -20,7 +20,7 @@ import {
 	type ViewUpdate
 } from '@codemirror/view';
 import { tags } from '@lezer/highlight';
-import { fenceScan, fenceTokens, findInlineDirectives, frontmatterSpan, type FenceScan } from './directives.ts';
+import { fenceScan, fenceTokens, frontmatterSpan, type FenceScan } from './directives.ts';
 import { WIDE_MARGIN } from './margin.ts';
 import type { PlacedNote, Range } from './notes.ts';
 
@@ -232,9 +232,9 @@ const line = (cls: string) => Decoration.line({ class: cls });
 const mark = (cls: string) => Decoration.mark({ class: cls });
 
 /**
- * The source marking: front matter, directive fences and their content, headings, the italic
- * purpose line, inline directives, code spans, and links. The fence scan needs the whole document,
- * since a line's container can open far above it, so it is cached and rerun on a change only.
+ * The source marking: front matter, directive fences and their content, headings, code spans, and
+ * links. The fence scan needs the whole document, since a line's container can open far above it,
+ * so it is cached and rerun on a change only.
  */
 function sourcePlugin(original: string) {
 	const originalLines = new Set(original.split('\n'));
@@ -275,8 +275,7 @@ function sourcePlugin(original: string) {
 								classes.push(`cm-l-h${h[1].length}`);
 								marks.push([l.from, l.from + h[0].length, 'cm-mark']);
 								marks.push([l.from + h[0].length, l.to, `cm-h cm-h${h[1].length}`]);
-							} else if (/^\*[^*].*\*$/.test(tx)) marks.push([l.from, l.to, 'cm-purpose']);
-							for (const r of findInlineDirectives(tx)) marks.push([l.from + r.from, l.from + r.to, 'cm-fact']);
+							}
 							for (const m of tx.matchAll(/`[^`]+`/g)) marks.push([l.from + m.index, l.from + m.index + m[0].length, 'cm-code']);
 							for (const m of tx.matchAll(/\[([^\]]+)\]\(([^)]+)\)/g)) {
 								const s = l.from + m.index;

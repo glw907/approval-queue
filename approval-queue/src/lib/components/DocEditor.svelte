@@ -319,16 +319,6 @@ text drops a box left empty. Below 1260px a tap on a highlight opens the drawer 
 	.cm-host :global(.cm-dir-label) {
 		color: var(--color-muted);
 	}
-	.cm-host :global(.cm-purpose) {
-		color: var(--color-muted);
-	}
-	.cm-host :global(.cm-fact) {
-		font-family: var(--font-mono);
-		font-size: 0.72em;
-		color: var(--color-muted);
-		opacity: 0.9;
-		white-space: nowrap;
-	}
 	.cm-host :global(.cm-fence) {
 		font-size: 0.85rem;
 		color: var(--color-muted);

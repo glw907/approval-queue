@@ -1,22 +1,22 @@
-# Drafter release notes, first stage
+# Sample release notes, first stage
 
-The drafter initiative replaces hand-written release notes with generated ones. This packet carries the last pass of the first stage. The earlier packet landed the template engine.
+The sample initiative replaces hand-written release notes with generated ones. This packet carries the last pass of the first stage. The earlier packet landed the template engine.
 
-The pass is ready to land as two drafter PRs and one design. One PR failed a lint check, and one question is yours to settle first.
+The pass is ready to land as two sample PRs and one design. One PR failed a lint check, and one question is yours to settle first.
 
-Approving merges each approved PR in order and publishes the drafter release. You refresh your registry login before the publish.
+Approving merges each approved PR in order and publishes the sample release. You refresh your registry login before the publish.
 
 ## If you approve
 1. [session] Merge each approved PR in the order listed.
-2. [irreversible] Publish the drafter release to the package registry.
+2. [irreversible] Publish the sample release to the package registry.
 3. [you: refresh your registry login] Run the publish login before step 2.
 
 ## Not checked
 The release notes were not read on the registry's preview page.
 
-## Ask: Merge the drafter PR whose lint check failed?
+## Ask: Merge the sample PR whose lint check failed?
 Rule: gate-failed
-Part: glw907/drafter#41
+Part: glw907/sample#41
 Recommended: 2
 Reason: The failing check is a style rule the repo already waives for generated files.
 Summary: PR 41 changes the note template and fails one lint check. The failure is in a generated file.
@@ -24,7 +24,7 @@ Summary: PR 41 changes the note template and fails one lint check. The failure i
 Background: A lint check scans every file for style rules. Generated files are exempt by policy, but the check config predates that policy.
 
 Facts: The only failure is in a generated file.
-- The lint check reports one error, in `notes.generated.ts` (`glw907/drafter#41`)
+- The lint check reports one error, in `notes.generated.ts` (`glw907/sample#41`)
 - The waiver policy lists generated files (`docs/policy.md`)
 
 Choices:
@@ -56,6 +56,6 @@ Choices:
 ## Routine
 | Part | Verdict | Fact | Why |
 |---|---|---|---|
-| glw907/drafter#42 | approve | All checks pass and the review verdict is accept. | Nothing in it needs a call. |
-| glw907/drafter:docs/specs/notes-design.md | approve | The design matches the approved plan. | It records the template contract. |
+| glw907/sample#42 | approve | All checks pass and the review verdict is accept. | Nothing in it needs a call. |
+| glw907/sample:docs/specs/notes-design.md | approve | The design matches the approved plan. | It records the template contract. |
 | step:1 | session | The merge order is fixed by the plan. | The session can revert a merge. |

@@ -151,11 +151,11 @@ describe('a packet item', () => {
 		await seedPacket(root, 'p', PACKET);
 		const item = await readItem(root, 'p');
 		if (item?.content.kind !== 'packet') throw new Error('not a packet');
-		expect(item.content.packet.headline).toBe('Drafter release notes, first stage');
+		expect(item.content.packet.headline).toBe('Sample release notes, first stage');
 		expect(item.content.parts.map((p) => [p.ref, p.kind, p.lane, p.verdict, p.head ?? p.sha256?.length])).toEqual([
-			['glw907/drafter#41', 'pr', 'ask', '', 'aaa111'],
-			['glw907/drafter#42', 'pr', 'routine', 'approve', 'bbb222'],
-			['glw907/drafter:docs/specs/notes-design.md', 'design', 'routine', 'approve', 64],
+			['glw907/sample#41', 'pr', 'ask', '', 'aaa111'],
+			['glw907/sample#42', 'pr', 'routine', 'approve', 'bbb222'],
+			['glw907/sample:docs/specs/notes-design.md', 'design', 'routine', 'approve', 64],
 			['step:1', 'step', 'routine', 'session', undefined]
 		]);
 	});

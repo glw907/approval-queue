@@ -1,0 +1,54 @@
+{
+	"headline": "One follow-up needs doing before the next release.",
+	"lede": "The first review found eight small gaps. The session proposes doing one now, four later, and skipping three. Change any call you disagree with.",
+	"rows": [
+		{
+			"action": "Teach the sample tool’s report to read the new config format.",
+			"why": "Configs now save as TOML; until this lands the report shows nothing for a new config, and the next release depends on it.",
+			"detail": "From sample#36: `src/report.js` `configPathFor` reads only `<name>.json`, so it can't show a `.toml`. Your ruling, 2026-10-12: land before the next release.",
+			"proposed": "now"
+		},
+		{
+			"action": "Make the checker catch a note written after a title or heading.",
+			"why": "A note there silently cuts the title short, with the link built from it. Not seen in a real config yet.",
+			"detail": "From sample#1: `title` and `heading` are not prose fields, so `title: X # note` is cut at the comment with no finding.",
+			"proposed": "defer"
+		},
+		{
+			"action": "Flag a link that points only at “#”.",
+			"why": "It passes silently today, and it’s rare.",
+			"detail": "From sample#1: a bare `#` link target passes silently.",
+			"proposed": "defer"
+		},
+		{
+			"action": "Check that each config’s path points inside the repo.",
+			"why": "A path outside the repo sends the link warnings to the wrong place.",
+			"detail": "From sample#1: `config.path` is not validated as repo-relative.",
+			"proposed": "defer"
+		},
+		{
+			"action": "Replace a needless pattern match with a plain text search.",
+			"why": "Tidier code, no change in behavior.",
+			"detail": "From sample#1: `bracketRe` is a regexp for a literal `[`.",
+			"proposed": "defer"
+		},
+		{
+			"action": "Skip the empty-list warning when a list is empty.",
+			"why": "Harmless as it is; an empty list is rare.",
+			"detail": "From sample#1: a `sentence` with `items: []` still gets the warning.",
+			"proposed": "drop"
+		},
+		{
+			"action": "Read the data folder once per run, not once per config.",
+			"why": "Only a speed-up, and runs have few configs.",
+			"detail": "From sample#1: `loadData` re-reads the data directory for each config.",
+			"proposed": "drop"
+		},
+		{
+			"action": "Move the end-to-end test’s program path out of a shared variable.",
+			"why": "It’s the standard Go test setup; nothing to gain.",
+			"detail": "From sample#1: `e2e` keeps the built binary path in a package global.",
+			"proposed": "drop"
+		}
+	]
+}

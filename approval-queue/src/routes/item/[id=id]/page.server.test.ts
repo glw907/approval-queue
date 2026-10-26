@@ -438,7 +438,7 @@ describe('load', () => {
 
 describe('a packet', () => {
 	/** Two asks (#41 bound as gate-failed, one with no part), routine #42 and #43, and step 1. */
-	const PACKET = fixture('packet-baseline.md').replace('glw907/drafter:docs/specs/notes-design.md', 'glw907/drafter#43');
+	const PACKET = fixture('packet-baseline.md').replace('glw907/sample:docs/specs/notes-design.md', 'glw907/sample#43');
 	const WITHDRAWN = 'This item was withdrawn by its session; nothing was recorded';
 	const noDecision = () => expect(readFile(join(state.root, 'items', ID, 'decision.json'), 'utf8')).rejects.toThrow();
 	const fingerprint = async () => ((await load({ params: { id: ID } } as never)) as { fingerprint: string }).fingerprint;
@@ -447,8 +447,8 @@ describe('a packet', () => {
 	async function fields(over: Record<string, string | null> = {}): Promise<[string, string][]> {
 		return Object.entries({
 			fingerprint: await fingerprint(),
-			'part:glw907/drafter#42': 'hold',
-			'part:glw907/drafter#43': 'approve',
+			'part:glw907/sample#42': 'hold',
+			'part:glw907/sample#43': 'approve',
 			'part:step:1': 'session',
 			'ask:1': 'Merge anyway',
 			'ask:2': 'Beta',
@@ -464,18 +464,18 @@ describe('a packet', () => {
 		expect(data).toMatchObject({ kind: 'packet', decided: false, irreversible: true, irreversibleSteps: [2] });
 		expect(data.fingerprint).toMatch(/^[0-9a-f]{64}$/);
 		expect(data.asks.map((a: any) => [a.index, a.rule, a.part, a.choices.length])).toEqual([
-			[1, 'gate-failed', 'glw907/drafter#41', 3],
+			[1, 'gate-failed', 'glw907/sample#41', 3],
 			[2, 'owner-call', null, 2]
 		]);
 		expect(data.routine.map((r: any) => [r.ref, r.verdict])).toEqual([
-			['glw907/drafter#42', 'approve'],
-			['glw907/drafter#43', 'approve'],
+			['glw907/sample#42', 'approve'],
+			['glw907/sample#43', 'approve'],
 			['step:1', 'session']
 		]);
 		expect(data.parts.map((p: any) => [p.ref, p.lane, p.head])).toEqual([
-			['glw907/drafter#41', 'ask', 'aaa111'],
-			['glw907/drafter#42', 'routine', 'bbb222'],
-			['glw907/drafter#43', 'routine', 'ccc333'],
+			['glw907/sample#41', 'ask', 'aaa111'],
+			['glw907/sample#42', 'routine', 'bbb222'],
+			['glw907/sample#43', 'routine', 'ccc333'],
 			['step:1', 'routine', undefined]
 		]);
 	});
@@ -487,7 +487,7 @@ describe('a packet', () => {
 		await seedPacket(state.root, ID, fixture('packet-baseline.md'));
 		await writeFile(join(state.root, 'items', ID, 'parts', '0', 'diff.patch'), patch);
 		const data = (await load({ params: { id: ID } } as never)) as Record<string, any>;
-		const pr = data.parts.find((p: any) => p.ref === 'glw907/drafter#41');
+		const pr = data.parts.find((p: any) => p.ref === 'glw907/sample#41');
 		expect(pr.totals).toEqual({ files: 2, adds: 3, dels: 1 });
 		const design = data.parts.find((p: any) => p.kind === 'design');
 		expect(design.docHtml).toContain('<h1');
@@ -507,8 +507,8 @@ describe('a packet', () => {
 		const SENT_BACK = {
 			note: 'Split this.',
 			calls: [
-				{ ref: 'glw907/drafter#41', verdict: 'hold' },
-				{ ask: 1, question: 'Merge the drafter PR whose lint check failed?', choice: 'Hold' }
+				{ ref: 'glw907/sample#41', verdict: 'hold' },
+				{ ask: 1, question: 'Merge the sample PR whose lint check failed?', choice: 'Hold' }
 			]
 		};
 
@@ -520,10 +520,10 @@ describe('a packet', () => {
 			expect(data.sentBack).toEqual(SENT_BACK);
 			expect(data.whatChanged).toEqual(['Split the template change out of PR 41.']);
 			const since = (ref: string) => data.parts.find((p: any) => p.ref === ref).since;
-			expect(since('glw907/drafter#41').groups).toEqual(fileGroups(SINCE_PATCH));
-			expect(since('glw907/drafter#41').groups[0].files.map((f: any) => f.path)).toEqual(['notes.md']);
-			expect(since('glw907/drafter#42')).toEqual({ gone: true });
-			expect(data.parts.find((p: any) => p.ref === 'glw907/drafter#43')).not.toHaveProperty('since');
+			expect(since('glw907/sample#41').groups).toEqual(fileGroups(SINCE_PATCH));
+			expect(since('glw907/sample#41').groups[0].files.map((f: any) => f.path)).toEqual(['notes.md']);
+			expect(since('glw907/sample#42')).toEqual({ gone: true });
+			expect(data.parts.find((p: any) => p.ref === 'glw907/sample#43')).not.toHaveProperty('since');
 		});
 
 		it('leaves sentBack out when the earlier item has no decision on disk', async () => {
@@ -554,9 +554,9 @@ describe('a packet', () => {
 		expect(await decision()).toEqual({
 			decision: 'approve',
 			parts: [
-				{ ref: 'glw907/drafter#41', verdict: 'approve' },
-				{ ref: 'glw907/drafter#42', verdict: 'hold' },
-				{ ref: 'glw907/drafter#43', verdict: 'approve' },
+				{ ref: 'glw907/sample#41', verdict: 'approve' },
+				{ ref: 'glw907/sample#42', verdict: 'hold' },
+				{ ref: 'glw907/sample#43', verdict: 'approve' },
 				{ ref: 'step:1', verdict: 'session' }
 			],
 			asks: [
@@ -568,14 +568,14 @@ describe('a packet', () => {
 
 	it('a held ask-bound part is written held', async () => {
 		await call('approve', await fields({ 'ask:1': 'Hold' }));
-		expect((await decision()).parts[0]).toEqual({ ref: 'glw907/drafter#41', verdict: 'hold' });
+		expect((await decision()).parts[0]).toEqual({ ref: 'glw907/sample#41', verdict: 'hold' });
 	});
 
 	it.each([
 		['an unanswered ask', { 'ask:1': null }],
 		['a label the ask does not hold', { 'ask:2': 'Stable soon' }],
-		['a missing part', { 'part:glw907/drafter#42': null }],
-		['an unknown ref', { 'part:glw907/drafter#99': 'approve' }],
+		['a missing part', { 'part:glw907/sample#42': null }],
+		['an unknown ref', { 'part:glw907/sample#99': 'approve' }],
 		['a verdict outside the kind', { 'part:step:1': 'hold' }],
 		['a stale fingerprint', { fingerprint: 'stale' }],
 		['a missing irreversible confirmation', { irreversible: null }]
@@ -588,7 +588,7 @@ describe('a packet', () => {
 		const post = await fields();
 		await call('approve', post);
 		expect(await call('approve', post)).toMatchObject({ status: 409, data: { message: 'Already decided' } });
-		expect((await decision()).parts[1]).toEqual({ ref: 'glw907/drafter#42', verdict: 'hold' });
+		expect((await decision()).parts[1]).toEqual({ ref: 'glw907/sample#42', verdict: 'hold' });
 	});
 
 	it('two posts racing write one decision and answer the other 409', async () => {
@@ -598,13 +598,13 @@ describe('a packet', () => {
 	});
 
 	it('a reject carries the screen’s calls, and refuses nothing for its fields', async () => {
-		await call('reject', [...(await fields({ 'part:glw907/drafter#42': 'send-back', 'ask:2': null, fingerprint: 'stale' })), ['note', 'not now']]);
+		await call('reject', [...(await fields({ 'part:glw907/sample#42': 'send-back', 'ask:2': null, fingerprint: 'stale' })), ['note', 'not now']]);
 		const sent = await decision();
 		expect(sent).toMatchObject({ decision: 'reject', note: 'not now' });
 		expect(sent.calls).toEqual([
-			{ ref: 'glw907/drafter#41', verdict: 'approve' },
-			{ ref: 'glw907/drafter#42', verdict: 'send-back' },
-			{ ref: 'glw907/drafter#43', verdict: 'approve' },
+			{ ref: 'glw907/sample#41', verdict: 'approve' },
+			{ ref: 'glw907/sample#42', verdict: 'send-back' },
+			{ ref: 'glw907/sample#43', verdict: 'approve' },
 			{ ref: 'step:1', verdict: 'session' },
 			{ ask: 1, question: expect.any(String), choice: 'Merge anyway' },
 			{ ask: 2, question: expect.any(String), choice: null }
@@ -673,7 +673,7 @@ describe('a packet', () => {
 		expect(data.decided).toBe(true);
 		expect(data.decision).toMatchObject({
 			decision: 'approve',
-			parts: expect.arrayContaining([{ ref: 'glw907/drafter#42', verdict: 'hold' }]),
+			parts: expect.arrayContaining([{ ref: 'glw907/sample#42', verdict: 'hold' }]),
 			asks: [
 				{ index: 1, choice: 'Merge anyway' },
 				{ index: 2, choice: 'Beta' }
@@ -1175,7 +1175,7 @@ describe('defer', () => {
 });
 
 describe('a packet whose packet.json does not parse', () => {
-	const PACKET = fixture('packet-baseline.md').replace('glw907/drafter:docs/specs/notes-design.md', 'glw907/drafter#43');
+	const PACKET = fixture('packet-baseline.md').replace('glw907/sample:docs/specs/notes-design.md', 'glw907/sample#43');
 	const WITHDRAWN = 'This item was withdrawn by its session; nothing was recorded';
 	beforeEach(async () => {
 		await seedPacket(state.root, ID, PACKET);
