@@ -25,22 +25,24 @@ const notes: PlacedNote[] = [
 	{
 		id: 'B3',
 		kind: 'decide',
-		anchor: 'a.p1',
+		file: 'docs/a.md',
+		anchor: { quote: 'one' },
 		title: 'Why',
 		body: [],
-		range: null,
+		range: [0, 0],
 		choices: [
-			{ label: 'Use the code reason', text: 'Rewritten line.', done: 'Used it' },
+			{ label: 'Use the code reason', done: 'Used it' },
 			{ label: 'Keep it', done: 'Kept it' }
 		]
 	},
 	{
 		id: 'Q1',
 		kind: 'question',
-		anchor: 'a.p2',
+		file: 'docs/a.md',
+		anchor: { quote: 'two' },
 		title: 'Keep it here?',
 		body: [],
-		range: null,
+		range: [0, 0],
 		choices: [{ label: 'Keep it here', done: 'Kept here' }]
 	}
 ];
@@ -49,7 +51,7 @@ function review(blob: string, save: ReviewInit['save'] = async () => ({ ok: true
 	return new DocReview({ doc, original: 'Old line.', blob, notes, save, remember: KEY });
 }
 
-/** What the editor's change hook is handed when a choice rewrites its line. */
+/** What the editor's change hook is handed after an edit. */
 const edited = { state: { doc: { toString: () => 'Rewritten line.' } } } as unknown as EditorView;
 
 describe('DocReview remembered choices', () => {
@@ -74,41 +76,6 @@ describe('DocReview remembered choices', () => {
 	it('opens a choice again when its stored blob is stale', () => {
 		review('b1').choose('B3', 1);
 		expect(review('b2').decided).toEqual({});
-	});
-
-	it('opens a choice again when the rewrite it made was never saved', async () => {
-		const failing = async (): Promise<SaveResult> => ({ ok: false, message: 'refused' });
-		const r = review('b1', failing);
-		r.hooks.change(edited);
-		r.choose('B3', 0);
-		expect(review('b1').decided).toEqual({});
-		await r.flush();
-		expect(review('b1').decided).toEqual({});
-	});
-
-	it('stores a rewriting choice against the blob its save returned', async () => {
-		const r = review('b1');
-		r.hooks.change(edited);
-		r.choose('B3', 0);
-		await r.flush();
-		expect(review('b1').decided).toEqual({});
-		expect(review('saved', undefined, 'Rewritten line.').decided).toEqual({ B3: 0 });
-	});
-
-	it('keeps a rewriting choice open after a failed save, whatever is chosen next', async () => {
-		const failing = async (): Promise<SaveResult> => ({ ok: false, message: 'refused' });
-		const r = review('b1', failing);
-		r.hooks.change(edited);
-		r.choose('B3', 0);
-		await r.flush();
-		r.choose('Q1', 0);
-		expect(review('b1').decided).not.toHaveProperty('B3');
-	});
-
-	it('recalls a rewriting choice only when the loaded file holds its text', () => {
-		localStorage.setItem(KEY, JSON.stringify({ blob: 'b1', decided: { B3: 0, Q1: 0 } }));
-		expect(review('b1').decided).toEqual({ Q1: 0 });
-		expect(review('b1', undefined, 'Rewritten line.').decided).toEqual({ B3: 0, Q1: 0 });
 	});
 
 	it('reports every saved pause as all edits saved', async () => {
@@ -182,13 +149,14 @@ describe('DocReview remembered choices', () => {
 });
 
 describe('DocReview comments', () => {
-	const anchor = (from: number, to: number) => ({ quote: 'x', prefix: '', suffix: '', from, to, commit: 'c' });
+	const anchor = (from: number, to: number) => ({ quote: 'x', prefix: '', suffix: '', from, to, commit: 'c', file: 'docs/a.md' });
 	const doc = 'One line.\nTwo line.';
 	const make = (comment?: ReviewInit['comment']) =>
 		new DocReview({
 			doc,
 			original: doc,
 			blob: 'b1',
+			file: 'docs/a.md',
 			notes: [],
 			save: async () => ({ ok: true, blob: 'b2' }),
 			comments: [
@@ -245,7 +213,7 @@ describe('DocReview comments', () => {
 });
 
 describe('DocReview comment removal and its Undo', () => {
-	const anchor = (from: number, to: number) => ({ quote: 'x', prefix: '', suffix: '', from, to, commit: 'c' });
+	const anchor = (from: number, to: number) => ({ quote: 'x', prefix: '', suffix: '', from, to, commit: 'c', file: 'docs/a.md' });
 	const doc = 'One line.\nTwo line.';
 	const stored = [
 		{ id: 'C1', text: 'First', anchor: anchor(0, 3) },
@@ -276,6 +244,7 @@ describe('DocReview comment removal and its Undo', () => {
 			doc,
 			original: doc,
 			blob: 'b1',
+			file: 'docs/a.md',
 			notes: [],
 			save: async () => ({ ok: true, blob: 'b2' }),
 			comments: stored.map((c) => ({ ...c, placed: { from: c.anchor.from, to: c.anchor.to } })),

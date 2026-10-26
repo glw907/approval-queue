@@ -32,11 +32,9 @@ for that save first, and closing the tab then asks before leaving.
 	import { changedCount, seedRows, type Row } from '#lib/triage.ts';
 	import { VERDICT_LOOK } from '#lib/packet-view.ts';
 	import type { PlacedNote } from '#lib/editor/notes.ts';
-	import { boxes, DocReview, heldBySave, noteStart, refuseOpenBox, restoredDrafted, sendBackDraft, type CommentAnswer, type SaveResult } from '#lib/editor/review.svelte.ts';
+	import { boxes, DocReview, heldBySave, noteStart, refuseOpenBox, restoredDrafted, sendBackDraft, type CommentAnswer } from '#lib/editor/review.svelte.ts';
 	import type { PageData } from '../../routes/item/[id=id]/$types';
-	import BlueprintView from './BlueprintView.svelte';
 	import BriefBlock from './BriefBlock.svelte';
-	import ChangeView from './ChangeView.svelte';
 	import DecideCards from './DecideCards.svelte';
 	import DesignView from './DesignView.svelte';
 	import DetailRows from './DetailRows.svelte';
@@ -46,7 +44,6 @@ for that save first, and closing the tab then asks before leaving.
 	import PaneList, { type PaneItem } from './frame/PaneList.svelte';
 	import PaneSection from './frame/PaneSection.svelte';
 	import PacketAsks from './PacketAsks.svelte';
-	import PageView from './PageView.svelte';
 	import PacketBrief from './PacketBrief.svelte';
 	import PacketIcon from './PacketIcon.svelte';
 	import PacketRoutine from './PacketRoutine.svelte';
@@ -211,25 +208,6 @@ for that save first, and closing the tab then asks before leaving.
 	const packetRepos = $derived(
 		packet ? [...new Set(packet.parts.filter((p) => p.kind !== 'step').map((p) => p.ref.split(/[#:]/)[0].split('/').pop()))].join(', ') : ''
 	);
-	const CHANGE_HEADLINE = 'Approving this change clears its pull request to merge.';
-
-	// The page keys this component on the item id, so the save's address is fixed once per item: a
-	// save that lands after the reader has moved on still reaches this item, never the next one.
-	// svelte-ignore state_referenced_locally
-	const saveUrl = `/item/${encodeURIComponent(data.meta.id)}?/save`;
-
-	/** Posts a blueprint's text to the save action, which commits it in the worktree. */
-	async function saveBlueprint(text: string, base: string): Promise<SaveResult> {
-		const body = new FormData();
-		body.set('text', text);
-		body.set('base', base);
-		const res = await fetch(saveUrl, { method: 'POST', body, headers: { 'x-sveltekit-action': 'true' } });
-		const result = deserialize(await res.text());
-		if (result.type === 'success') return { ok: true, blob: String(result.data?.blob ?? '') };
-		if (result.type === 'failure') return { ok: false, message: String(result.data?.message ?? 'refused') };
-		return { ok: false, message: result.type === 'error' ? result.error.message : 'unexpected answer' };
-	}
-
 	// svelte-ignore state_referenced_locally
 	const commentUrl = `/item/${encodeURIComponent(data.meta.id)}?/comment`;
 
@@ -256,65 +234,19 @@ for that save first, and closing the tab then asks before leaving.
 		}
 		return out;
 	}
-	// The page keys this component on the item id, so each review is built once per item.
-	// svelte-ignore state_referenced_locally
-	const remember = data.decided ? undefined : `desk.calls.${data.meta.id}`;
-	// svelte-ignore state_referenced_locally
-	const review =
-		data.kind === 'blueprint' || data.kind === 'page'
-			? new DocReview({
-					doc: data.doc,
-					original: data.original,
-					blob: data.blob,
-					notes: data.notes,
-					save: saveBlueprint,
-					decided: data.decided ? answeredCalls(data.notes) : undefined,
-					remember,
-					comments: data.comments,
-					threads: data.threads,
-					comment: data.decided ? undefined : postComment
-				})
-			: null;
-	// A change review shows each changed document read-only, with the lines the change edited marked.
-	// svelte-ignore state_referenced_locally
-	const changeReviews =
-		data.kind === 'change'
-			? data.docs.map((d, i) => {
-					const r = new DocReview({
-						doc: d.doc,
-						original: d.original,
-						blob: '',
-						notes: d.notes,
-						save: async () => ({ ok: false, message: 'a change review takes no edits' }),
-						decided: data.decided ? answeredCalls(d.notes) : undefined,
-						remember: remember && `${remember}.${i}`,
-						readonly: true,
-						comments: d.comments,
-						threads: d.threads,
-						comment: data.decided ? undefined : postComment,
-						file: d.path,
-						margin: `margin-${i}`
-					});
-					r.markChanges = true;
-					r.saveStatus = 'Read only';
-					return r;
-				})
-			: [];
-	const docReviews = review ? [review] : changeReviews;
+	const docReviews: DocReview[] = [];
 	const openCalls = $derived(docReviews.flatMap((r) => r.openCalls));
 	const decidedCount = $derived(docReviews.reduce((n, r) => n + Object.keys(r.decided).length, 0));
-	const docItem = $derived(data.kind === 'blueprint' || data.kind === 'page' ? data : null);
-	const change = $derived(data.kind === 'change' ? data : null);
+	const changedLines = $derived(docReviews.reduce((n, r) => n + r.changedLines, 0));
 	const frozen = $derived(isDecided);
-	const missing = $derived(data.kind === 'blueprint' || data.kind === 'page' ? data.missing : false);
 
-	// A held or decided review takes no choices, and no text edits either while the file is gone.
+	// A held or decided review takes no choices and no text edits.
 	$effect(() => {
 		for (const r of docReviews) {
 			r.locked = frozen;
-			r.commentable = !frozen && !missing;
+			r.commentable = !frozen;
+			r.setReadonly(frozen);
 		}
-		review?.setReadonly(frozen || missing);
 	});
 	// A box left open on the item being left must not refuse decisions on the next one, and a toast's
 	// Undo, such as a deleted comment's, must not act on this item from the next.
@@ -360,51 +292,16 @@ for that save first, and closing the tab then asks before leaving.
 		const list = parts.length < 3 ? parts.join(' and ') : `${parts.slice(0, -1).join(', ')}, and ${parts.at(-1)}`;
 		return `You sent it back with ${plural(threads.length, 'comment')}. The author ${list}.`;
 	});
-	/**
-	 * The lede of a blueprint or page: the open calls, what the file describes, then what the author did
-	 * with the fact check. A blueprint's type name is hyphenated as a modifier ("symptom-row page").
-	 */
-	const docLede = $derived.by(() => {
-		if (!docItem || !review) return '';
-		const type = docItem.pageType ? `${/^[aeiou]/i.test(docItem.pageType) ? 'an' : 'a'} ${docItem.pageType.replaceAll(' ', '-')} page` : 'a docs page';
-		const what = `${docItem.kind === 'page' ? 'This draft is' : 'This blueprint describes'} ${type}${docItem.track ? ` on the ${docItem.track} track` : ''}.`;
-		const fixed = review.notes.filter((n) => n.kind === 'info').length;
-		const disputed = review.notes.filter((n) => n.kind === 'decide').length;
-		const asked = review.notes.filter((n) => n.kind === 'question').length;
-		const found = fixed + disputed;
-		const check =
-			found === 0
-				? ''
-				: disputed === 0
-					? `The author fixed ${found === 1 ? 'the one finding' : `all ${word(found)} findings`} from the fact check.`
-					: fixed === 0
-						? `The author disputed ${found === 1 ? 'the one finding' : `all ${word(found)} findings`} from the fact check.`
-						: `Of the fact check’s ${word(found)} findings, the author fixed ${word(fixed)} and disputed ${word(disputed)}.`;
-		const question = asked ? `The author ${check ? 'also ' : ''}has ${asked === 1 ? 'a question' : `${word(asked)} questions`} for you.` : '';
-		return [what, repliesLine, check, question, callsLine].filter(Boolean).join(' ');
-	});
-	/** The change's lede: the open calls, then what the change edits. */
-	const changeLede = $derived.by(() => {
-		if (!change) return '';
-		const docs = plural(change.docs.length, 'document');
-		const code = change.totals.files ? ` and ${plural(change.totals.files, 'code file')}` : '';
-		return `“${change.meta.title}” edits ${docs}${code}. ${callsLine}`;
-	});
-
 	/** Moves focus to the next open call after the one holding focus, wrapping to the first. */
 	let lastDoc = -1;
 	function nextCall() {
-		if (review) {
-			review.nextCall();
-			return;
-		}
-		if (changeReviews.length) {
-			// One document at a time, starting after the last one visited.
-			for (let step = 1; step <= changeReviews.length; step++) {
-				const at = (lastDoc + step) % changeReviews.length;
-				if (changeReviews[at].openCalls.length) {
+		if (docReviews.length) {
+			// One page at a time, starting after the last one visited.
+			for (let step = 1; step <= docReviews.length; step++) {
+				const at = (lastDoc + step) % docReviews.length;
+				if (docReviews[at].openCalls.length) {
 					lastDoc = at;
-					changeReviews[at].nextCall();
+					docReviews[at].nextCall();
 					return;
 				}
 			}
@@ -422,7 +319,7 @@ for that save first, and closing the tab then asks before leaving.
 		return docReviews.find((r) => r.focused) ?? docReviews.find((r) => !r.selectionEmpty) ?? docReviews[0];
 	}
 
-	/** Moves to the next or previous comment; a change walks on through its documents, wrapping at the ends. */
+	/** Moves to the next or previous comment; a docs review walks on through its pages, wrapping at the ends. */
 	function moveComment(dir: 1 | -1) {
 		const start = activeReview();
 		if (!start || refuseOpenBox()) return;
@@ -450,7 +347,7 @@ for that save first, and closing the tab then asks before leaving.
 			desk.announce(UNDONE);
 			if (restored.outcome === 'reject') {
 				// Only matters when openNote refuses: the restored note is the reader's own text unless it is still the draft.
-				drafted = restoredDrafted(noteText, sendBackDraft(openCalls, review?.changedLines ?? 0, data.kind === 'page' ? 'page' : 'plan'));
+				drafted = restoredDrafted(noteText, sendBackDraft(openCalls, changedLines, 'page'));
 				void openNote();
 			}
 			else {
@@ -495,10 +392,10 @@ for that save first, and closing the tab then asks before leaving.
 		});
 	});
 
-	/** The section the reader has scrolled to on a change: a document's index, or null above the first. */
+	/** The page the reader has scrolled to: its index, or null above the first. */
 	let currentDoc = $state<number | null>(null);
 	$effect(() => {
-		if (!change) return;
+		if (!docReviews.length) return;
 		const track = () => {
 			let cur: number | null = null;
 			for (let i = 0; i < docReviews.length; i++) {
@@ -512,7 +409,7 @@ for that save first, and closing the tab then asks before leaving.
 		return () => window.removeEventListener('scroll', track);
 	});
 
-	/** Scrolls a section of the change into view, as the outline's links do. */
+	/** Scrolls a page into view, as the outline's links do. */
 	function goSection(id: string) {
 		const el = document.getElementById(id);
 		el?.scrollIntoView({ block: 'start', behavior: jump() });
@@ -523,64 +420,28 @@ for that save first, and closing the tab then asks before leaving.
 		}
 	}
 
-	/**
-	 * The open item's outline, which the rail shows under the item: a blueprint's or page's headings,
-	 * numbered, each marked when it holds an open call or correction; a change's documents and its code.
-	 */
-	const outlineEntries = $derived.by((): OutlineEntry[] => {
-		if (review) {
-			let x = 0;
-			let y = 0;
-			const hs = review.headings;
-			return hs.map((h, i) => {
-				if (h.level === 2) {
-					x++;
-					y = 0;
-				} else y++;
-				const end = hs[i + 1]?.pos ?? Infinity;
-				const open = review.notes.filter((n) => {
-					const at = review.starts[n.id];
-					return at !== null && at !== undefined && at >= h.pos && at < end && review.decided[n.id] === undefined && !review.resolved.includes(n.id);
-				});
-				const n = h.level === 2 || x === 0 ? String(x) : `${x}.${y}`;
-				return {
-					key: `h${h.pos}`,
-					n,
-					text: h.text.replaceAll('`', ''),
-					level: h.level,
-					href: `#section-${n}`,
-					cur: review.current === h.pos,
-					mark: open.some((o) => o.kind !== 'info') ? 'call' : open.length ? 'fix' : null,
-					go: () => review.jumpToPos(h.pos)
-				};
-			});
-		}
-		if (change) {
-			const docs = change.docs.map((d, i): OutlineEntry => ({
-				key: d.path,
-				n: String(i + 1),
-				text: d.path.split('/').pop() ?? d.path,
-				level: 2,
-				href: `#doc-${i}`,
-				cur: currentDoc === i,
-				mark: docReviews[i].openCalls.length ? 'call' : null,
-				go: () => goSection(`doc-${i}`)
-			}));
-			return [...docs, { key: 'code', n: String(docs.length + 1), text: 'Code changes', level: 2, href: '#code', cur: false, mark: null, go: () => goSection('code') }];
-		}
-		return [];
-	});
+	/** The open item's outline, which the rail shows under the item: the pages, each marked when it holds an open call. */
+	const outlineEntries = $derived.by((): OutlineEntry[] =>
+		docReviews.map((r, i) => ({
+			key: r.file ?? String(i),
+			n: String(i + 1),
+			text: r.file?.split('/').pop() ?? '',
+			level: 2,
+			href: `#doc-${i}`,
+			cur: currentDoc === i,
+			mark: r.openCalls.length ? 'call' : null,
+			go: () => goSection(`doc-${i}`)
+		}))
+	);
 	$effect(() => {
 		desk.outline = docReviews.length ? outlineEntries : null;
 	});
 	$effect(() => () => (desk.outline = null));
 
-	/** What the place bar names: the heading or document the reader is in, else the item. */
-	const placeWhere = $derived.by(() => {
-		if (review && review.current !== null) return review.headings.find((h) => h.pos === review.current)?.text.replaceAll('`', '') ?? '';
-		if (change && currentDoc !== null) return change.docs[currentDoc].path.split('/').pop() ?? '';
-		return data.meta.headline ?? data.meta.title;
-	});
+	/** What the place bar names: the page the reader is in, else the item. */
+	const placeWhere = $derived(
+		currentDoc === null ? (data.meta.headline ?? data.meta.title) : (docReviews[currentDoc].file?.split('/').pop() ?? '')
+	);
 	const hasCalls = $derived(docReviews.some((r) => r.calls.length > 0));
 
 	let tocOpen = $state(false);
@@ -655,7 +516,8 @@ for that save first, and closing the tab then asks before leaving.
 			}
 			return;
 		}
-		if (!review?.pending) return;
+		const unsaved = docReviews.filter((r) => r.pending);
+		if (!unsaved.length) return;
 		// A closing tab cannot wait for the save, so the browser asks first.
 		navigation.cancel();
 		if (navigation.willUnload || !navigation.to) return;
@@ -670,12 +532,13 @@ for that save first, and closing the tab then asks before leaving.
 			desk.toast = STILL_SAVING;
 			desk.announce(STILL_SAVING);
 		}, 3000);
-		void review.flush().then(() => {
+		void Promise.all(unsaved.map((r) => r.flush())).then(() => {
 			clearTimeout(stalled);
 			if (desk.toast === STILL_SAVING) desk.toast = null;
 			const leave = leaveAfterSave;
 			leaveAfterSave = null;
-			if (review.saveFailed) desk.announce(`${review.saveStatus}. You are still on this item.`);
+			const failed = unsaved.find((r) => r.saveFailed);
+			if (failed) desk.announce(`${failed.saveStatus}. You are still on this item.`);
 			else leave?.();
 		});
 	});
@@ -703,7 +566,7 @@ for that save first, and closing the tab then asks before leaving.
 		form?.requestSubmit(approveButton);
 	}
 
-	/** Approve on a document review: a locked press moves to the next open call; otherwise the last edit saves first. */
+	/** Approve on a docs review: a locked press moves to the next open call; otherwise the last edit saves first. */
 	async function approveDoc() {
 		if (refuseOpenBox()) return;
 		if (openCalls.length) {
@@ -711,11 +574,11 @@ for that save first, and closing the tab then asks before leaving.
 			return;
 		}
 		for (const r of docReviews) await r.settled();
-		if (review) {
-			await review.flush();
-			const held = heldBySave(review, 'approve');
-			if (held) {
-				desk.announce(held);
+		for (const r of docReviews) {
+			await r.flush();
+			const refusal = heldBySave(r, 'approve');
+			if (refusal) {
+				desk.announce(refusal);
 				return;
 			}
 		}
@@ -728,7 +591,7 @@ for that save first, and closing the tab then asks before leaving.
 	async function openNote() {
 		if (refuseOpenBox()) return;
 		if (docReviews.length) {
-			const fresh = sendBackDraft(openCalls, review?.changedLines ?? 0, data.kind === 'page' ? 'page' : 'plan');
+			const fresh = sendBackDraft(openCalls, changedLines, 'page');
 			noteText = noteStart(noteText, drafted, fresh);
 			drafted = fresh;
 		}
@@ -751,24 +614,20 @@ for that save first, and closing the tab then asks before leaving.
 		const name = data.meta.repo.split('/').pop();
 		if (data.kind === 'design') return `the design ${data.meta.title}`;
 		if (data.kind === 'packet') return 'the packet';
-		if (data.kind === 'blueprint') return `the blueprint for ${data.page}`;
-		if (data.kind === 'page') return `the page ${data.page}`;
 		return data.meta.number === undefined ? name : `${name} #${data.meta.number}`;
 	}
 
 	/** "your comment" or "your three comments": Geoff's comments and replies, which go to the author. */
 	const yours = (n: number) => (n === 1 ? 'your comment' : `your ${word(n)} comments`);
-	const docWord = $derived(data.kind === 'page' ? 'page' : data.kind === 'change' ? 'change' : 'blueprint');
 
 	function decisionText(action: URL) {
 		const n = yourWords;
 		if (action.search === '?/approve') {
 			if (!n) return `Approved ${subject()}.`;
-			if (data.kind === 'blueprint') return `Approved. The author applies ${yours(n)}, and then the page is drafted. The replies appear on the page review.`;
-			return `Approved. ${capital(yours(n))} ${n === 1 ? 'goes' : 'go'} to the ${data.kind === 'change' ? 'change’s author' : 'author'} with your approval.`;
+			return `Approved. ${capital(yours(n))} ${n === 1 ? 'goes' : 'go'} to the author with your approval.`;
 		}
 		if (action.search === '?/reject') {
-			if (n) return `Sent back with ${plural(n, 'comment')}. The author will answer ${n === 1 ? 'it' : 'them'} and queue the ${docWord} again.`;
+			if (n) return `Sent back with ${plural(n, 'comment')}. The author will answer ${n === 1 ? 'it' : 'them'} and queue it again.`;
 			return noteText.trim() ? `Sent ${subject()} back with a note.` : `Sent ${subject()} back.`;
 		}
 		if (action.search === '?/defer') return `Deferred ${subject()}. It waits under Deferred.`;
@@ -794,17 +653,14 @@ for that save first, and closing the tab then asks before leaving.
 			for (const r of docReviews) await r.settled();
 			// A send-back carries the edits too, so the last one is committed first, and the post names
 			// the blob that save returned rather than the one the form rendered with.
-			if (review) {
-				await review.flush();
-				const refusal = heldBySave(
-					review,
-					action.search === '?/reject' ? 'reject' : action.search === '?/defer' ? 'defer' : 'approve'
-				);
+			for (const r of docReviews) {
+				await r.flush();
+				const refusal = heldBySave(r, action.search === '?/reject' ? 'reject' : action.search === '?/defer' ? 'defer' : 'approve');
 				if (refusal) {
 					desk.announce(refusal);
 					return;
 				}
-				if (action.search !== '?/defer') formData.set('blob', review.blob);
+				if (action.search !== '?/defer' && r.file !== undefined) formData.set(`blob:${r.file}`, r.blob);
 			}
 			const outcome =
 				action.search === '?/approve'
@@ -904,13 +760,7 @@ for that save first, and closing the tab then asks before leaving.
 <Frame
 	margin={docReviews.length > 0}
 	where={data.meta.headline ?? data.meta.title}
-	paneLabel={data.kind === 'packet'
-		? 'Outline and parts'
-		: data.kind === 'blueprint' || data.kind === 'page'
-			? 'Outline and calls'
-			: data.kind === 'change'
-				? 'Calls and documents'
-				: 'Calls and outline'}
+	paneLabel={data.kind === 'packet' ? 'Outline and parts' : data.kind === 'docs' ? 'Calls and pages' : 'Calls and outline'}
 >
 	{#snippet header()}
 		{#if packet}
@@ -936,31 +786,6 @@ for that save first, and closing the tab then asks before leaving.
 				{#snippet description()}
 					{#each [packet.background, ...packet.summary] as paragraph, i (i)}<p><Prose text={paragraph} /></p>{/each}
 				{/snippet}
-			</FrameHeader>
-		{:else if docItem && review}
-			{#snippet paragraphs()}
-				{#each docItem.description ?? [] as paragraph, i (i)}<p><Prose text={paragraph} /></p>{/each}
-			{/snippet}
-			<FrameHeader
-				headlineText={docItem.meta.title}
-				description={docItem.description?.length ? paragraphs : undefined}
-				crumbs={[{ text: 'Board', href: '/' }, { text: docItem.kind === 'page' ? 'Page' : 'Blueprint' }, { text: docItem.meta.repo }]}
-			>
-				{#snippet state()}
-					{#if docItem.revision}<span class="badge badge-sm badge-outline rule-badge tone-info">Revision {docItem.revision}</span>{/if}
-					{#if docItem.amend}<span class="badge badge-sm badge-outline rule-badge tone-info">Amends the approved version</span>{/if}
-					{@render itemState()}
-				{/snippet}
-				{#snippet headline()}{docItem.meta.title}{/snippet}
-				{#snippet lede()}{docLede}{/snippet}
-			</FrameHeader>
-		{:else if change}
-			<FrameHeader headlineText={CHANGE_HEADLINE} crumbs={[{ text: 'Board', href: '/' }, { text: 'Change' }, { text: change.ref }]}>
-				{#snippet state()}
-					{@render itemState()}
-				{/snippet}
-				{#snippet headline()}{CHANGE_HEADLINE}{/snippet}
-				{#snippet lede()}{changeLede}{/snippet}
 			</FrameHeader>
 		{:else if data.kind === 'pr' || data.kind === 'design' || data.kind === 'triage'}
 			{@const item = data}
@@ -996,17 +821,6 @@ for that save first, and closing the tab then asks before leaving.
 		<PacketBrief data={packet} bind:verdicts decided={packet.decided} />
 		<PacketAsks asks={packet.asks} parts={packet.parts} bind:answers decided={packet.decided} />
 		<PacketRoutine routine={packet.routine} parts={packet.parts} bind:verdicts decided={packet.decided} />
-	{:else if docItem && review}
-		{#if docItem.missing}
-			<p class="bg bg-first bg-flat">The queue can no longer read <code>{docItem.file}</code> from the worktree’s latest commit. The editor shows the copy that was queued, and you can’t edit it.</p>
-		{/if}
-		{#if docItem.kind === 'page'}
-			<PageView {review} file={docItem.file} pr={docItem.pr} place={docPlace} amend={docItem.amend?.original} />
-		{:else}
-			<BlueprintView {review} file={docItem.file} place={docPlace} amend={docItem.amend?.original} />
-		{/if}
-	{:else if change}
-		<ChangeView data={change} reviews={changeReviews} place={docPlace} />
 	{:else if data.kind === 'pr'}
 		<PrView {data} bind:picks />
 	{:else if data.kind === 'design'}
@@ -1062,7 +876,7 @@ for that save first, and closing the tab then asks before leaving.
 				{#if packet}
 					<input type="hidden" name="fingerprint" value={packet.fingerprint} />
 				{:else if docReviews.length}
-					{#if review}<input type="hidden" name="blob" value={review.blob} />{/if}
+					{#each docReviews as docReview (docReview)}{#if docReview.file !== undefined}<input type="hidden" name="blob:{docReview.file}" value={docReview.blob} />{/if}{/each}
 					{#each docReviews as docReview (docReview)}
 						{#each docReview.calls as call (call.id)}
 							{#if docReview.decided[call.id] !== undefined}
@@ -1086,14 +900,10 @@ for that save first, and closing the tab then asks before leaving.
 								<p class="muted" id="note-hint">
 									{packet
 										? 'Your verdicts go with this note.'
-										: review && yourWords
+										: docReviews.length && yourWords
 											? `This note goes back with ${yours(yourWords)} and your edits and decisions. A note is optional when you’ve commented.`
-											: review
+											: docReviews.length
 												? 'Your edits and decisions go with this note.'
-												: change && yourWords
-													? `This note goes back with ${yours(yourWords)}. A note is optional when you’ve commented.`
-													: change
-														? 'The change’s author reads this note and makes the edits.'
 												: 'The session reads it as the reason; leave it empty to send back without one.'}
 								</p>
 								<textarea
@@ -1144,11 +954,7 @@ for that save first, and closing the tab then asks before leaving.
 										threadCount ? (unreadCount ? `${plural(unreadCount, 'reply', 'replies')} to read` : 'every reply read') : '',
 										replyCount ? `${plural(replyCount, 'reply', 'replies')} from you` : '',
 										commentCount ? plural(commentCount, 'comment') : '',
-										review
-											? review.changedLines
-												? `${plural(review.changedLines, 'line')} changed`
-												: 'no edits yet'
-											: ''
+										changedLines ? `${plural(changedLines, 'line')} changed` : 'no edits yet'
 									]
 										.filter(Boolean)
 										.join(', ') || 'Nothing decided yet'
@@ -1201,7 +1007,7 @@ for that save first, and closing the tab then asks before leaving.
 									approveDoc();
 								}}
 							>
-								Approve the {data.kind === 'page' ? 'page' : data.kind === 'change' ? 'change' : 'blueprint'} <kbd aria-hidden="true">Ctrl</kbd><kbd aria-hidden="true">Enter</kbd>
+								Approve the pages <kbd aria-hidden="true">Ctrl</kbd><kbd aria-hidden="true">Enter</kbd>
 							</button>
 						{:else if data.kind === 'triage'}
 							<button class="btn btn-primary" aria-keyshortcuts="Control+Enter Meta+Enter" bind:this={submitButton}>

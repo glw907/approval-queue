@@ -1,8 +1,10 @@
 /**
- * Entry point for `approval-queue pr|design|triage|packet|blueprint|page`: checks the item's brief, packet, or description before it is queued.
+ * Entry point for `approval-queue pr|design|triage|packet|docs`: checks the item's brief, packet, or
+ * description before it is queued. The kinds it checks are `pr`, `design`, `triage`, `packet`, and
+ * `description`.
  *
  * Run as `node check-brief.ts <pr|design|triage|packet> <file>`, or as
- * `node check-brief.ts description <file> <title>` for a blueprint's or page's description and title.
+ * `node check-brief.ts description <file> <title>` for a docs review's description and title.
  * It exits 0 and prints `{"headline": ...}` on a valid brief, the whole parse as JSON on a valid
  * packet, and the paragraphs as a JSON array on a valid description. It exits 2 with the check's
  * messages on stderr for a defect, and 1 for a tool failure such as an unreadable file. It imports only `brief.ts` and `packet.ts`, so it runs under plain `node` with

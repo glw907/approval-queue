@@ -43,7 +43,7 @@ class Desk {
 	outline = $state.raw<OutlineEntry[] | null>(null);
 	/** Approve is disabled, so the `a` key must not post it either. */
 	approveLocked = $state(false);
-	page = $state<'pr' | 'design' | 'triage' | 'packet' | 'blueprint' | 'page' | 'change'>('design');
+	page = $state<'pr' | 'design' | 'triage' | 'packet' | 'docs'>('design');
 	#toast = $state<string | null>(null);
 	/** What the plain toast's Undo button does; null shows no button. */
 	toastUndo = $state.raw<(() => void) | null>(null);
