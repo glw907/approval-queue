@@ -7,7 +7,6 @@
 set -uo pipefail
 cd "$(dirname "$0")/.."
 SCRIPT="$(pwd)/bin/.local/bin/approval-queue"
-APP="$(pwd)/approval-queue"
 PR=glw907/sample#7
 fail=0
 root="$(mktemp -d)"
@@ -69,45 +68,6 @@ state="$XDG_STATE_HOME/approval-queue"
 log="$state/decisions.jsonl"
 source tests/collect-check.sh
 
-# The quote check is the app's: use its entry when it takes a directory and a notes file (the contract's call 3),
-# else a stand-in with the same contract, so this test needs no other build.
-mkdir -p "$root/probe"
-printf 'Run it. Run it.\n' >"$root/probe/a.md"
-printf '[{"id":"P","file":"a.md","kind":"info","anchor":{"quote":"Run it"},"title":"t","body":[]}]\n' >"$root/probe/notes.json"
-node "$APP/src/check-notes.ts" "$root/probe" "$root/probe/notes.json" >/dev/null 2>"$root/probe/err"
-if [ "$?" -eq 2 ] && grep -q 'occurs' "$root/probe/err"; then
-  SCRIPT_UNDER_TEST=$SCRIPT
-else
-  tree="$root/tree"
-  mkdir -p "$tree/bin/.local/bin" "$tree/approval-queue/src"
-  cp "$SCRIPT" "$tree/bin/.local/bin/approval-queue"
-  for e in "$APP"/* "$APP"/.[!.]*; do
-    [ -e "$e" ] || continue
-    [ "${e##*/}" = src ] || ln -s "$e" "$tree/approval-queue/${e##*/}"
-  done
-  for e in "$APP"/src/*; do
-    [ "${e##*/}" = check-notes.ts ] || ln -s "$e" "$tree/approval-queue/src/${e##*/}"
-  done
-  cat >"$tree/approval-queue/src/check-notes.ts" <<'STANDIN'
-import { readFileSync } from 'node:fs';
-const [dir, notesFile] = process.argv.slice(2);
-const lines = [];
-try {
-  for (const n of JSON.parse(readFileSync(notesFile, 'utf8'))) {
-    const text = readFileSync(`${dir}/${n.file}`, 'utf8');
-    const needle = (n.anchor.prefix ?? '') + n.anchor.quote + (n.anchor.suffix ?? '');
-    const count = text.split(needle).length - 1;
-    if (count > 1) lines.push(`note ${n.id} (${n.file}): the quote "${n.anchor.quote}" occurs ${count} times`);
-  }
-} catch (e) {
-  console.error(`check-notes: cannot read ${e.message}`);
-  process.exit(1);
-}
-if (lines.length) { console.error(lines.join('\n')); process.exit(2); }
-STANDIN
-  SCRIPT_UNDER_TEST="$tree/bin/.local/bin/approval-queue"
-fi
-SCRIPT=$SCRIPT_UNDER_TEST
 
 DESC="$root/description.md"
 printf 'The guide pages describe the sample tool.\n\nThis review covers four pages. Approving it lets the session merge the pull request.\n' >"$DESC"
@@ -302,7 +262,6 @@ jq '.[1].id = "N1"' "$NOTES" >"$root/dup-id.json"
 refuse "a duplicate note id" 'the id "N1" is used 2 times' docs "${args[@]}" --notes "$root/dup-id.json"
 jq '.[0].file = "src/app.js"' "$NOTES" >"$root/unchanged-file.json"
 refuse "a note on a file that is no changed page" "names files that are not changed docs pages" docs "${args[@]}" --notes "$root/unchanged-file.json"
-jq '.[0].file = "docs/guide/ship.md"' "$NOTES" >"$root/renamed-away.json"
 jq '.[0].file = "docs/guide/deploy.md"' "$NOTES" >"$root/old-path.json"
 refuse "a note on a renamed page's old path" "docs/guide/deploy.md" docs "${args[@]}" --notes "$root/old-path.json"
 jq '.[0].anchor = {quote: "setup step"}' "$NOTES" >"$root/ambiguous.json"
