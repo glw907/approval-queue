@@ -5,9 +5,12 @@ import type { Proposed, Triage } from '#lib/brief.ts';
 import type { Comment, Thread } from '#lib/editor/comments.ts';
 import type { Note } from '#lib/editor/notes.ts';
 import { descriptionParagraphs, type Packet } from '#lib/packet.ts';
-import { committed } from './blueprint.ts';
+import { committed } from './docs.ts';
 
 export type Disposition = Proposed;
+
+/** The kinds the queue reads; an item of any other kind stays on disk unlisted and unserved. */
+const KINDS: readonly string[] = ['pr', 'design', 'triage', 'packet', 'docs'];
 
 /** One row of a submitted triage: the session's action, Geoff's call, and his own note. */
 export interface SubmittedRow {
@@ -18,7 +21,7 @@ export interface SubmittedRow {
 
 export interface ItemMeta {
 	id: string;
-	kind: 'pr' | 'design' | 'triage' | 'packet' | 'blueprint' | 'page' | 'change';
+	kind: 'pr' | 'design' | 'triage' | 'packet' | 'docs';
 	repo: string;
 	title: string;
 	/** The brief's headline, written by the command; absent on an item it wrote before briefs. */
@@ -29,27 +32,24 @@ export interface ItemMeta {
 	head?: string;
 	/** A PR's number; absent on an item the old command wrote. */
 	number?: number;
-	/** A design's source file name, or a blueprint's path relative to its worktree. */
+	/** A design's source file name. */
 	file?: string;
-	/** A blueprint's worktree, an absolute path; the app reads, saves, and commits the file there. */
+	/** A docs review's worktree, an absolute path; the app reads, saves, and commits the pages there. */
 	worktree?: string;
-	/** A blueprint's blob at HEAD when it was queued. */
-	blob?: string;
-	/** A page's pull request, as `owner/repo#n`. */
-	pr?: string;
-	/** The page's pull request head when the item was queued. */
-	prHead?: string;
+	/** A docs review's merge base with the PR's base branch. */
+	base?: string;
 	/** A packet's initiative id, or `none`; the sidebar and the board group by it. */
 	initiative?: string;
 	/** The initiative record's title; empty for `none`. */
 	initiativeTitle?: string;
 	/**
 	 * Set when the item resends what Geoff sent back: the earlier item, this item's round (2 for the
-	 * first resend), and for a packet the head or hash of each part he sent back.
+	 * first resend), for a packet the head or hash of each part he sent back, and for a docs review
+	 * the worktree commit he left on the send-back.
 	 */
-	revises?: { item: string; revision: number; parts?: Array<{ ref: string; head?: string; sha256?: string }> };
-	/** The blob of the approve a blueprint or page amends; its `approved.md` holds that text. */
-	amends?: string;
+	revises?: { item: string; revision: number; commit?: string; parts?: Array<{ ref: string; head?: string; sha256?: string }> };
+	/** Set when a docs review was queued after an approve of its PR: the commit that approve named. */
+	amends?: { commit: string };
 	/** The queuing command's pid and its start time in clock ticks since boot; absent on an item queued before withdraw. */
 	pid?: number;
 	pidStart?: number;
@@ -86,51 +86,55 @@ export interface PacketPart {
 	doc?: string;
 	pr?: PrMeta;
 	/** A PR the item resends: the diff since the head Geoff sent back, or a marker that head is gone. */
-	since?: { patch: string } | { gone: true };
+	since?: StoredPatch;
 }
 
-/** One document a code PR changed, as the change review shows it. */
-export interface ChangeDoc {
+/** A stored patch the item compares against: the diff itself, or a marker that its commit is no longer an ancestor. */
+export type StoredPatch = { patch: string } | { gone: true };
+
+/** One page a docs review changed. */
+export interface DocsPage {
 	path: string;
-	kind: 'blueprint' | 'page';
-	/** The document at the PR's head. */
-	doc: string;
-	/** The document at the PR's base, empty for a new file. */
-	original: string;
-}
-
-/** A blueprint or a page under review: the file as its worktree commits it, and the notes on it. */
-export interface DocContent {
-	/** The file as committed at the worktree's HEAD now, with its blob and that commit. */
+	/** The page's old path when the PR renamed it. */
+	from?: string;
+	/** The page at the merge base, empty for a new page, which the review marks changed lines against. */
+	base: string;
+	/** The page as committed at the worktree's HEAD now, with its blob and that commit. */
 	doc: string;
 	blob: string;
 	commit: string;
-	/** The file as it was queued, which the review marks changed lines against. */
-	original: string;
-	notes: Note[];
-	worktree: string;
-	file: string;
-	/** The worktree or the file is gone, so the review shows the queued copy and takes no edits. */
+	/** The worktree or the page is gone, so `doc` is the queued copy and the review takes no edits to it. */
 	missing: boolean;
-	/** The description's paragraphs; absent on an item queued before descriptions. */
-	description?: string[];
-	/** The approved text and blob this item amends, when the file was queued after an approve of it. */
-	amend?: { blob: string; original: string };
-	/** A page's pull request as `owner/repo#n`, and its head when queued; a blueprint has neither. */
-	pr?: string;
-	prHead?: string;
+}
+
+/** A docs review: the PR, the code it changes, and its pages as the worktree commits them. */
+export interface DocsContent {
+	/** The description's paragraphs. */
+	description: string[];
+	/** The PR's body. */
+	body: string;
+	pr: PrMeta;
+	/** The PR's diff with each changed page's file section removed. */
+	diff: string;
+	pages: DocsPage[];
+	worktree: string;
+	notes: Note[];
+	/** The author's replies to the comments of an earlier send-back; empty on a first review. */
+	replies: Thread[];
+	/** On a revision, the diff since the commit Geoff sent back. */
+	since?: StoredPatch;
+	/** On an amend, the diff since the commit he approved. */
+	approved?: StoredPatch;
 }
 
 export type ItemContent =
 	| { kind: 'pr'; body: string; diff: string; pr?: PrMeta }
 	| { kind: 'design'; doc: string }
 	| { kind: 'packet'; packet: Packet; parts: PacketPart[] }
-	| ({ kind: 'blueprint' } & DocContent)
-	| ({ kind: 'page' } & DocContent)
-	| { kind: 'change'; body: string; diff: string; pr?: PrMeta; docs: ChangeDoc[]; notes: Note[] }
+	| ({ kind: 'docs' } & DocsContent)
 	| ({ kind: 'triage' } & Triage);
 
-/** What a document review's decision carries to the author; present on the blueprint, page, and change kinds only. */
+/** What a docs review's decision carries to the author. */
 export interface Carried {
 	comments?: Comment[];
 	/** Only the threads Geoff replied to; every other thread resolves at the decision. */
@@ -149,22 +153,21 @@ export type Decision =
 			/** A packet's per-part verdicts and per-ask answers; the command joins the heads and hashes. */
 			parts?: Array<{ ref: string; verdict: string }>;
 			asks?: Array<{ index: number; choice: string }>;
-			/** A blueprint's or change's answered calls by note id, with the choice label. */
+			/** A docs review's answered calls by note id, with the choice label. */
 			calls?: Array<{ id: string; choice: string }>;
-			/** A blueprint's disputed notes answered by keeping the author's text, with the reason. */
-			waived?: Array<{ id: string; choice: string; reason: string }>;
-			/** A blueprint's worktree HEAD at approval, and the file's blob there. */
+			/** A docs review's worktree HEAD at approval. */
 			commit?: string;
-			blob?: string;
 	  } & Carried)
 	| ({
 			decision: 'reject';
 			note: string;
 			/**
-			 * A document review's calls made before it was sent back, so the decided item shows them. A
+			 * A docs review's calls made before it was sent back, so the decided item shows them. A
 			 * packet's are its parts' verdicts and its asks' picks as the screen held them.
 			 */
 			calls?: Array<{ id: string; choice: string } | PacketCall>;
+			/** A docs review's worktree HEAD at the send-back. */
+			commit?: string;
 	  } & Carried)
 	| { decision: 'submit'; rows: SubmittedRow[] };
 
@@ -203,7 +206,7 @@ async function isWaiter(pid: number, start: number | undefined): Promise<boolean
 /** Reads `item.json` and adds the two flags the board shows, which the file never holds. */
 async function readMeta(dir: string): Promise<ItemMeta | undefined> {
 	const stored = await readJson<Omit<ItemMeta, 'deferred' | 'orphaned'>>(join(dir, 'item.json'));
-	if (!stored) return undefined;
+	if (!stored || !KINDS.includes(stored.kind)) return undefined;
 	const deferred = (await stat(join(dir, 'deferred.json')).catch(() => undefined)) !== undefined;
 	const orphaned = stored.pid !== undefined && !deferred && !(await isWaiter(stored.pid, stored.pidStart));
 	return { ...stored, deferred, orphaned };
@@ -291,16 +294,12 @@ export async function readItem(root: string, id: string): Promise<Item | undefin
 			if (err instanceof SyntaxError) return undefined;
 			throw err;
 		}
-	} else if (meta.kind === 'blueprint' || meta.kind === 'page') {
-		content = await readBlueprint(dir, meta);
-	} else if (meta.kind === 'change') {
-		content = await readChange(dir);
-	} else if (meta.kind === 'triage') {
+	} else if (meta.kind === 'docs') {
+		content = await readDocs(dir, meta);
+	} else {
 		const triage = await readJson<Triage>(join(dir, 'triage.json'));
 		// The command validates the file before writing it; a missing or old-shape file renders as empty.
 		content = { kind: 'triage', headline: '', lede: '', rows: [], ...(triage && !Array.isArray(triage) && triage) };
-	} else {
-		return undefined;
 	}
 	return { meta, content, decided: decision !== undefined, ...(decision && { decision }) };
 }
@@ -329,7 +328,7 @@ async function readPacket(dir: string): Promise<ItemContent> {
 		const partDir = join(dir, 'parts', String(k));
 		if (part.kind === 'pr') {
 			const pr = await readJson<PrMeta>(join(partDir, 'pr.json'));
-			const since = await readSince(partDir);
+			const since = await readStoredPatch(partDir, 'since');
 			parts.push({
 				...base,
 				head: pr?.head ?? '',
@@ -346,14 +345,14 @@ async function readPacket(dir: string): Promise<ItemContent> {
 	return { kind: 'packet', packet, parts };
 }
 
-/** Reads a resent PR part's since-send-back files: the patch, a gone marker, or neither. */
-async function readSince(partDir: string): Promise<PacketPart['since']> {
-	const patch = await readFile(join(partDir, 'since.patch'), 'utf8').catch((err) => {
+/** Reads the `<name>.patch` or `<name>.json` gone marker a resent or amended item stores, or neither. */
+async function readStoredPatch(dir: string, name: 'since' | 'approved'): Promise<StoredPatch | undefined> {
+	const patch = await readFile(join(dir, `${name}.patch`), 'utf8').catch((err) => {
 		if (err.code === 'ENOENT') return undefined;
 		throw err;
 	});
 	if (patch !== undefined) return { patch };
-	return (await readJson<{ gone: true }>(join(partDir, 'since.json'))) ?? undefined;
+	return (await readJson<{ gone: true }>(join(dir, `${name}.json`))) ?? undefined;
 }
 
 /** The note and calls of the send-back an earlier item ended in; absent when that item has no reject on disk. */
@@ -363,47 +362,51 @@ export async function readSentBack(root: string, id: string): Promise<{ note: st
 	return { note: decision.note, calls: decision.calls ?? [] };
 }
 
-/** Reads a change item: the PR's body, diff, and metadata, and each changed document at the head and the base. */
-async function readChange(dir: string): Promise<ItemContent> {
-	const lf = (text: string) => text.replace(/\r\n/g, '\n');
-	const pr = await readJson<PrMeta>(join(dir, 'pr.json'));
-	const listed = (await readJson<Array<Pick<ChangeDoc, 'path' | 'kind'>>>(join(dir, 'docs.json'))) ?? [];
-	const docs: ChangeDoc[] = [];
-	for (const [k, { path, kind }] of listed.entries()) {
-		const at = join(dir, 'docs', String(k));
-		const original = await readFile(join(at, 'old.md'), 'utf8').catch(() => '');
-		docs.push({ path, kind, doc: lf(await readFile(join(at, 'new.md'), 'utf8')), original: lf(original) });
-	}
-	return {
-		kind: 'change',
-		body: await readFile(join(dir, 'body.md'), 'utf8'),
-		diff: await readFile(join(dir, 'diff.patch'), 'utf8'),
-		docs,
-		notes: (await readJson<Note[]>(join(dir, 'notes.json'))) ?? [],
-		...(pr && { pr })
-	};
+/** The patch without the file sections of `paths`, which the pages show instead. */
+function withoutSections(patch: string, paths: readonly string[]): string {
+	const sections = patch.split(/^(?=diff --git )/m);
+	return sections.filter((section) => !paths.some((path) => section.split('\n', 1)[0].endsWith(` b/${path}`))).join('');
 }
 
-/** Reads a blueprint or page item: the stored notes and queued copy, and the file as its worktree now commits it. */
-async function readBlueprint(dir: string, meta: ItemMeta): Promise<ItemContent> {
-	const kind = meta.kind === 'page' ? 'page' : 'blueprint';
-	const prs = kind === 'page' ? { pr: meta.pr ?? '', prHead: meta.prHead ?? '' } : {};
+/**
+ * Reads a docs item: the PR's body, metadata, and code diff, the stored notes and replies, and each
+ * changed page as its worktree now commits it, else as it was queued.
+ */
+async function readDocs(dir: string, meta: ItemMeta): Promise<ItemContent> {
 	// The editor works in LF, so the anchors are resolved and the lines compared in LF too.
 	const lf = (text: string) => text.replace(/\r\n/g, '\n');
-	const original = lf(await readFile(join(dir, 'doc.md'), 'utf8'));
-	const notes = (await readJson<Note[]>(join(dir, 'notes.json'))) ?? [];
 	const worktree = meta.worktree ?? '';
-	const file = meta.file ?? '';
-	const description = await readFile(join(dir, 'description.md'), 'utf8').then(descriptionParagraphs, () => undefined);
-	const approved = meta.amends ? await readFile(join(dir, 'approved.md'), 'utf8').catch(() => undefined) : undefined;
-	const amend = approved === undefined ? undefined : { blob: meta.amends ?? '', original: lf(approved) };
-	const extra = { ...prs, ...(description && { description }), ...(amend && { amend }) };
-	try {
-		const now = await committed(worktree, file);
-		return { kind, doc: lf(now.text), blob: now.blob, commit: now.commit, original, notes, worktree, file, missing: false, ...extra };
-	} catch {
-		return { kind, doc: original, blob: meta.blob ?? '', commit: '', original, notes, worktree, file, missing: true, ...extra };
+	const listed = JSON.parse(await readFile(join(dir, 'pages.json'), 'utf8')) as Array<{ path: string; from?: string }>;
+	const pages: DocsPage[] = [];
+	for (const [k, { path, from }] of listed.entries()) {
+		const at = join(dir, 'pages', String(k));
+		const base = lf(await readFile(join(at, 'base.md'), 'utf8'));
+		const page = { path, ...(from && { from }), base };
+		try {
+			const now = await committed(worktree, path);
+			pages.push({ ...page, doc: lf(now.text), blob: now.blob, commit: now.commit, missing: false });
+		} catch {
+			pages.push({ ...page, doc: lf(await readFile(join(at, 'queued.md'), 'utf8')), blob: '', commit: '', missing: true });
+		}
 	}
+	const since = meta.revises && (await readStoredPatch(dir, 'since'));
+	const approved = meta.amends && (await readStoredPatch(dir, 'approved'));
+	return {
+		kind: 'docs',
+		description: descriptionParagraphs(await readFile(join(dir, 'description.md'), 'utf8')),
+		body: await readFile(join(dir, 'body.md'), 'utf8'),
+		pr: JSON.parse(await readFile(join(dir, 'pr.json'), 'utf8')),
+		diff: withoutSections(
+			await readFile(join(dir, 'diff.patch'), 'utf8'),
+			listed.map((page) => page.path)
+		),
+		pages,
+		worktree,
+		notes: (await readJson<Note[]>(join(dir, 'notes.json'))) ?? [],
+		replies: (await readJson<Thread[]>(join(dir, 'replies.json'))) ?? [],
+		...(since && { since }),
+		...(approved && { approved })
+	};
 }
 
 /** Whether the item still has its `item.json`, which a withdraw renames away before it checks for a decision. */

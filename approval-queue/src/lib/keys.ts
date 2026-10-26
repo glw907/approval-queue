@@ -26,7 +26,7 @@ export type KeyAction =
 	| 'cancel-comment';
 
 export interface KeyContext {
-	page: 'pr' | 'design' | 'triage' | 'packet' | 'blueprint' | 'page' | 'change';
+	page: 'pr' | 'design' | 'triage' | 'packet' | 'docs';
 	/** The event target is a field that takes text. */
 	typing: boolean;
 	singleKeys: boolean;
@@ -59,7 +59,7 @@ export interface KeyMods {
 const MOVES: Record<string, KeyAction> = { '1': 'move-now', '2': 'move-defer', '3': 'move-drop' };
 /** On a packet, a digit picks that option of the ask holding focus; the layout finds the ask. */
 const PICKS: Record<string, KeyAction> = { '1': 'pick-1', '2': 'pick-2', '3': 'pick-3' };
-const DOCS: ReadonlyArray<KeyContext['page']> = ['blueprint', 'page', 'change'];
+const DOCS: ReadonlyArray<KeyContext['page']> = ['docs'];
 const COMMENT_LETTERS: Record<string, KeyAction> = { m: 'comment', n: 'next-comment', p: 'prev-comment' };
 const COMMENT_CODES: Record<string, KeyAction> = { KeyM: 'comment', KeyN: 'next-comment', KeyP: 'prev-comment' };
 
@@ -109,7 +109,7 @@ export function keyAction(key: string, mods: KeyMods, context: KeyContext): KeyA
 	if (key === 'z') return held ? 'undo' : null;
 	if ((page === 'pr' || page === 'design') && key === 'a') return noteOpen || approveLocked ? null : 'approve';
 	if (page !== 'triage' && key === 'r') return 'open-note';
-	if ((page === 'pr' || page === 'change') && key === '/') return 'focus-filter';
+	if ((page === 'pr' || page === 'docs') && key === '/') return 'focus-filter';
 	if (page === 'triage' && key in MOVES) return MOVES[key];
 	if (page === 'packet' && !held && key in PICKS) return PICKS[key];
 	return null;

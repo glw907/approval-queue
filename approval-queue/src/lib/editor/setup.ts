@@ -406,13 +406,6 @@ export function lineTop(view: EditorView, pos: number): number {
 	return view.coordsAtPos(at)?.top ?? view.documentTop + view.lineBlockAt(at).top;
 }
 
-/** Replaces a note's anchored text and moves its anchor onto the new text. */
-export function replaceNoteText(view: EditorView, id: string, text: string) {
-	const r = view.state.field(rangesField)[id];
-	if (!r) return;
-	view.dispatch({ changes: { from: r[0], to: r[1], insert: text }, effects: rangeEffect.of({ id, range: [r[0], r[0] + text.length] }) });
-}
-
 /**
  * The start of the folded run of unchanged lines that hides `pos`, or null. `uncollapseUnchanged`
  * names a run by its exact start and the package exports no lookup, so this reads the fold from the

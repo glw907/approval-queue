@@ -14,7 +14,7 @@ async function git(worktree: string, args: string[]): Promise<string> {
 	return stdout;
 }
 
-/** Where a document stands in its worktree: the HEAD commit, the file's blob there, and its text. */
+/** Where a page stands in its worktree: the HEAD commit, the file's blob there, and its text. */
 export interface Committed {
 	commit: string;
 	blob: string;
@@ -61,6 +61,14 @@ export const queued = <T>(worktree: string, file: string, step: () => Promise<T>
 	serial(fileQueues, join(worktree, file), step);
 
 /**
+ * Runs `step` once every earlier step on each of the files has finished, for a decision that reads
+ * every page. The queues are taken in the order given, the item's page order, so two decisions
+ * never wait on each other.
+ */
+export const queuedEach = <T>(worktree: string, files: readonly string[], step: () => Promise<T>): Promise<T> =>
+	files.reduceRight((inner, file) => () => queued(worktree, file, inner), step)();
+
+/**
  * Runs `step` after every earlier step on the same item directory has finished. A step that also
  * needs the file's queue takes it inside this one, never the other way round, so the two never
  * wait on each other.
@@ -100,23 +108,13 @@ export async function commitText(worktree: string, file: string, text: string, b
 export const saveFile = (worktree: string, file: string, text: string, base: string): Promise<Saved> =>
 	queued(worktree, file, () => commitText(worktree, file, text, base));
 
-/** A disputed note answered by keeping the author's text, which leaves the fact check's finding unapplied. */
-export interface Waived {
-	id: string;
-	choice: string;
-	reason: string;
-}
+export type DocsApprove = { ok: true; decision: Decision } | { ok: false; message: string };
 
-export type BlueprintApprove = { ok: true; decision: Decision } | { ok: false; message: string };
-
-type Answered = { ok: true; calls: Array<{ id: string; choice: string }>; waived: Waived[] } | { ok: false; message: string };
+type Answered = { ok: true; calls: Array<{ id: string; choice: string }> } | { ok: false; message: string };
 
 /**
  * Reads the answers to a review's calls from the post. Every call (a `decide` or `question` note)
- * must carry one of its own choice labels under `call:<id>`, and nothing else may be posted as a
- * call. A `decide` note answered with a choice that neither rewrites the line (`text`) nor opens it
- * for the reader's own wording (`edit`) waives the fact check's finding; the choice's outcome line
- * is the reason.
+ * must carry one of its own choice labels under `call:<id>`, and nothing else may be posted as a call.
  */
 function answerCalls(notes: readonly Note[], form: Fields): Answered {
 	const calls = notes.filter(isCall);
@@ -126,34 +124,35 @@ function answerCalls(notes: readonly Note[], form: Fields): Answered {
 		}
 	}
 	const out: Array<{ id: string; choice: string }> = [];
-	const waived: Waived[] = [];
 	for (const note of calls) {
 		const label = form.get(`call:${note.id}`);
 		const picked = typeof label === 'string' ? note.choices?.find((c) => c.label === label) : undefined;
 		if (!picked) return { ok: false, message: `Make the call “${note.title}” first` };
 		out.push({ id: note.id, choice: picked.label });
-		if (note.kind === 'decide' && picked.text === undefined && !picked.edit) {
-			waived.push({ id: note.id, choice: picked.label, reason: picked.done });
-		}
 	}
-	return { ok: true, calls: out, waived };
+	return { ok: true, calls: out };
 }
 
 /**
- * Builds the approve decision of a blueprint or a page from the stored notes and the post. The
- * commit and blob come from the worktree, never from the post: the posted `blob`, what the page
- * last saved, must still be the file's blob at HEAD, so what the reader approved is exactly what
- * the decision names.
+ * Builds the approve decision of a docs review from the stored notes and the post. The commit comes
+ * from the worktree, never from the post: each page must be clean, and the `blob:<path>` the post
+ * carries, what the page last saved, must still be the page's blob at HEAD, so what the reader
+ * approved is exactly what the decision names.
  */
-export function buildBlueprintApprove(notes: readonly Note[], form: Fields, head: Committed & { clean: boolean }): BlueprintApprove {
+export function buildDocsApprove(
+	notes: readonly Note[],
+	form: Fields,
+	head: { commit: string; pages: Array<{ path: string; blob: string; clean: boolean }> }
+): DocsApprove {
 	const answered = answerCalls(notes, form);
 	if (!answered.ok) return answered;
-	if (!head.clean) return { ok: false, message: 'The file has changes that are not committed; wait for the save' };
-	if (form.get('blob') !== head.blob) return { ok: false, message: 'The file changed since your last save; reload the page' };
-	return {
-		ok: true,
-		decision: { decision: 'approve', calls: answered.calls, waived: answered.waived, commit: head.commit, blob: head.blob }
-	};
+	for (const page of head.pages) {
+		if (!page.clean) return { ok: false, message: `${page.path} has changes that are not committed; wait for the save` };
+		if (form.get(`blob:${page.path}`) !== page.blob) {
+			return { ok: false, message: `${page.path} changed since your last save; reload the page` };
+		}
+	}
+	return { ok: true, decision: { decision: 'approve', commit: head.commit, calls: answered.calls } };
 }
 
 /**
@@ -166,10 +165,4 @@ export function sentBackCalls(notes: readonly Note[], form: Fields): Array<{ id:
 		const picked = typeof label === 'string' ? note.choices?.find((c) => c.label === label) : undefined;
 		return picked ? [{ id: note.id, choice: picked.label }] : [];
 	});
-}
-
-/** Builds the approve decision of a change review: its calls only, since the documents take no edits. */
-export function buildChangeApprove(notes: readonly Note[], form: Fields): BlueprintApprove {
-	const answered = answerCalls(notes, form);
-	return answered.ok ? { ok: true, decision: { decision: 'approve', calls: answered.calls } } : answered;
 }

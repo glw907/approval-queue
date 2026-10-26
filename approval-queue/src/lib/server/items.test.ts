@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
+import { git, REPOT, REPOT_HEAD, seedDocsItem, seedDocsRepo, WATER, WATER_HEAD } from '#lib/fixtures/seed-docs.ts';
 import { seedPacket } from '#lib/fixtures/seed-packet.ts';
 import { listDecided, listWaiting, procStat, readItem, writeDecision, writeDecisionOnce, writeDeferred } from './items.ts';
 
@@ -63,7 +64,7 @@ describe('listDecided', () => {
 	});
 
 	it('adds the reason from refused.json, and only to the item that has one', async () => {
-		const meta = { kind: 'page', repo: 'r', title: 't', created: 'c' };
+		const meta = { kind: 'docs', repo: 'r', title: 't', created: 'c' };
 		for (const id of ['a', 'b']) await seed(id, { ...meta, title: id });
 		await writeDecision(root, 'a', { decision: 'approve' });
 		await writeDecision(root, 'b', { decision: 'approve' });
@@ -289,20 +290,107 @@ describe('a packet.json that does not parse', () => {
 	});
 });
 
-describe('an amend', () => {
-	const meta = { kind: 'blueprint', repo: 'r', title: 't', created: 'c', worktree: '/nonexistent', file: 'b.blueprint.md', blob: 'new' };
+describe('a docs item', () => {
+	let repo: string;
+	beforeEach(async () => {
+		repo = await mkdtemp(join(tmpdir(), 'approval-queue-docs-'));
+		seedDocsRepo(repo);
+		await seedDocsItem(root, 'd', repo);
+	});
+	afterEach(() => rm(repo, { recursive: true, force: true }));
 
-	it('reads the approved text with CRLF turned to LF, and the blob it came from', async () => {
-		await seed('a', { ...meta, amends: 'abc123' }, { 'doc.md': 'now\n', 'approved.md': 'before\r\nthen\r\n' });
-		const item = await readItem(root, 'a');
-		expect(item?.content).toMatchObject({ kind: 'blueprint', amend: { blob: 'abc123', original: 'before\nthen\n' } });
+	const docs = async (id = 'd') => {
+		const item = await readItem(root, id);
+		if (item?.content.kind !== 'docs') throw new Error('not a docs item');
+		return item.content;
+	};
+
+	it('reads each page as the worktree commits it, with its merge-base text and blob', async () => {
+		const content = await docs();
+		expect(content.pages.map((p) => [p.path, p.missing])).toEqual([
+			[WATER, false],
+			[REPOT, false]
+		]);
+		const [water, repot] = content.pages;
+		expect(water).toMatchObject({ doc: WATER_HEAD, blob: git(repo, 'rev-parse', `HEAD:${WATER}`), commit: git(repo, 'rev-parse', 'HEAD') });
+		expect(water.base).toContain('runs out of the drainage holes');
+		expect(repot).toMatchObject({ doc: REPOT_HEAD, base: '' });
+		expect(content).toMatchObject({ worktree: repo, notes: expect.any(Array), replies: [expect.objectContaining({ id: 'C1' })] });
+		expect(content.notes.map((n) => n.kind)).toEqual(['info', 'decide', 'question']);
+		expect(content.description).toEqual(['The guide had no repotting page.', 'This adds one and tightens the watering step.']);
 	});
 
-	it('has no amend without the field, or when approved.md is gone', async () => {
-		await seed('plain', meta, { 'doc.md': 'now\n' });
-		await seed('lost', { ...meta, amends: 'abc123' }, { 'doc.md': 'now\n' });
-		expect((await readItem(root, 'plain'))?.content).not.toHaveProperty('amend');
-		expect((await readItem(root, 'lost'))?.content).not.toHaveProperty('amend');
+	it('shows the worktree’s page after an edit, with CRLF read as LF', async () => {
+		await writeFile(join(repo, WATER), WATER_HEAD.replace(/\n/g, '\r\n').replace('top inch', 'top two inches'));
+		git(repo, 'commit', '-q', '-am', `Edit ${WATER} in review`);
+		const [water] = (await docs()).pages;
+		expect(water.doc).toBe(WATER_HEAD.replace('top inch', 'top two inches'));
+	});
+
+	it('holds the code diff with each page’s file section removed', async () => {
+		const { diff } = await docs();
+		expect(diff).toContain('diff --git a/src/watering.ts b/src/watering.ts');
+		expect(diff).not.toContain(WATER);
+		expect(diff).not.toContain(REPOT);
+	});
+
+	it('removes a renamed page’s section by its new path', async () => {
+		const diff = 'diff --git a/docs/old.md b/docs/new.md\nsimilarity index 90%\nrename from docs/old.md\nrename to docs/new.md\ndiff --git a/src/a.ts b/src/a.ts\n+x\n';
+		await writeFile(join(root, 'items', 'd', 'diff.patch'), diff);
+		await writeFile(join(root, 'items', 'd', 'pages.json'), JSON.stringify([{ path: 'docs/new.md', from: 'docs/old.md' }]));
+		await mkdir(join(root, 'items', 'd', 'pages/0'), { recursive: true });
+		expect((await docs()).diff).toBe('diff --git a/src/a.ts b/src/a.ts\n+x\n');
+		expect((await docs()).pages[0]).toMatchObject({ path: 'docs/new.md', from: 'docs/old.md', missing: true });
+	});
+
+	it('shows the queued copy of a page and marks it missing when the worktree is gone', async () => {
+		await rm(repo, { recursive: true, force: true });
+		const { pages } = await docs();
+		expect(pages.map((p) => [p.doc, p.blob, p.commit, p.missing])).toEqual([
+			[WATER_HEAD, '', '', true],
+			[REPOT_HEAD, '', '', true]
+		]);
+	});
+
+	it('marks only the page that is no longer committed', async () => {
+		git(repo, 'rm', '-q', REPOT);
+		git(repo, 'commit', '-q', '-m', 'Drop the page');
+		expect((await docs()).pages.map((p) => p.missing)).toEqual([false, true]);
+	});
+
+	it('reads the since diff of a revision and the approved diff of an amend', async () => {
+		await seed('r', { kind: 'docs', repo: 'r', title: 't', created: 'c', worktree: repo, revises: { item: 'd', revision: 2, commit: 'abc' } }, {});
+		for (const name of ['pages.json', 'description.md', 'body.md', 'diff.patch', 'pr.json']) {
+			await writeFile(join(root, 'items', 'r', name), name === 'pages.json' ? '[]' : name === 'pr.json' ? '{}' : '');
+		}
+		await writeFile(join(root, 'items', 'r', 'since.patch'), 'diff --git a/x b/x\n');
+		expect(await docs('r')).toMatchObject({ since: { patch: 'diff --git a/x b/x\n' } });
+		await rm(join(root, 'items', 'r', 'since.patch'));
+		await writeFile(join(root, 'items', 'r', 'since.json'), '{"gone":true}');
+		expect(await docs('r')).toMatchObject({ since: { gone: true } });
+		await seed('a', { kind: 'docs', repo: 'r', title: 't', created: 'c', worktree: repo, amends: { commit: 'abc' } }, {});
+		for (const name of ['pages.json', 'description.md', 'body.md', 'diff.patch', 'pr.json']) {
+			await writeFile(join(root, 'items', 'a', name), name === 'pages.json' ? '[]' : name === 'pr.json' ? '{}' : '');
+		}
+		await writeFile(join(root, 'items', 'a', 'approved.patch'), 'diff --git a/y b/y\n');
+		const amend = await docs('a');
+		expect(amend).toMatchObject({ approved: { patch: 'diff --git a/y b/y\n' } });
+		expect(amend).not.toHaveProperty('since');
+		expect((await docs()).pages).toHaveLength(2);
+		expect(await docs()).not.toHaveProperty('approved');
+	});
+});
+
+describe('an item of a kind the queue no longer reads', () => {
+	it.each(['blueprint', 'page', 'change'])('stays on disk but is not listed, decided or waiting, nor served (%s)', async (kind) => {
+		await seed('old', { kind, repo: 'r', title: 't', created: 'c' }, { 'doc.md': '# doc' });
+		await seed('gone', { kind, repo: 'r', title: 't', created: 'c' }, { 'doc.md': '# doc' });
+		await writeDecision(root, 'gone', { decision: 'approve' });
+		expect(await listWaiting(root)).toEqual([]);
+		expect(await listDecided(root, 0)).toEqual([]);
+		expect(await readItem(root, 'old')).toBeUndefined();
+		expect(await readItem(root, 'gone')).toBeUndefined();
+		expect(await readdir(join(root, 'items'))).toContain('gone');
 	});
 });
 

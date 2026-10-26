@@ -4,7 +4,7 @@ import { listWaiting, type ItemMeta } from '#lib/server/items.ts';
 import { packetFacts } from '#lib/server/packet-facts.ts';
 import type { PageServerLoad } from './$types';
 
-const KINDS = { pr: 'PR', design: 'Design', triage: 'Triage', blueprint: 'Blueprint', page: 'Page', change: 'Change' };
+const KINDS = { pr: 'PR', design: 'Design', triage: 'Triage', docs: 'Docs' };
 
 async function toRow(meta: ItemMeta): Promise<BoardRow> {
 	const base = { id: meta.id, headline: meta.headline ?? meta.title, created: meta.created, deferred: meta.deferred, orphaned: meta.orphaned };
