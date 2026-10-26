@@ -270,12 +270,13 @@ describe('seedFrom', () => {
 		expect(seed.note).toBe('');
 	});
 
-	it('reads a document review’s send-back note', () => {
+	it('reads a docs review’s send-back note from a post carrying two pages and a call', () => {
 		const form = new FormData();
-		form.set('blob', 'abc');
+		form.set('blob:docs/a.md', 'abc');
+		form.set('blob:docs/b.md', 'def');
 		form.set('call:B3', 'Keep it');
 		form.set('note', '- Still open: Why\n');
-		expect(seedFrom(form, 'docs')).toMatchObject({ note: '- Still open: Why\n', answers: {}, picks: [] });
+		expect(seedFrom(form, 'docs')).toMatchObject({ note: '- Still open: Why\n', answers: {}, verdicts: {}, picks: [] });
 	});
 });
 

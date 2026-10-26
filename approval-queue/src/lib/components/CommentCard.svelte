@@ -16,7 +16,7 @@ With comments read only, as on a decided item, the card shows no actions.
 	interface Props {
 		review: DocReview;
 		card: Exclude<MarginCard, { kind: 'note' }>;
-		/** What the document is called in the gone line: "blueprint", "page", or a change document's kind. */
+		/** What the document is called in the gone line, such as "page". */
 		kindWord: string;
 		current?: boolean;
 		/** The heading level of the card's title, one under the margin's own title. */

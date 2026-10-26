@@ -1,29 +1,15 @@
 // Remark-directive detection for the document editor, ported from cairn-cms
-// `src/lib/admin/markdown-directives.ts` (the FENCE, LEAF, INLINE, and CODE_FENCE regexes,
+// `src/lib/admin/markdown-directives.ts` (the FENCE, INLINE, and CODE_FENCE regexes,
 // `fenceScan`, `fenceTokens`, `findInlineDirectives`, and `frontmatterSpan`). Only what the
 // review editor reads came across; the fold, figure, and include helpers stayed behind.
 
 // A container fence: three or more colons, then an optional name, an optional [label], and
 // optional {attrs}. The name tells an opener (named) from a closer (bare colons).
 const FENCE = /^\s{0,3}(:{3,})\s*([\w-]*)\s*(\[[^\]]*\])?\s*(\{[^}]*\})?\s*$/d;
-const LEAF = /^\s{0,3}::[\w-]+(\[[^\]]*\])?(\{[^}]*\})?\s*$/;
 const INLINE = /(?<![:\w]):[\w-]+\[[^\]]*\](\{[^}]*\})?/g;
 // A fenced code block's delimiter, tracked so a documented ::: example never opens a container.
 const CODE_FENCE = /^\s{0,3}(`{3,}|~{3,})/;
 const FRONTMATTER_FENCE = /^---$/;
-
-/** Classifies a whole line as a container fence, a leaf directive, or neither. */
-export function directiveLineKind(line: string): 'fence' | 'leaf' | null {
-	if (FENCE.test(line)) return 'fence';
-	if (LEAF.test(line)) return 'leaf';
-	return null;
-}
-
-/** The directive name on a container opener line, or null for a closer or any other line. */
-export function directiveOpenerName(line: string): string | null {
-	const m = FENCE.exec(line);
-	return m && m[2] ? m[2] : null;
-}
 
 /** Each line's container depth and fence role, from one pass over the document. */
 export interface FenceScan {

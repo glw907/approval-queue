@@ -4,7 +4,7 @@ contour texture behind them. The screen passes its path as `crumbs`, the last of
 itself, and its headline and lede as snippets, so rendered inline Markdown works. A `state` snippet
 holds what is not part of the path (a badge, the wait, a link out); it sits beside the breadcrumb,
 outside its `nav`. `headlineText` is the headline's source text; one over 90 characters takes the
-`long` size. A packet, blueprint, or page passes `description`, its paragraphs each in a `<p>`; a
+`long` size. A packet or docs review passes `description`, its paragraphs each in a `<p>`; a
 `lede` passed beside it follows as a smaller status line, and one passed alone is the one-paragraph
 lede.
 -->
