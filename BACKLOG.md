@@ -12,6 +12,8 @@
 
 ## Medium
 
+- [ ] **#59** An orderly reboot retires an undecided item, so `collect` can't recover it `#bug` `#approval-queue` *(2026-10-31)*
+  Shutdown sends TERM to the waiting `approval-queue packet`, and the `trap 'exit 143' TERM HUP INT` line runs the EXIT trap's `retire_item`, the same path `withdraw` uses. `item.json` is gone, and `collect` answers "no item is queued". #16's recovery covers only a KILL or a crash, so a session that tells Geoff a reboot is safe loses the packet without notice. Seen on phonebook packet 20261031T151942-2819338 (retired 15:35:26 at shutdown, resent unchanged). Have `withdraw` leave a marker for the waiter to check, so a plain TERM leaves `item.json` for `collect`.
 - [ ] **#58** A docs review's page controls: F8 order, a new page's diff button, and the added-text underline `#improvement` `#approval-queue` `#initiative:docs-system` *(2026-10-26)*
   F8 ("next call") always starts at the page after the last one used, so with two open calls on page 1 and one on page 2 it goes page 1, page 2, page 1. A new page (`base` empty) still offers "Show all unchanged lines" with nothing to unfold. Added text takes a solid underline like a link, so a whole new paragraph can read as a link. Found in the svelte and accessibility reviews of the docs cutover (PR #12).
 - [ ] **#57** A docs review's comment and send-back edges `#improvement` `#approval-queue` `#initiative:docs-system` *(2026-10-26)*
