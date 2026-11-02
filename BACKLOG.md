@@ -12,6 +12,8 @@
 
 ## Medium
 
+- [ ] **#60** Two approved packets kept no decision.json `#bug` `#approval-queue` *(2026-11-01)*
+  Geoff approved packets 20261101T090321-3628943 and 20261101T131042-271886 on 2026-11-01, and neither left a `decision.json`, so both were withdrawn and his chat word stood in for the approval. Design items saved fine that day, and both losses were packets. The cause is unexplained, so read the save path for a packet first. A record packet does not wait on its decision, so nothing stalled, but a lost approve on a waiting packet would hold a run.
 - [ ] **#59** An orderly reboot retires an undecided item, so `collect` can't recover it `#bug` `#approval-queue` *(2026-10-31)*
   Shutdown sends TERM to the waiting `approval-queue packet`, and the `trap 'exit 143' TERM HUP INT` line runs the EXIT trap's `retire_item`, the same path `withdraw` uses. `item.json` is gone, and `collect` answers "no item is queued". #16's recovery covers only a KILL or a crash, so a session that tells Geoff a reboot is safe loses the packet without notice. Seen on phonebook packet 20261031T151942-2819338 (retired 15:35:26 at shutdown, resent unchanged). Have `withdraw` leave a marker for the waiter to check, so a plain TERM leaves `item.json` for `collect`.
 - [ ] **#58** A docs review's page controls: F8 order, a new page's diff button, and the added-text underline `#improvement` `#approval-queue` `#initiative:docs-system` *(2026-10-26)*
