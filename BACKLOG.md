@@ -12,6 +12,9 @@
 
 ## Medium
 
+- [ ] **#61** A PR whose diff touches an escape-bearing file can't be queued `#bug` `#approval-queue` *(2026-11-01)*
+  `gh pr diff` now refuses a diff with terminal escape sequences unless passed `--allow-escape-sequences`, so `approval-queue packet` and `--check` exit 1 on such a PR. glw907/cairn-cms#180 hit this by deleting 30 `.ansi` reference frames, with no added line carrying an escape. The session wrote the packet to its state dir and merged under the hand-over's queue-down rule. The queue should render the neutralized diff, or fall back to `git diff`, since passing raw escapes to a browser page needs its own thought.
+
 - [ ] **#60** Two approved packets kept no decision.json `#bug` `#approval-queue` *(2026-11-01)*
   Geoff approved packets 20261101T090321-3628943 and 20261101T131042-271886 on 2026-11-01, and neither left a `decision.json`, so both were withdrawn and his chat word stood in for the approval. Design items saved fine that day, and both losses were packets. The cause is unexplained, so read the save path for a packet first. A record packet does not wait on its decision, so nothing stalled, but a lost approve on a waiting packet would hold a run.
 - [ ] **#59** An orderly reboot retires an undecided item, so `collect` can't recover it `#bug` `#approval-queue` *(2026-10-31)*
