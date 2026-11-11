@@ -299,13 +299,16 @@ describe('load', () => {
 });
 
 describe('an item of a removed kind', () => {
-	it.each(['blueprint', 'page', 'change', 'pr', 'docs'])('answers 404 to the load and every post, decided or not (%s)', async (kind) => {
+	it.each(['blueprint', 'page', 'change', 'pr', 'docs'])('answers 404 to every post and to the load while it waits, and opens read-only once decided (%s)', async (kind) => {
 		await seed(ID, { kind, repo: 'r', title: 't', created: 'c' }, { 'doc.md': '# doc' });
 		for (const run of [() => load({ params: { id: ID } } as never), () => call('approve'), () => call('reject'), () => call('submit')]) {
 			await expect(Promise.resolve().then(run)).rejects.toMatchObject({ status: 404 });
 		}
 		await writeFile(join(state.root, 'items', ID, 'decision.json'), '{"decision":"approve"}');
-		await expect(load({ params: { id: ID } } as never)).rejects.toMatchObject({ status: 404 });
+		expect(await load({ params: { id: ID } } as never)).toMatchObject({ kind: 'retired', itemKind: kind, decision: 'approve' });
+		for (const run of [() => call('approve'), () => call('reject'), () => call('submit')]) {
+			await expect(Promise.resolve().then(run)).rejects.toMatchObject({ status: 404 });
+		}
 	});
 });
 

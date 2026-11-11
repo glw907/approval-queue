@@ -10,6 +10,7 @@ import { deepDiveBody } from '#lib/packet-view.ts';
 import { nextItem } from '#lib/queue.ts';
 import { appendFold } from '#lib/server/folds.ts';
 import { checkCurrent } from '#lib/server/heads.ts';
+import { historyRow } from '#lib/server/history.ts';
 import { buildPacketDecision, parseNotes } from '#lib/server/packet-decision.ts';
 import {
 	listWaiting,
@@ -107,10 +108,18 @@ function detailRows(brief: Brief | null) {
 	}));
 }
 
-/** Loads the item the page shows: a packet, a design, or a triage list. Any other kind is a 404, as an unknown id is. */
+/**
+ * Loads the item the page shows: a packet, a design, or a triage list. A decided item the queue can
+ * no longer read in full (a retired kind, or a packet whose files no longer check) opens as the
+ * record `history` lists, read-only; an unknown id, or an item still waiting, is a 404.
+ */
 export const load: PageServerLoad = async ({ params }) => {
 	const item = await readItem(APPROVAL_QUEUE_STATE, params.id);
-	if (!item) error(404, 'Not found');
+	if (!item) {
+		const row = await historyRow(APPROVAL_QUEUE_STATE, params.id);
+		if (!row) error(404, 'Not found');
+		return { kind: 'retired' as const, id: row.id, title: row.title, itemKind: row.kind, decision: row.decision, date: row.date };
+	}
 	const { meta, decided, content, decision } = item;
 	if (content.kind === 'design') {
 		const words = content.doc.split(/\s+/).filter(Boolean).length;
@@ -145,7 +154,8 @@ export const load: PageServerLoad = async ({ params }) => {
 		};
 	}
 	if (content.kind === 'legacy') {
-		return { meta, decided, kind: 'legacy' as const, decision, text: content.text };
+		const date = (await historyRow(APPROVAL_QUEUE_STATE, params.id))?.date;
+		return { meta, decided, kind: 'legacy' as const, decision, text: content.text, date };
 	}
 	// A decided triage shows the calls that were sent, matched by action so a reordered file never
 	// pairs a call with the wrong row.

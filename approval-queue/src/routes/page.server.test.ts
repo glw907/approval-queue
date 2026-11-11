@@ -35,7 +35,7 @@ async function makeIrreversible(id: string) {
 }
 
 const board = (sort?: string) =>
-	load({ depends() {}, cookies: { get: () => sort } } as never) as Promise<{
+	load({ depends() {}, isDataRequest: true, cookies: { get: () => sort } } as never) as Promise<{
 		empty: false;
 		sort: string;
 		rows: Array<{ id: string; group: string; asks: number; rules: string[]; repos: number; irreversible: boolean; single?: string; orphaned: boolean }>;
@@ -93,7 +93,7 @@ describe('/', () => {
 
 	it('depends on desk:queue, so the poll refreshes the board', async () => {
 		const keys: string[] = [];
-		await load({ depends: (key: string) => keys.push(key), cookies: { get: () => undefined } } as never);
+		await load({ depends: (key: string) => keys.push(key), isDataRequest: true, cookies: { get: () => undefined } } as never);
 		expect(keys).toEqual(['desk:queue']);
 	});
 
@@ -102,22 +102,59 @@ describe('/', () => {
 	});
 });
 
-describe('layout', () => {
-	it('loads the waiting queue and what was decided since the app started', async () => {
-		await seed('a', '2026-10-11T10:00:00Z');
-		const data = await layoutLoad({ depends() {}, isDataRequest: false } as never);
-		expect(data).toMatchObject({ queue: [{ id: 'a' }], decided: [] });
+describe('/ on a first load', () => {
+	const open = (isDataRequest: boolean) => load({ depends() {}, isDataRequest, cookies: { get: () => undefined } } as never);
+	/** The redirect `load` throws, as SvelteKit's `redirect` makes it. */
+	const redirected = async (isDataRequest: boolean) => {
+		try {
+			await open(isDataRequest);
+		} catch (thrown) {
+			return thrown as { status: number; location: string };
+		}
+	};
+
+	it('redirects to the oldest waiting packet', async () => {
+		await seedFacts(state.root, 'late', 'close', { created: '2026-10-11T11:00:00Z' });
+		await seedFacts(state.root, 'early', 'stop', { created: '2026-10-11T10:00:00Z' });
+		await seed('d', '2026-10-11T09:00:00Z');
+		expect(await redirected(false)).toMatchObject({ status: 302, location: '/item/early' });
 	});
 
-	it('gives each packet its ask count and irreversible flag, and every other kind none', async () => {
+	it('shows the board when only a design or an unreadable packet waits', async () => {
+		await seed('d', '2026-10-11T09:00:00Z');
+		await seedFacts(state.root, 'bad', 'close', { created: '2026-10-11T10:00:00Z' });
+		await writeFile(join(state.root, 'items', 'bad', 'facts.json'), '{nope');
+		expect(await redirected(false)).toBeUndefined();
+	});
+
+	it('never redirects a navigation inside the app, so the board key and a decision that empties the queue land on the board', async () => {
+		await seedFacts(state.root, 'p1', 'close', { created: '2026-10-11T10:00:00Z' });
+		expect(await redirected(true)).toBeUndefined();
+	});
+});
+
+describe('layout', () => {
+	it('loads the waiting queue and the digest line, with no digest yet', async () => {
+		await seed('a', '2026-10-11T10:00:00Z');
+		const data = await layoutLoad({ depends() {}, isDataRequest: false } as never);
+		expect(data).toMatchObject({ queue: [{ id: 'a' }], digest: null });
+	});
+
+	it('gives each packet its call count and kind, and every other kind none', async () => {
 		await seed('a', '2026-10-11T10:00:00Z');
 		await seedFacts(state.root, 'p1', 'close', { created: '2026-10-11T11:00:00Z' });
-		await seedFacts(state.root, 'p2', 'close', { created: '2026-10-11T12:00:00Z' });
-		await makeIrreversible('p2');
+		await seedFacts(state.root, 'p2', 'stop', { created: '2026-10-11T12:00:00Z' });
 		const { queue } = (await layoutLoad({ depends() {}, isDataRequest: false } as never)) as unknown as {
-			queue: Array<{ id: string; asks: number; irreversible: boolean }>;
+			queue: Array<{ id: string; asks: number; packetKind?: string }>;
 		};
-		expect(Object.fromEntries(queue.map((q) => [q.id, [q.asks, q.irreversible]]))).toEqual({ a: [0, false], p1: [2, false], p2: [2, true] });
+		expect(Object.fromEntries(queue.map((q) => [q.id, [q.asks, q.packetKind]]))).toMatchObject({ a: [0, undefined], p1: [2, 'close'], p2: [expect.any(Number), 'stop'] });
+	});
+
+	it('summarizes the newest day of the digest', async () => {
+		const line = (time: string, n: number) => JSON.stringify({ time, ref: `o/r#${n}`, head: 'h', claim: `c${n}`, lane: 'land' });
+		await writeFile(join(state.root, 'digest.jsonl'), [line('2026-11-09T12:00:00Z', 1), line('2026-11-10T12:00:00Z', 2), line('2026-11-10T12:10:00Z', 3)].join('\n') + '\n');
+		const data = await layoutLoad({ depends() {}, isDataRequest: false } as never);
+		expect(data).toMatchObject({ digest: { count: 2, day: '10 November' } });
 	});
 
 	it('depends on desk:queue, so the open tab can poll it', async () => {

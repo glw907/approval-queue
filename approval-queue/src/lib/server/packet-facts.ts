@@ -4,6 +4,8 @@ import type { Facts } from '#lib/facts.ts';
 
 /** What the board and the rail show of a packet without opening it. */
 export interface PacketFacts {
+	/** The fact file's kind, which words the rail's line. */
+	kind: Facts['kind'];
 	asks: number;
 	/** The rule ids of the asks, once each. */
 	rules: string[];
@@ -38,6 +40,7 @@ export async function packetFacts(root: string, id: string): Promise<PacketFacts
 function summarize(stored: Facts): PacketFacts {
 	const repos = new Set([...stored.prs.map((ref) => ref.split('#')[0]), ...(stored.design ? [stored.design.repo] : [])]);
 	return {
+		kind: stored.kind,
 		asks: stored.calls.length,
 		rules: [...new Set(stored.calls.map((call) => call.rule))],
 		repos: repos.size,

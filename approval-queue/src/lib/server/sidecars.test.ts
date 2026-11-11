@@ -74,7 +74,7 @@ describe('readItem on a new-shape packet', () => {
 describe('packetFacts on a new-shape packet', () => {
 	it('counts the calls, their rules, and the repos the PRs name', async () => {
 		await seedFacts(root, 'p', 'close');
-		expect(await packetFacts(root, 'p')).toEqual({ asks: 2, rules: ['owner-call', 'public-surface'], repos: 1, irreversible: false });
+		expect(await packetFacts(root, 'p')).toEqual({ kind: 'close', asks: 2, rules: ['owner-call', 'public-surface'], repos: 1, irreversible: false });
 	});
 });
 
