@@ -1,12 +1,12 @@
 <!-- @component
-The packet's routine parts: one row per PR or design no ask binds, each with the session's verdict
-preselected in a segment and a Why that opens the detail (a PR's checks and full diff, or the design
-rendered). A failing or unchecked PR keeps that fact outside the disclosure. A plan step's verdict sits
-on its step in `PacketBrief`, so steps are not listed here.
+The packet's routine parts: one row per PR or design no ask binds, each with the session's fact and a
+Why that opens the detail (a PR's checks and full diff, or the design
+rendered). A failing or unchecked PR keeps that fact outside the disclosure. A plan step is shown on its
+step in `PacketBrief`, so steps are not listed here.
 
-The segment's radios belong to the decision form and post as `part:<ref>`; `verdicts` is bound up so
-the page can follow what changed. The server reads every routine part by ref and refuses a post that
-omits one. Renders nothing for a packet with no routine parts.
+The row carries no control: the packet decides as a whole, and the item panel posts the session's
+verdict for each routine part as a hidden `part:<ref>` field. Renders nothing for a packet with no
+routine parts.
 -->
 <script lang="ts">
 	import { refKind } from '#lib/packet-view.ts';
@@ -15,7 +15,6 @@ omits one. Renders nothing for a packet with no routine parts.
 	import FilesDiff from './FilesDiff.svelte';
 	import PacketIcon from './PacketIcon.svelte';
 	import PartFiles from './PartFiles.svelte';
-	import PacketSeg from './PacketSeg.svelte';
 	import Prose from './Prose.svelte';
 
 	type Packet = Extract<PageData, { kind: 'packet' }>;
@@ -24,13 +23,9 @@ omits one. Renders nothing for a packet with no routine parts.
 		routine: Packet['routine'];
 		/** Every part, which carries the detail a row opens to. */
 		parts: Packet['parts'];
-		/** The verdict chosen for each part, by ref; starts at the session's. */
-		verdicts: Record<string, string>;
-		/** A decided packet shows its rows but locks every override. */
-		decided: boolean;
 	}
 
-	let { routine, parts, verdicts = $bindable({}), decided }: Props = $props();
+	let { routine, parts }: Props = $props();
 
 	const rows = $derived(routine.filter((row) => row.kind !== 'step'));
 	const detail = (ref: string) => parts.find((p) => p.ref === ref);
@@ -43,15 +38,13 @@ omits one. Renders nothing for a packet with no routine parts.
 		if ((part.checks?.failed ?? 0) > 0 || part.review === 'fix' || part.review === 'escalate') return 'failing';
 		return (part.checks?.rows.length ?? 0) === 0 || !part.review ? 'unchecked' : null;
 	}
-
-	const changed = $derived(rows.filter((row) => verdicts[row.ref] !== row.verdict).length);
 </script>
 
 {#if rows.length}
 	<section class="sec" id="parts" aria-labelledby="parts-h">
 		<h2 id="parts-h">Parts</h2>
 		<p class="sl">
-			{rows.length} routine {plural(rows.length, 'part', 'parts')}, with the session’s verdicts preselected{changed ? `; ${changed} changed` : ''}.
+			{rows.length} routine {plural(rows.length, 'part', 'parts')}, approved with the session’s verdicts.
 		</p>
 		<ul class="parts">
 			{#each rows as row (row.ref)}
@@ -88,16 +81,13 @@ omits one. Renders nothing for a packet with no routine parts.
 									</dl>
 									<PartFiles since={part.since} />
 									{#if part.totals}
-										<div class="mt-2"><FilesDiff groups={part.groups ?? []} totals={part.totals} focusKey={false} /></div>
+										<div class="mt-2"><FilesDiff groups={part.groups ?? []} totals={part.totals} /></div>
 									{/if}
 								{:else if part?.kind === 'design' && part.docHtml}
 									<DesignView docHtml={part.docHtml} embedded />
 								{/if}
 							</div>
 						</details>
-					</div>
-					<div class="sc">
-						<PacketSeg ref={row.ref} kind={row.kind} session={row.verdict} label="Verdict for {row.ref}" bind:verdicts {decided} />
 					</div>
 				</li>
 			{/each}

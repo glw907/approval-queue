@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { WATER_HEAD as DOC } from '#lib/fixtures/seed-docs.ts';
-import { ambiguousQuote, anchorAt, CONTEXT, place } from './comments.ts';
+import { ambiguousQuote, anchorAt, CONTEXT, place } from './anchors.ts';
+
+const DOC = '---\ntitle: Water a houseplant\n---\n\n# Water a houseplant\n\nWater a houseplant when the top inch of soil is dry.\n\n## Check the soil\n\nPress a finger into the soil up to the first knuckle. Dry soil at that depth means the plant needs water.\n\n## Water the plant\n\nPour slowly until water runs from the drainage holes. Empty the saucer after ten minutes.\n\n## Fix a drooping plant\n\nA drooping plant is more often overwatered than thirsty. Check the soil before you pour.\n';
 
 const FILE = 'docs/guide/water-a-houseplant.md';
 const LINE = 'Dry soil at that depth means the plant needs water.';

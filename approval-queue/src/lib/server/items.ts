@@ -2,26 +2,22 @@ import { createHash, randomUUID } from 'node:crypto';
 import { link, open, readFile, readdir, rename, stat, unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Proposed, Triage } from '#lib/brief.ts';
-import type { Comment, Thread } from '#lib/editor/comments.ts';
-import type { Note } from '#lib/editor/notes.ts';
-import { descriptionParagraphs, type Packet } from '#lib/packet.ts';
-import { committed } from './docs.ts';
+import type { Packet } from '#lib/packet.ts';
 
 export type Disposition = Proposed;
 
 /** The kinds the queue reads; an item of any other kind stays on disk unlisted and unserved. */
-const KINDS: readonly string[] = ['pr', 'design', 'triage', 'packet', 'docs'];
+const KINDS: readonly string[] = ['design', 'triage', 'packet'];
 
-/** One row of a submitted triage: the session's action, Geoff's call, and his own note. */
+/** One row of a submitted triage: the session's action and Geoff's call. */
 export interface SubmittedRow {
 	action: string;
 	disposition: Disposition;
-	note: string;
 }
 
 export interface ItemMeta {
 	id: string;
-	kind: 'pr' | 'design' | 'triage' | 'packet' | 'docs';
+	kind: 'design' | 'triage' | 'packet';
 	repo: string;
 	title: string;
 	/** The brief's headline, written by the command; absent on an item it wrote before briefs. */
@@ -30,32 +26,21 @@ export interface ItemMeta {
 	created: string;
 	/** The PR head commit the item was fetched at. */
 	head?: string;
-	/** A PR's number; absent on an item the old command wrote. */
-	number?: number;
 	/** A design's source file name. */
 	file?: string;
-	/** A docs review's worktree, an absolute path; the app reads, saves, and commits the pages there. */
-	worktree?: string;
-	/** A docs review's merge base with the PR's base branch. */
-	base?: string;
 	/** A packet's initiative id, or `none`; the sidebar and the board group by it. */
 	initiative?: string;
 	/** The initiative record's title; empty for `none`. */
 	initiativeTitle?: string;
 	/**
 	 * Set when the item resends what Geoff sent back: the earlier item, this item's round (2 for the
-	 * first resend), for a packet the head or hash of each part he sent back, and for a docs review
-	 * the worktree commit he left on the send-back.
+	 * first resend), and the head or hash of each part he sent back.
 	 */
-	revises?: { item: string; revision: number; commit?: string; parts?: Array<{ ref: string; head?: string; sha256?: string }> };
-	/** Set when a docs review was queued after an approve of its PR: the commit that approve named. */
-	amends?: { commit: string };
+	revises?: { item: string; revision: number; parts?: Array<{ ref: string; head?: string; sha256?: string }> };
 	/** The queuing command's pid and its start time in clock ticks since boot; absent on an item queued before withdraw. */
 	pid?: number;
 	pidStart?: number;
-	/** Geoff deferred the item: it stays on the board with no session waiting on it. */
-	deferred: boolean;
-	/** A pid is recorded and that process is gone, and the item is not deferred, so no session waits for the decision. */
+	/** A pid is recorded and that process is gone, so no session waits for the decision. */
 	orphaned: boolean;
 }
 
@@ -92,56 +77,10 @@ export interface PacketPart {
 /** A stored patch the item compares against: the diff itself, or a marker that its commit is no longer an ancestor. */
 export type StoredPatch = { patch: string } | { gone: true };
 
-/** One page a docs review changed. */
-export interface DocsPage {
-	path: string;
-	/** The page's old path when the PR renamed it. */
-	from?: string;
-	/** The page at the merge base, empty for a new page, which the review marks changed lines against. */
-	base: string;
-	/** The page as it was queued, which the review counts its edits against. */
-	queued: string;
-	/** The page as committed at the worktree's HEAD now, with its blob and that commit. */
-	doc: string;
-	blob: string;
-	commit: string;
-	/** The worktree or the page is gone, so `doc` is the queued copy and the review takes no edits to it. */
-	missing: boolean;
-}
-
-/** A docs review: the PR, the code it changes, and its pages as the worktree commits them. */
-export interface DocsContent {
-	/** The description's paragraphs. */
-	description: string[];
-	/** The PR's body. */
-	body: string;
-	pr: PrMeta;
-	/** The PR's diff with each changed page's file section removed. */
-	diff: string;
-	pages: DocsPage[];
-	worktree: string;
-	notes: Note[];
-	/** The author's replies to the comments of an earlier send-back; empty on a first review. */
-	replies: Thread[];
-	/** On a revision, the diff since the commit Geoff sent back. */
-	since?: StoredPatch;
-	/** On an amend, the diff since the commit he approved. */
-	approved?: StoredPatch;
-}
-
 export type ItemContent =
-	| { kind: 'pr'; body: string; diff: string; pr?: PrMeta }
 	| { kind: 'design'; doc: string }
 	| { kind: 'packet'; packet: Packet; parts: PacketPart[] }
-	| ({ kind: 'docs' } & DocsContent)
 	| ({ kind: 'triage' } & Triage);
-
-/** What a docs review's decision carries to the author. */
-export interface Carried {
-	comments?: Comment[];
-	/** Only the threads Geoff replied to; every other thread resolves at the decision. */
-	threads?: Array<{ id: string; reply: string }>;
-}
 
 /** One entry of a packet send-back's `calls`; `null` is a field the post lacked or a value the packet does not hold. */
 export type PacketCall =
@@ -149,28 +88,19 @@ export type PacketCall =
 	| { ask: number; question: string; choice: string | null };
 
 export type Decision =
-	| ({
+	| {
 			decision: 'approve';
 			choices?: Array<{ title: string; choice: string }>;
 			/** A packet's per-part verdicts and per-ask answers; the command joins the heads and hashes. */
 			parts?: Array<{ ref: string; verdict: string }>;
 			asks?: Array<{ index: number; choice: string }>;
-			/** A docs review's answered calls by note id, with the choice label. */
-			calls?: Array<{ id: string; choice: string }>;
-			/** A docs review's worktree HEAD at approval. */
-			commit?: string;
-	  } & Carried)
-	| ({
+	  }
+	| {
 			decision: 'reject';
 			note: string;
-			/**
-			 * A docs review's calls made before it was sent back, so the decided item shows them. A
-			 * packet's are its parts' verdicts and its asks' picks as the screen held them.
-			 */
-			calls?: Array<{ id: string; choice: string } | PacketCall>;
-			/** A docs review's worktree HEAD at the send-back. */
-			commit?: string;
-	  } & Carried)
+			/** A packet's parts' verdicts and its asks' picks as the screen held them. */
+			calls?: PacketCall[];
+	  }
 	| { decision: 'submit'; rows: SubmittedRow[] };
 
 export interface Item {
@@ -205,13 +135,12 @@ async function isWaiter(pid: number, start: number | undefined): Promise<boolean
 	return found !== undefined && found.state !== 'Z' && found.start === start;
 }
 
-/** Reads `item.json` and adds the two flags the board shows, which the file never holds. */
+/** Reads `item.json` and adds the flag the board shows, which the file never holds. An item of a retired kind reads as none. */
 async function readMeta(dir: string): Promise<ItemMeta | undefined> {
-	const stored = await readJson<Omit<ItemMeta, 'deferred' | 'orphaned'>>(join(dir, 'item.json'));
+	const stored = await readJson<Omit<ItemMeta, 'orphaned'>>(join(dir, 'item.json'));
 	if (!stored || !KINDS.includes(stored.kind)) return undefined;
-	const deferred = (await stat(join(dir, 'deferred.json')).catch(() => undefined)) !== undefined;
-	const orphaned = stored.pid !== undefined && !deferred && !(await isWaiter(stored.pid, stored.pidStart));
-	return { ...stored, deferred, orphaned };
+	const orphaned = stored.pid !== undefined && !(await isWaiter(stored.pid, stored.pidStart));
+	return { ...stored, orphaned };
 }
 
 async function itemIds(root: string): Promise<string[]> {
@@ -225,7 +154,7 @@ async function itemIds(root: string): Promise<string[]> {
 
 /**
  * Items with an `item.json` and no `decision.json`, oldest first by `created`, then `id`, each with
- * whether Geoff deferred it and whether its session is gone. An item whose JSON does not parse is skipped.
+ * whether its session is gone. An item whose JSON does not parse is skipped.
  */
 export async function listWaiting(root: string): Promise<ItemMeta[]> {
 	const waiting: ItemMeta[] = [];
@@ -279,15 +208,7 @@ export async function readItem(root: string, id: string): Promise<Item | undefin
 	if (!meta) return undefined;
 	const decision = await readJson<Decision>(join(dir, 'decision.json'));
 	let content: ItemContent;
-	if (meta.kind === 'pr') {
-		const pr = await readJson<PrMeta>(join(dir, 'pr.json'));
-		content = {
-			kind: 'pr',
-			body: await readFile(join(dir, 'body.md'), 'utf8'),
-			diff: await readFile(join(dir, 'diff.patch'), 'utf8'),
-			...(pr && { pr })
-		};
-	} else if (meta.kind === 'design') {
+	if (meta.kind === 'design') {
 		content = { kind: 'design', doc: await readFile(join(dir, 'doc.md'), 'utf8') };
 	} else if (meta.kind === 'packet') {
 		try {
@@ -296,8 +217,6 @@ export async function readItem(root: string, id: string): Promise<Item | undefin
 			if (err instanceof SyntaxError) return undefined;
 			throw err;
 		}
-	} else if (meta.kind === 'docs') {
-		content = await readDocs(dir, meta);
 	} else {
 		const triage = await readJson<Triage>(join(dir, 'triage.json'));
 		// The command validates the file before writing it; a missing or old-shape file renders as empty.
@@ -347,8 +266,8 @@ async function readPacket(dir: string): Promise<ItemContent> {
 	return { kind: 'packet', packet, parts };
 }
 
-/** Reads the `<name>.patch` or `<name>.json` gone marker a resent or amended item stores, or neither. */
-async function readStoredPatch(dir: string, name: 'since' | 'approved'): Promise<StoredPatch | undefined> {
+/** Reads the `<name>.patch` or `<name>.json` gone marker a resent item stores, or neither. */
+async function readStoredPatch(dir: string, name: 'since'): Promise<StoredPatch | undefined> {
 	const patch = await readFile(join(dir, `${name}.patch`), 'utf8').catch((err) => {
 		if (err.code === 'ENOENT') return undefined;
 		throw err;
@@ -362,54 +281,6 @@ export async function readSentBack(root: string, id: string): Promise<{ note: st
 	const decision = await readJson<Decision>(join(root, 'items', id, 'decision.json'));
 	if (decision?.decision !== 'reject') return undefined;
 	return { note: decision.note, calls: decision.calls ?? [] };
-}
-
-/** The patch without the file sections of `paths`, which the pages show instead. */
-function withoutSections(patch: string, paths: readonly string[]): string {
-	const sections = patch.split(/^(?=diff --git )/m);
-	return sections.filter((section) => !paths.some((path) => section.split('\n', 1)[0].endsWith(` b/${path}`))).join('');
-}
-
-/**
- * Reads a docs item: the PR's body, metadata, and code diff, the stored notes and replies, and each
- * changed page as its worktree now commits it, else as it was queued.
- */
-async function readDocs(dir: string, meta: ItemMeta): Promise<ItemContent> {
-	// The editor works in LF, so the anchors are resolved and the lines compared in LF too.
-	const lf = (text: string) => text.replace(/\r\n/g, '\n');
-	const worktree = meta.worktree ?? '';
-	const listed = JSON.parse(await readFile(join(dir, 'pages.json'), 'utf8')) as Array<{ path: string; from?: string }>;
-	const pages: DocsPage[] = [];
-	for (const [k, { path, from }] of listed.entries()) {
-		const at = join(dir, 'pages', String(k));
-		const base = lf(await readFile(join(at, 'base.md'), 'utf8'));
-		const queued = lf(await readFile(join(at, 'queued.md'), 'utf8'));
-		const page = { path, ...(from && { from }), base, queued };
-		try {
-			const now = await committed(worktree, path);
-			pages.push({ ...page, doc: lf(now.text), blob: now.blob, commit: now.commit, missing: false });
-		} catch {
-			pages.push({ ...page, doc: queued, blob: '', commit: '', missing: true });
-		}
-	}
-	const since = meta.revises && (await readStoredPatch(dir, 'since'));
-	const approved = meta.amends && (await readStoredPatch(dir, 'approved'));
-	return {
-		kind: 'docs',
-		description: descriptionParagraphs(await readFile(join(dir, 'description.md'), 'utf8')),
-		body: await readFile(join(dir, 'body.md'), 'utf8'),
-		pr: JSON.parse(await readFile(join(dir, 'pr.json'), 'utf8')),
-		diff: withoutSections(
-			await readFile(join(dir, 'diff.patch'), 'utf8'),
-			listed.map((page) => page.path)
-		),
-		pages,
-		worktree,
-		notes: (await readJson<Note[]>(join(dir, 'notes.json'))) ?? [],
-		replies: (await readJson<Thread[]>(join(dir, 'replies.json'))) ?? [],
-		...(since && { since }),
-		...(approved && { approved })
-	};
 }
 
 /** Whether the item still has its `item.json`, which a withdraw renames away before it checks for a decision. */
@@ -429,53 +300,6 @@ export async function writeDecision(root: string, id: string, decision: Decision
 	await unlink(join(dir, 'decision.json')).catch(() => undefined);
 	return false;
 }
-
-/** Writes `deferred.json` through a temp file and `rename`, so the waiting command never reads a partial file. */
-export async function writeDeferred(root: string, id: string): Promise<void> {
-	const dir = join(root, 'items', id);
-	const tmp = join(dir, `deferred.json.${randomUUID()}.tmp`);
-	await writeFile(tmp, JSON.stringify({ at: new Date().toISOString() }));
-	await rename(tmp, join(dir, 'deferred.json'));
-}
-
-/** Geoff's side of a document review's comments, as `comments.json` in the item directory holds it. */
-export interface CommentStore {
-	comments: Comment[];
-	/** Geoff's reply to, or resolution of, a thread from `replies.json`; a thread with neither has no entry. */
-	threads: Array<{ id: string; reply?: string; resolved?: true }>;
-	/** The number in the next comment id, `C<next>`. It only grows, so a deleted id is never reused. */
-	next: number;
-}
-
-/** The author's replies the item was queued with (`--replies`), or none. */
-export async function readReplies(root: string, id: string): Promise<Thread[]> {
-	return (await readJson<Thread[]>(join(root, 'items', id, 'replies.json'))) ?? [];
-}
-
-/**
- * Reads `comments.json`. An absent file is an empty store whose `next` is past the highest `C<n>`
- * id in `replies.json`, so a new comment on a re-queued item never takes a thread's id.
- */
-export async function readComments(root: string, id: string): Promise<CommentStore> {
-	const stored = await readJson<CommentStore>(join(root, 'items', id, 'comments.json'));
-	if (stored) return stored;
-	const taken = (await readReplies(root, id)).map((t) => Number(/^C(\d+)$/.exec(t.id)?.[1] ?? 0));
-	return { comments: [], threads: [], next: Math.max(0, ...taken) + 1 };
-}
-
-/** Writes `comments.json` through a temp file and `rename`, as `writeDecision` does. The caller holds the item's queue. */
-export async function writeComments(root: string, id: string, store: CommentStore): Promise<void> {
-	const dir = join(root, 'items', id);
-	const tmp = join(dir, 'comments.json.tmp');
-	await writeFile(tmp, JSON.stringify(store));
-	await rename(tmp, join(dir, 'comments.json'));
-}
-
-/** The comments and replied threads a decision carries to the author. */
-export const carried = (store: CommentStore): Required<Carried> => ({
-	comments: store.comments,
-	threads: store.threads.flatMap((t) => (t.reply === undefined ? [] : [{ id: t.id, reply: t.reply }]))
-});
 
 /**
  * Writes `decision.json` through a temp file named for this request, synced to disk, then `link`ed

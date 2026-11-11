@@ -1,12 +1,9 @@
 <!-- @component
-The code diff of a PR as the PR screen's Files row shows it: a filter on the path, groups by top
+The code diff of a packet's PR: a filter on the path, groups by top
 folder, and each file's diff behind its own row, all closed until opened. `groups` and `totals`
-come from the item's `load`; a filter that matches nothing says so. Registers the `/` key to focus
-the filter for as long as it is mounted, unless `focusKey` is false.
+come from the item's `load`; a filter that matches nothing says so.
 -->
 <script lang="ts">
-	import { tick } from 'svelte';
-	import { desk } from '#lib/desk.svelte.ts';
 	import type { DiffFile } from '#lib/diff.ts';
 	import DiffTable from './DiffTable.svelte';
 	import Disclosure from './Disclosure.svelte';
@@ -14,11 +11,9 @@ the filter for as long as it is mounted, unless `focusKey` is false.
 	interface Props {
 		groups: Array<{ name: string; files: DiffFile[] }>;
 		totals: { files: number; adds: number; dels: number };
-		/** False inside a packet, where several diffs share the screen and `/` does nothing. */
-		focusKey?: boolean;
 	}
 
-	let { groups, totals, focusKey = true }: Props = $props();
+	let { groups, totals }: Props = $props();
 
 	const count = (n: number) => n.toLocaleString('en-US');
 	const plural = (n: number, one: string, many: string) => (n === 1 ? one : many);
@@ -44,17 +39,6 @@ the filter for as long as it is mounted, unless `focusKey` is false.
 	const filesSummary = $derived(
 		`${totals.files} ${plural(totals.files, 'file', 'files')}, +${count(totals.adds)} −${count(totals.dels)}.`
 	);
-
-	$effect(() => {
-		if (!focusKey) return;
-		return desk.register({
-			'focus-filter': async () => {
-				filesOpen = true;
-				await tick();
-				filter?.focus();
-			}
-		});
-	});
 
 	function toggleAll() {
 		for (const g of shown) groupOpen[g.name] = !allOpen;
@@ -90,7 +74,6 @@ the filter for as long as it is mounted, unless `focusKey` is false.
 				bind:value={term}
 				onkeydown={onFilterKey}
 			/>
-			{#if focusKey}<kbd class="kbd kbd-xs desk-kbd desk-sk" aria-hidden="true">/</kbd>{/if}
 		</label>
 		<button type="button" class="btn btn-sm btn-ghost" onclick={toggleAll}>
 			{allOpen ? 'Close all groups' : 'Open all groups'}

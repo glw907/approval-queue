@@ -32,7 +32,7 @@ const board = (sort?: string) =>
 	load({ depends() {}, cookies: { get: () => sort } } as never) as Promise<{
 		empty: false;
 		sort: string;
-		rows: Array<{ id: string; group: string; asks: number; rules: string[]; repos: number; irreversible: boolean; single?: string; deferred: boolean; orphaned: boolean }>;
+		rows: Array<{ id: string; group: string; asks: number; rules: string[]; repos: number; irreversible: boolean; single?: string; orphaned: boolean }>;
 	}>;
 
 describe('/', () => {
@@ -73,14 +73,12 @@ describe('/', () => {
 		]);
 	});
 
-	it('carries whether Geoff deferred a row and whether its session is gone', async () => {
+	it('carries whether the session that queued a row is gone', async () => {
 		await seed('a', '2026-10-11T10:00:00Z');
-		await seed('b', '2026-10-11T11:00:00Z');
 		await seed('c', '2026-10-11T12:00:00Z');
-		await writeFile(join(state.root, 'items', 'b', 'deferred.json'), '{}');
 		await writeFile(join(state.root, 'items', 'c', 'item.json'), JSON.stringify({ id: 'c', kind: 'design', repo: 'o/r', title: 'c', created: '2026-10-11T12:00:00Z', pid: 2 ** 22 + 1, pidStart: 1 }));
 		const { rows } = await board();
-		expect(Object.fromEntries(rows.map((r) => [r.id, [r.deferred, r.orphaned]]))).toEqual({ a: [false, false], b: [true, false], c: [false, true] });
+		expect(Object.fromEntries(rows.map((r) => [r.id, r.orphaned]))).toEqual({ a: false, c: true });
 	});
 
 	it('reads the sort from the cookie, asks first by default', async () => {

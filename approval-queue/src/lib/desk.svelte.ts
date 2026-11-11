@@ -2,21 +2,6 @@ import { startHold } from '#lib/hold.ts';
 import type { KeyAction } from '#lib/keys.ts';
 import type { Row } from '#lib/triage.ts';
 
-/** One entry of the open item's outline, which the rail shows under the item and the place bar's Contents menu repeats. */
-export interface OutlineEntry {
-	key: string;
-	/** The section's number, such as "2" or "2.1"; empty for an entry the outline does not number. */
-	n: string;
-	text: string;
-	level: 2 | 3;
-	href: string;
-	cur: boolean;
-	/** A dot for a section holding an open call or a correction. */
-	mark: 'call' | 'fix' | null;
-	/** Moves the screen to the section, since the editor renders only the lines near the viewport. */
-	go: () => void;
-}
-
 /** How long a plain toast stays, and one that carries Undo. */
 export const FLASH_MS = 3200;
 export const FLASH_UNDO_MS = 10000;
@@ -33,17 +18,13 @@ class Desk {
 	noteOpen = $state(false);
 	/** The queue rail is open as a drawer (below 1024px). */
 	railOpen = $state(false);
-	/** The review pane or a document's comment margin is open as a drawer (below 1260px). */
+	/** The review pane is open as a drawer (below 1260px). */
 	paneOpen = $state(false);
-	/** The id of the drawer `paneOpen` opens: `review`, or the comment margin of one document. */
+	/** The id of the drawer `paneOpen` opens. */
 	pane = $state('review');
-	/** A comment box has focus, so Ctrl+Enter saves it and Escape cancels it. */
-	commentOpen = $state(false);
-	/** The open item's outline for the rail; null on a screen without one. */
-	outline = $state.raw<OutlineEntry[] | null>(null);
 	/** Approve is disabled, so the `a` key must not post it either. */
 	approveLocked = $state(false);
-	page = $state<'pr' | 'design' | 'triage' | 'packet' | 'docs'>('design');
+	page = $state<'design' | 'triage' | 'packet'>('design');
 	#toast = $state<string | null>(null);
 	/** What the plain toast's Undo button does; null shows no button. */
 	toastUndo = $state.raw<(() => void) | null>(null);

@@ -15,16 +15,16 @@ this session" until the queue reload lists it there itself.
 	import { page } from '$app/state';
 	import { onMount } from 'svelte';
 	import { fade } from 'svelte/transition';
-	import { age, DEFERRED, SINGLES } from '#lib/board.ts';
-	import { closeDrawers, closeDrawersForLink, setDrawer } from '#lib/components/frame/drawers.ts';
+	import { age, SINGLES } from '#lib/board.ts';
+	import { closeDrawers, setDrawer } from '#lib/components/frame/drawers.ts';
 	import { desk } from '#lib/desk.svelte.ts';
 	import { held } from '#lib/held.svelte.ts';
 	import { keyAction } from '#lib/keys.ts';
 
 	let { children, data } = $props();
 
-	const KINDS = { pr: 'PR', design: 'Design', triage: 'Triage', packet: 'Packet', docs: 'Docs' };
-	const OUTCOMES = { approve: 'Approved', reject: 'Sent back', submit: 'Submitted', defer: 'Deferred' };
+	const KINDS = { design: 'Design', triage: 'Triage', packet: 'Packet' };
+	const OUTCOMES = { approve: 'Approved', reject: 'Sent back', submit: 'Submitted' };
 	const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
 	let sheet: HTMLDialogElement;
@@ -50,15 +50,13 @@ this session" until the queue reload lists it there itself.
 		return [...mine, ...listed];
 	});
 
-	/** The queue by initiative, then "Single items", then "Deferred", the order the board uses. */
+	/** The queue by initiative, then "Single items", the order the board uses. */
 	const sidebar = $derived.by(() => {
 		const initiativeOf = (item: (typeof data.queue)[number]) =>
-			item.deferred
-				? DEFERRED
-				: item.kind !== 'packet'
+			item.kind !== 'packet'
 				? SINGLES
 				: item.initiativeTitle || (item.initiative && item.initiative !== 'none' ? item.initiative : 'No initiative');
-		const rank = (title: string) => (title === DEFERRED ? 2 : title === SINGLES ? 1 : 0);
+		const rank = (title: string) => (title === SINGLES ? 1 : 0);
 		const groups = new Map<string, typeof waiting>();
 		for (const item of waiting) groups.set(initiativeOf(item), [...(groups.get(initiativeOf(item)) ?? []), item]);
 		return [...groups]
@@ -76,7 +74,7 @@ this session" until the queue reload lists it there itself.
 
 	/** The line under a rail entry's title: a packet's asks and whether it cannot be undone, else its kind. */
 	function railMeta(item: (typeof data.queue)[number]) {
-		if (item.kind !== 'packet') return item.number === undefined ? KINDS[item.kind] : `${KINDS[item.kind]} #${item.number}`;
+		if (item.kind !== 'packet') return KINDS[item.kind];
 		return [item.asks ? plural(item.asks, 'ask') : 'Routine only', item.irreversible && 'irreversible'].filter(Boolean).join(' · ');
 	}
 
@@ -105,16 +103,6 @@ this session" until the queue reload lists it there itself.
 						sendBack
 					]
 			},
-			pr: {
-				title: 'On a pull request',
-				rows: [
-					{ keys: ['a'], text: 'Approve and merge', single: true },
-					{ keys: ['F8'], text: 'Next open decision' },
-					approveOr('Approve and merge'),
-					sendBack,
-					{ keys: ['/'], text: 'Filter files by path', single: true }
-				]
-			},
 			design: {
 				title: 'On a design',
 				rows: [
@@ -124,7 +112,6 @@ this session" until the queue reload lists it there itself.
 					sendBack
 				]
 			},
-			docs: { title: 'On a docs review', rows: editorRows('Approve the pages') },
 			triage: {
 				title: 'On a triage',
 				rows: [
@@ -135,27 +122,6 @@ this session" until the queue reload lists it there itself.
 			}
 		};
 		return [{ title: 'Anywhere', rows: anywhere }, screens[desk.page]];
-
-		function editorRows(approve: string): SheetRow[] {
-			return [
-				{ keys: ['F8'], text: 'Next call for you' },
-				{ keys: ['Ctrl', 'Z'], text: 'Undo' },
-				{ keys: ['Ctrl', 'Shift', 'Z'], text: 'Redo' },
-				{ keys: ['Ctrl', 'S'], text: 'Save now (it also saves as you pause)' },
-				...commentRows(approve),
-				{ keys: ['?'], text: 'This list, outside the editor', single: true },
-				sendBack
-			];
-		}
-
-		/** The comment keys; Ctrl+Enter saves an open comment box before it approves. */
-		function commentRows(approve: string): SheetRow[] {
-			return [
-				{ keys: ['Ctrl', 'Alt', 'M'], text: 'Comment on the selected text' },
-				{ keys: ['Ctrl', 'Alt', 'N', '/', 'P'], text: 'Next or previous comment' },
-				{ keys: CTRL_ENTER, text: `Save the comment you're writing, or ${approve.charAt(0).toLowerCase()}${approve.slice(1)}` }
-			];
-		}
 	});
 
 	onMount(() => {
@@ -236,14 +202,13 @@ this session" until the queue reload lists it there itself.
 		if (document.querySelector('dialog[open]:not(#keys)')) return;
 		// Escape closes the open sheet natively; the drawer under it stays for the next Escape.
 		if (e.key === 'Escape' && desk.sheetOpen) return;
-		// Escape in a comment box cancels the comment first; the drawer holding it closes on the next one.
-		if (e.key === 'Escape' && (desk.railOpen || desk.paneOpen) && !desk.commentOpen) {
+		if (e.key === 'Escape' && (desk.railOpen || desk.paneOpen)) {
 			closeDrawers();
 			return;
 		}
 		const action = keyAction(
 			e.key,
-			{ ctrl: e.ctrlKey, meta: e.metaKey, alt: e.altKey, shift: e.shiftKey, code: e.code },
+			{ ctrl: e.ctrlKey, meta: e.metaKey, alt: e.altKey, shift: e.shiftKey },
 			{
 				page: desk.page,
 				typing: isTyping(e.target as HTMLElement | null),
@@ -251,8 +216,7 @@ this session" until the queue reload lists it there itself.
 				sheetOpen: desk.sheetOpen,
 				held: held.current !== null,
 				noteOpen: desk.noteOpen,
-				approveLocked: desk.approveLocked,
-				commentOpen: desk.commentOpen
+				approveLocked: desk.approveLocked
 			}
 		);
 		if (!action) return;
@@ -324,29 +288,6 @@ this session" until the queue reload lists it there itself.
 									</span>
 									{#if item.orphaned}<span class="orphan">No session is waiting for this.</span>{/if}
 								</a>
-								{#if item.id === currentId && desk.outline?.length}
-									<ol class="rail-toc" aria-label="Contents">
-										{#each desk.outline as e (e.key)}
-											<li>
-												<a
-													href={e.href}
-													class={[e.level === 3 && 'l3', e.cur && 'cur']}
-													aria-current={e.cur ? 'location' : undefined}
-													onclick={(ev) => {
-														ev.preventDefault();
-														closeDrawersForLink();
-														e.go();
-													}}
-													><span class="n">{e.n}</span><span class="t">{e.text}</span>{#if e.mark}<span
-															class="mk {e.mark}"
-															aria-hidden="true"
-															title={e.mark === 'call' ? 'A call for you' : 'Corrected'}
-														></span><span class="sr-only">{e.mark === 'call' ? ', a call for you' : ', corrected'}</span>{/if}</a
-												>
-											</li>
-										{/each}
-									</ol>
-								{/if}
 							</li>
 						{/each}
 					</ul>
@@ -359,7 +300,7 @@ this session" until the queue reload lists it there itself.
 			<h2 class="group">Decided this session</h2>
 			<ul class="rail-list">
 				{#each decided as row (row.id)}
-					<li class={['dq', row.outcome === OUTCOMES.defer && 'deferred', row.refused !== undefined && 'refused']}>
+					<li class={['dq', row.refused !== undefined && 'refused']}>
 						<span>{row.title}</span>
 						<span>{row.outcome}</span>
 						{#if row.refused}<span class="why"><span class="sr-only">: </span>{row.refused}</span>{/if}

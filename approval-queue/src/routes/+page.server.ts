@@ -4,10 +4,10 @@ import { listWaiting, type ItemMeta } from '#lib/server/items.ts';
 import { packetFacts } from '#lib/server/packet-facts.ts';
 import type { PageServerLoad } from './$types';
 
-const KINDS = { pr: 'PR', design: 'Design', triage: 'Triage', docs: 'Docs' };
+const KINDS = { design: 'Design', triage: 'Triage' };
 
 async function toRow(meta: ItemMeta): Promise<BoardRow> {
-	const base = { id: meta.id, headline: meta.headline ?? meta.title, created: meta.created, deferred: meta.deferred, orphaned: meta.orphaned };
+	const base = { id: meta.id, headline: meta.headline ?? meta.title, created: meta.created, orphaned: meta.orphaned };
 	if (meta.kind !== 'packet') {
 		return { ...base, group: SINGLES, asks: 0, rules: [], repos: 1, irreversible: false, single: KINDS[meta.kind] };
 	}

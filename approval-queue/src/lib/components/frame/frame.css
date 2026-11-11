@@ -218,10 +218,6 @@ html {
 	color: var(--cairn-success-ink);
 	flex: none;
 }
-/* A deferred item is set aside, not done: its outcome takes the warning ink, not the approved green. */
-.rail .dq.deferred span:nth-child(2) {
-	color: var(--cairn-warning-ink);
-}
 /* A refused approval was not recorded: its outcome takes the warning ink, and the reason wraps to a second line. */
 .rail .dq.refused {
 	flex-wrap: wrap;
