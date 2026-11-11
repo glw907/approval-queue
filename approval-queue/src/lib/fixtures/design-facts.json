@@ -1,0 +1,31 @@
+{
+  "kind": "design",
+  "title": "Sample queue redesign",
+  "prs": [],
+  "design": { "repo": "sample", "path": "docs/specs/2026-11-10-sample-design.md" },
+  "plan": { "repo": "sample", "path": "docs/plans/2026-11-10-sample-plan.md" },
+  "held": [],
+  "calls": [
+    {
+      "question": "Should the redesign drop the contents rail?",
+      "rule": "owner-call",
+      "forced": false,
+      "options": [
+        { "label": "Drop it", "consequence": "The notes margin takes its place." },
+        { "label": "Keep it", "consequence": "Both stay on the page." }
+      ],
+      "recommended": 1,
+      "evidence": [
+        { "text": "The history shows no use of the rail in 364 decided items.", "source": "docs/specs/2026-11-10-sample-design.md:40" }
+      ]
+    }
+  ],
+  "decidedForYou": [],
+  "steps": [
+    { "text": "Plan the pass under the approved design.", "who": "session" }
+  ],
+  "notChecked": [
+    { "text": "No prototype was shown on a phone.", "source": "docs/specs/2026-11-10-sample-design.md:12" }
+  ],
+  "reviews": []
+}

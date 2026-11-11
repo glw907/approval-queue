@@ -1,0 +1,69 @@
+{
+  "kind": "stop",
+  "title": "Setup tooling overnight run",
+  "reason": {
+    "text": "The pass paused before its first test build: the npm-publish environment refuses a job from main, and the plan needs a ruling on three overnight stops.",
+    "source": "glw907/cairn-cms#214"
+  },
+  "prs": ["glw907/cairn-cms#214", "glw907/cairn-cms#215", "glw907/workstation#216", "glw907/standards#16"],
+  "held": [".claude/skills/cairn-releasing/**", ".claude/skills/cairn-proving-setup/**", ".github/**"],
+  "calls": [
+    {
+      "question": "Should the session add main to the npm-publish environment and then merge #214?",
+      "rule": "public-surface",
+      "forced": true,
+      "options": [
+        { "label": "The session adds the policy, then merges", "consequence": "The first test build publishes tonight." },
+        { "label": "I'll add it myself", "consequence": "#214 and the rounds wait for my step." }
+      ],
+      "recommended": 1,
+      "evidence": [
+        { "text": "The snapshot publish is a workflow_dispatch on main with a snapshot input, and two reviews traced every route through the workflows.", "source": ".github/workflows/publish.yml:34-43" },
+        { "text": "The first review found one blocking pin defect, and the second read accepted the fix.", "source": "glw907/cairn-cms#214" }
+      ]
+    },
+    {
+      "question": "May the conductor merge a held-path round PR overnight?",
+      "rule": "owner-call",
+      "forced": false,
+      "options": [
+        { "label": "Merge after a fresh review accepts", "consequence": "The loop runs on, and the morning packet lists each one." },
+        { "label": "Hold each one for me", "consequence": "The loop parks at the first held-path fix." }
+      ],
+      "recommended": 1,
+      "evidence": [
+        { "text": "The held paths are the release skill, the proving skill, .github/, and the clean-room settings template.", "source": ".claude/skills/cairn-releasing/SKILL.md:40-46" }
+      ]
+    },
+    {
+      "question": "How far should the budget stop go tonight?",
+      "rule": "owner-call",
+      "forced": false,
+      "options": [
+        { "label": "Ten naive runs or $100", "consequence": "The loop can run until morning." },
+        { "label": "Keep five runs or $100", "consequence": "The loop likely stops before midnight." }
+      ],
+      "recommended": 1,
+      "evidence": [
+        { "text": "A naive run takes most of an hour with its grading and fix, and the last probe run's transcript cost was $0.32.", "source": "glw907/cairn-cms#214" }
+      ]
+    }
+  ],
+  "decidedForYou": [],
+  "steps": [
+    { "text": "Add a deployment branch policy for main to the npm-publish environment through the API, then check it lists v*, tool/v*, and main only.", "who": "session" },
+    { "text": "Merge cairn-cms #214 at the head you read.", "who": "session" },
+    { "text": "Merge cairn-cms #215.", "who": "session" },
+    { "text": "Merge workstation #216.", "who": "session" },
+    { "text": "Merge standards #16.", "who": "session" },
+    { "text": "Publish the first test build, run the probe, and hand over to a fresh conductor with the standing answers.", "who": "session" }
+  ],
+  "notChecked": [
+    { "text": "No naive run has tested the test-build path end to end.", "source": "glw907/cairn-cms#214" },
+    { "text": "The environment change lets any workflow job on main that names the environment reach the npm-publish secrets, not only a tag push.", "source": ".github/workflows/publish.yml:49-62" }
+  ],
+  "reviews": [
+    { "text": "Two reviews on #214 found one blocking defect, a caret pin that would have pulled rc.4's backend, now fixed.", "source": "glw907/cairn-cms#214" },
+    { "text": "#215 and #216 each have an accepting review, and checks pass on #16.", "source": "glw907/standards#16" }
+  ]
+}
