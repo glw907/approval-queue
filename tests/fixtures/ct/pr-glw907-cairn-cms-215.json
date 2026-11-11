@@ -1,0 +1,16 @@
+{
+  "number": 215,
+  "state": "OPEN",
+  "title": "Title of cairn-cms",
+  "body": "",
+  "url": "https://github.com/glw907/cairn-cms/pull/215",
+  "headRefOid": "h2",
+  "statusCheckRollup": [],
+  "files": [
+    {
+      "path": ".claude/skills/cairn-releasing/SKILL.md",
+      "additions": 3,
+      "deletions": 1
+    }
+  ]
+}

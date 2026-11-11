@@ -1,16 +1,40 @@
 import { describe, expect, it } from 'vitest';
-import { filesLine } from './packet-view.ts';
+import type { Claim, Facts } from './facts.ts';
+import { claimFor, claimHunks, deepDiveBody, patchFiles, prLabel, ruleLabel, statusLine } from './packet-view.ts';
 
-describe('filesLine', () => {
-	it('counts the files across groups and names each group', () => {
-		expect(filesLine([{ name: 'docs', files: [1] }, { name: 'src', files: [1, 2] }])).toBe('3 in 2 groups: docs, src');
+const claim = (pr: string, path: string, from: number, to: number): Claim => ({ text: 't', pr, path, from, to });
+const facts = (over: Partial<Facts>): Facts => ({ kind: 'stop', title: 't', prs: [], held: [], calls: [], decidedForYou: [], steps: [], notChecked: [], reviews: [], ...over });
+
+describe('packet-view', () => {
+	it('labels a pull request and a rule', () => {
+		expect(prLabel('glw907/cairn-cms#214')).toBe('cairn-cms #214');
+		expect(ruleLabel('public-surface')).toBe('Public surface');
 	});
 
-	it('says no files changed for an empty list', () => {
-		expect(filesLine([])).toBe('No files changed');
+	it('builds the status line from the kind, the initiative, and the repos', () => {
+		const stop = facts({ prs: ['o/a#1', 'o/b#2', 'o/a#3'] });
+		expect(statusLine(stop, 'Setup tooling')).toEqual({ lead: 'Pass paused until you decide.', rest: 'Setup tooling in a and b.' });
+		expect(statusLine(facts({ kind: 'design', design: { repo: 'sample', path: 'd.md' } }), '')).toEqual({ lead: 'A design for your approval.', rest: 'in sample.' });
 	});
 
-	it('uses the singular for one group', () => {
-		expect(filesLine([{ name: 'notes.md', files: [1] }])).toBe('1 in 1 group: notes.md');
+	it('takes the deep dive body past its closed line', () => {
+		const md = '# H\n\nOpen.\n\n## Deep dive\n\nThe closed line.\n\n### Part\n\nBody text.\n\n## Your calls\n\nx\n';
+		expect(deepDiveBody(md)).toBe('### Part\n\nBody text.');
+		expect(deepDiveBody('# H\n\nOpen.\n\n## Deep dive\n\nOnly a line.\n')).toBe('');
+	});
+
+	it('finds the claim an evidence source points at', () => {
+		const claims = [claim('o/r#1', '.github/a.yml', 10, 20), claim('o/r#1', '.github/a.yml', 40, 50), claim('o/r#2', 'b.md', 1, 3)];
+		expect(claimFor('.github/a.yml:42-45', claims)).toBe(1);
+		expect(claimFor('.github/a.yml:30', claims)).toBe(0);
+		expect(claimFor('o/r#2', claims)).toBe(2);
+		expect(claimFor('https://example.com/x', claims)).toBe(-1);
+	});
+
+	it('keeps the hunks a claim reaches', () => {
+		const patch = ['diff --git a/f b/f', '--- a/f', '+++ b/f', '@@ -1,2 +1,2 @@', ' a', '-b', '+c', '@@ -50,1 +50,2 @@', ' x', '+y', ''].join('\n');
+		const file = patchFiles(patch).get('f')!;
+		expect(claimHunks(file, 50, 51).rows.map((r) => r.text)).toEqual(['@@ -50,1 +50,2 @@', 'x', 'y']);
+		expect(claimHunks(file, 900, 901).rows[0].text).toBe('@@ -1,2 +1,2 @@');
 	});
 });

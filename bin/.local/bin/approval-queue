@@ -1,16 +1,18 @@
 #!/usr/bin/env bash
-# approval-queue: put one item (a PR, a design, a triage list, a packet, a docs review) in front of Geoff in
-# the Approval Queue and print his decision as JSON on stdout. Build, server, and browser output go to server.log.
+# approval-queue: put one item (a design, a triage list, a packet) in front of Geoff in the Approval Queue and
+# print his decision as JSON on stdout. Build, server, and browser output go to server.log.
 set -euo pipefail
 
-usage="usage: approval-queue <pr|design|triage> <repo> <title> <source>
-       approval-queue packet [--check] <initiative> <file>
-       approval-queue docs <worktree> <owner/repo#n> <title> --description <file> [--notes <notes.json>] [--replies <replies.json>]
+usage="usage: approval-queue <design|triage> <repo> <title> <source>
+       approval-queue snapshot <facts.json>
+       approval-queue packet [--check] [--replies <replies.json>] <initiative> <facts.json> <text.md>
+       approval-queue reply <id|digest> <replies.json>
        approval-queue withdraw <id>
        approval-queue pending
-       approval-queue notes --check <worktree> <notes.json>
-       approval-queue notes <id> <notes.json>
-       approval-queue collect <id>"
+       approval-queue collect <id>
+       approval-queue merge [--skip <owner/repo#n>]... [--premerge-done <owner/repo#n>]... <id>
+       approval-queue land <owner/repo#n> <claim>
+       approval-queue digest <owner/repo#n> <claim>"
 root="${XDG_STATE_HOME:-$HOME/.local/state}/approval-queue"
 id_pattern='^[0-9]{8}T[0-9]{6}-[0-9]+$'
 
@@ -45,8 +47,9 @@ retire_item() {
   rm -f "$1/item.json.gone" "$1/item.json.tmp"
 }
 
-# withdraw <id>: takes a waiting item off the board. A live waiter gets TERM, and its exit trap retires
-# item.json; a dead or deferred waiter leaves the file for withdraw to retire.
+# withdraw <id>: takes a waiting item off the board. It writes a withdrawn marker, then sends a live waiter TERM,
+# and the waiter's exit trap retires item.json only when it finds the marker. A dead waiter leaves the file for
+# withdraw to retire. A TERM from anywhere else (a reboot) leaves the item for `collect` (#59).
 if [ "${1:-}" = withdraw ]; then
   shift
   if [ $# -ne 1 ]; then echo "$usage" >&2; exit 2; fi
@@ -57,37 +60,40 @@ if [ "${1:-}" = withdraw ]; then
   wpid=$(jq -r '.pid // empty' "$wdir/item.json")
   wstart=$(jq -r '.pidStart // empty' "$wdir/item.json")
   if [ -z "$wpid" ]; then echo "approval-queue: $1 was queued before withdraw existed; stop its command" >&2; exit 2; fi
-  if [ -e "$wdir/deferred.json" ] || ! proc_running "$wpid" "$wstart"; then
-    retire_item "$wdir" && { echo "withdrew $1"; exit 0; }
-    echo "approval-queue: $1 was decided while withdrawing; run collect" >&2
-    exit 1
+  if proc_running "$wpid" "$wstart"; then
+    : >"$wdir/withdrawn"
+    kill -TERM "$wpid" 2>/dev/null || true
+    # Wait for the waiter to exit, not for item.json to vanish: retire_item's rename makes it vanish briefly.
+    for _ in $(seq 50); do
+      proc_running "$wpid" "$wstart" || break
+      sleep 0.1
+    done
+    if proc_running "$wpid" "$wstart"; then
+      echo "approval-queue: $1 is still queued after its command was told to stop" >&2
+      exit 1
+    fi
+    [ -e "$wdir/item.json" ] || { echo "withdrew $1"; exit 0; }
   fi
-  kill -TERM "$wpid" 2>/dev/null || true
-  # Wait for the waiter to exit, not for item.json to vanish: retire_item's rename makes it vanish briefly.
-  for _ in $(seq 50); do
-    proc_running "$wpid" "$wstart" || break
-    sleep 0.1
-  done
-  [ -e "$wdir/item.json" ] || { echo "withdrew $1"; exit 0; }
-  if [ -e "$wdir/decision.json" ]; then
-    echo "approval-queue: $1 was decided while withdrawing; run collect" >&2
-    exit 1
-  fi
-  # A defer that landed in the same instant made the waiter's trap keep item.json.
-  if [ -e "$wdir/deferred.json" ]; then
-    retire_item "$wdir" && { echo "withdrew $1"; exit 0; }
-    echo "approval-queue: $1 was decided while withdrawing; run collect" >&2
-    exit 1
-  fi
-  echo "approval-queue: $1 is still queued after its command was told to stop" >&2
+  # The waiter is gone and its trap kept the item (or never ran): retire it here, unless a decision landed.
+  retire_item "$wdir" && { echo "withdrew $1"; exit 0; }
+  echo "approval-queue: $1 was decided while withdrawing; run collect" >&2
   exit 1
 fi
 
+# unanswered <notes file> <replies file>: prints how many notes (the `notes` array of a decision, or the array a
+# file holds) no reply in the replies file (when it exists) answers.
+unanswered() {
+  local replies='[]'
+  [ ! -e "$2" ] || replies=$(cat "$2")
+  jq -r --argjson r "$replies" '(if type == "array" then . else .notes // [] end) as $n
+    | [$n[] | select(((.text // "x") | gsub("[[:space:]]"; "")) != "") | .id | tostring] - [$r[] | .note | tostring] | length' "$1"
+}
+
 # pending: prints one line per decided item no command is left to log: `<id>\t<kind>\t<decision>\t<title>`,
-# oldest first, for a session to `collect`. Skipped: an item with a live waiter, a logged decision (a log line
-# whose `packet` is the item's id), a refusal (it went to the command that wrote refused.json), a triage item
-# (its decision is never logged), a kind this queue no longer reads, and an item queued before pids existed, which
-# cannot be told from a handled one.
+# oldest first, for a session to `collect`; then `<id>\tnotes\t<count>\t<title>` for each decided packet with notes
+# no reply answers, and `digest\tdigest-notes\t<count>\t-` for digest notes no reply answers. Skipped: an item with a live waiter, a logged decision (a log line
+# whose `packet` is the item's id), a triage item (its decision is never logged), a kind this queue no longer
+# reads, and an item queued before pids existed, which cannot be told from a handled one.
 if [ "${1:-}" = pending ]; then
   shift
   if [ $# -ne 0 ]; then echo "$usage" >&2; exit 2; fi
@@ -97,68 +103,328 @@ if [ "${1:-}" = pending ]; then
   fi
   for pdir in "$root"/items/*/; do
     pdir=${pdir%/}
-    [ -e "$pdir/item.json" ] && [ -e "$pdir/decision.json" ] && [ ! -e "$pdir/refused.json" ] || continue
+    [ -e "$pdir/item.json" ] && [ -e "$pdir/decision.json" ] || continue
     IFS=$'\x1f' read -r ppid pstart pkind ptitle < <(jq -r '
       [(.pid // "" | tostring), (.pidStart // "" | tostring), .kind, (.title | gsub("[\t\n]"; " "))] | join("\u001f")' "$pdir/item.json") || continue
     [ -n "$ppid" ] || continue
-    case "$pkind" in pr | design | packet | docs) ;; *) continue ;; esac
+    case "$pkind" in design | packet) ;; *) continue ;; esac
     ! proc_running "$ppid" "$pstart" || continue
     pitem=${pdir##*/}
     ! grep -qxF -- "$pitem" <<<"$logged" || continue
     printf '%s\t%s\t%s\t%s\n' "$pitem" "$pkind" "$(jq -r '.decision // empty' "$pdir/decision.json")" "$ptitle"
   done
+  # Notes no reply answers: each decided packet's, then the digest's.
+  for pdir in "$root"/items/*/; do
+    pdir=${pdir%/}
+    [ -e "$pdir/item.json" ] && [ -e "$pdir/decision.json" ] && [ -e "$pdir/facts.json" ] || continue
+    pcount=$(unanswered "$pdir/decision.json" "$pdir/replies.json")
+    [ "$pcount" -eq 0 ] || printf '%s\tnotes\t%s\t%s\n' "${pdir##*/}" "$pcount" "$(jq -r '.title | gsub("[\t\n]"; " ")' "$pdir/item.json")"
+  done
+  if [ -e "$root/digest-notes.json" ]; then
+    pcount=$(unanswered "$root/digest-notes.json" "$root/digest-replies.json")
+    [ "$pcount" -eq 0 ] || printf 'digest\tdigest-notes\t%s\t-\n' "$pcount"
+  fi
   exit 0
 fi
 
-notes_id="" collecting="" check="" initiative="" repo="" title="" source="" worktree="" notes="" replies="" description="" pr="" pr_repo="" number=""
-if [ "${1:-}" = docs ]; then
-  kind=$1
+# refuse <message>: one line on stderr, exit 2.
+refuse() {
+  echo "approval-queue: $1" >&2
+  exit 2
+}
+
+ref_pattern='^[^/#[:space:]]+/[^/#[:space:]]+#[0-9]+$'
+
+# view_pr <ref> <fields>: prints the PR's `gh pr view` JSON for the fields; a gh failure prints gh's error and exits 1.
+view_pr() {
+  local errf out rc=0
+  errf=$(mktemp)
+  out=$(gh pr view "${1##*#}" --repo "${1%#*}" --json "$2" 2>"$errf" </dev/null) || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    cat "$errf" >&2
+    rm -f "$errf"
+    exit 1
+  fi
+  rm -f "$errf"
+  printf '%s\n' "$out"
+}
+
+# merge_pr <ref> <head>: merges at the head; a gh failure prints gh's error and returns 1.
+merge_pr() {
+  gh pr merge "${1##*#}" --repo "${1%#*}" --merge --match-head-commit "$2" </dev/null
+}
+
+has_before_merge() { grep -qiE '^##[[:space:]]+Before merge[[:space:]]*$' <<<"$1"; }
+
+# rollup_failing <view json> and rollup_pending <view json>: succeed when a check in the view's statusCheckRollup
+# has failed, or is not finished. `land` and `packet` share them, and the figures below.
+rollup_failing() {
+  jq -e 'any(.statusCheckRollup[]?; ((.conclusion // "") | . != "" and (IN("SUCCESS", "NEUTRAL", "SKIPPED") | not)) or ((.state // "") | IN("FAILURE", "ERROR")))' <<<"$1" >/dev/null
+}
+rollup_pending() {
+  jq -e 'any(.statusCheckRollup[]?; (.status != null and .status != "COMPLETED") or .state == "PENDING")' <<<"$1" >/dev/null
+}
+# The pending-check wait: poll every 30 seconds for up to 15 minutes. The overrides are for tests only.
+check_poll=${APPROVAL_QUEUE_POLL_S:-30} check_cap=${APPROVAL_QUEUE_POLL_MAX_S:-900}
+
+# pr_diff <owner/repo#n> <file>: saves the PR's diff into file. GitHub refuses a diff of more than 300 files (HTTP
+# 406, too_large), so that refusal falls back to the PR's file list, which carries each file's patch for up to 3,000
+# files; a rename with no content change has no patch. A diff with terminal escape sequences is refused until
+# --allow-escape-sequences, so that refusal is retried with the flag and the control bytes other than tab and
+# newline are removed from what is stored (#61).
+pr_diff() {
+  local r=${1%#*} n=${1##*#} out=$2 err
+  if err=$(gh pr diff "$n" -R "$r" 2>&1 >"$out" </dev/null); then return 0; fi
+  case $err in
+    *'terminal escape sequences'*)
+      if err=$(gh pr diff "$n" -R "$r" --allow-escape-sequences 2>&1 >"$out.raw" </dev/null); then
+        LC_ALL=C tr -d '\000-\010\013-\037' <"$out.raw" >"$out"
+        rm -f "$out.raw"
+        return 0
+      fi
+      rm -f "$out.raw"
+      printf '%s\n' "$err" >&2
+      return 1 ;;
+    *too_large*) ;;
+    *) printf '%s\n' "$err" >&2; return 1 ;;
+  esac
+  gh api --paginate "repos/$r/pulls/$n/files?per_page=100" </dev/null | jq -rs '
+    add | .[] | (.previous_filename // .filename) as $old
+    | "diff --git a/\($old) b/\(.filename)",
+      (if .status == "renamed" then "rename from \($old)", "rename to \(.filename)" else empty end),
+      (if .patch then "--- a/\($old)", "+++ b/\(.filename)", .patch else empty end)' >"$out"
+}
+
+# snapshot <facts.json>: writes snapshot/ beside the fact file, one patch per PR and heads.json. Each patch must be
+# the diff of the head it pins, so a head that moved while fetching is fetched again, and a third move exits 1.
+if [ "${1:-}" = snapshot ]; then
   shift
-  args=()
+  if [ $# -ne 1 ]; then echo "$usage" >&2; exit 2; fi
+  jq -e '(.prs | type) == "array" and all(.prs[]; type == "string")' "$1" >/dev/null 2>&1 \
+    || refuse "$1 is not a fact file with a list of prs (the approval-packet skill)"
+  sdir=$(dirname "$1")/snapshot
+  stmp=$(mktemp -d "$(dirname "$1")/.snapshot.XXXXXX")
+  trap 'rm -rf "$stmp"' EXIT
+  heads='[]'
+  while IFS= read -r sref; do
+    [[ $sref =~ $ref_pattern ]] || refuse "$sref is not a pull request as owner/repo#n (the approval-packet skill)"
+    sname=${sref/\#/-}
+    shead=""
+    for _ in 1 2 3; do
+      first=$(view_pr "$sref" headRefOid | jq -r '.headRefOid')
+      pr_diff "$sref" "$stmp/${sname//\//-}.patch" || exit 1
+      shead=$(view_pr "$sref" headRefOid | jq -r '.headRefOid')
+      [ "$shead" != "$first" ] || break
+      shead=""
+    done
+    [ -n "$shead" ] || { echo "approval-queue: $sref moved its head three times while it was fetched; try again" >&2; exit 1; }
+    heads=$(jq -c --arg r "$sref" --arg h "$shead" '. + [{ref: $r, head: $h}]' <<<"$heads")
+  done < <(jq -r '.prs[]' "$1")
+  printf '%s\n' "$heads" >"$stmp/heads.json"
+  rm -rf "$sdir"
+  mv "$stmp" "$sdir"
+  echo "approval-queue: snapshotted $(jq length <<<"$heads") pull requests into $sdir" >&2
+  exit 0
+fi
+
+# replies_defects <replies.json> <note ids json>: prints a line for each defect of a replies file: an array of
+# {note, outcome, text, ref} that answers notes in the id list, with a ref (a commit or a backlog item) for fixed
+# and filed.
+replies_defects() {
+  jq -e . "$1" >/dev/null 2>&1 || { echo "$1 is not JSON"; return 0; }
+  jq -r --argjson ids "$2" '
+    if type != "array" then "the replies file must hold an array of {note, outcome, text, ref}"
+    else to_entries[] | (.key + 1) as $n | .value as $r
+      | if ($r | type) != "object" then "reply \($n) is not an object"
+        elif (($r | keys) - ["note", "outcome", "text", "ref"] | length) > 0 then "reply \($n) holds a key beyond note, outcome, text, and ref"
+        elif ($r.note | type | IN("string", "number") | not) or ($ids | index([($r.note | tostring)]) == null) then "reply \($n) answers a note this item does not have"
+        elif ($r.outcome | IN("fixed", "filed", "answered") | not) then "reply \($n) has the outcome \($r.outcome | tojson); it is fixed, filed, or answered"
+        elif ($r.text | type) != "string" or ($r.text | test("^\\s*$")) then "reply \($n) has no text"
+        elif ($r | has("ref")) and (($r.ref | type) != "string" or ($r.ref | test("^\\s*$"))) then "reply \($n) has a ref that is not a commit or a backlog item"
+        elif ($r.outcome | IN("fixed", "filed")) and (($r.ref // "") == "") then "reply \($n) is \($r.outcome) and needs a ref (a commit or a backlog item)"
+        else empty end
+    end' "$1"
+}
+
+# store_replies <replies.json> <dest>: merges the replies into dest, a later reply to a note replacing an earlier.
+store_replies() {
+  local old='[]'
+  [ ! -e "$2" ] || old=$(cat "$2")
+  jq -c --argjson old "$old" '(map(.note | tostring)) as $n
+    | ($old | map(select((.note | tostring) as $x | ($n | index([$x])) == null))) + .' "$1" >"$2.tmp"
+  mv "$2.tmp" "$2"
+}
+
+# reply <id|digest> <replies.json>: stores replies on a decided item, or on the digest's notes.
+if [ "${1:-}" = reply ]; then
+  shift
+  if [ $# -ne 2 ]; then echo "$usage" >&2; exit 2; fi
+  [ -r "$2" ] || { echo "approval-queue: cannot read $2" >&2; exit 1; }
+  if [ "$1" = digest ]; then
+    [ -e "$root/digest-notes.json" ] || refuse "the digest holds no notes"
+    rids=$(jq -c '[.[] | .id | tostring]' "$root/digest-notes.json")
+    rdest="$root/digest-replies.json"
+  else
+    [[ $1 =~ $id_pattern ]] || refuse "$1 is not an item id"
+    rdir="$root/items/$1"
+    [ -e "$rdir/item.json" ] || refuse "no item $1 is queued"
+    [ -e "$rdir/decision.json" ] || refuse "$1 is not decided yet"
+    [ -e "$rdir/facts.json" ] || refuse "$1 was queued in an old shape and holds no notes to answer"
+    rids=$(jq -c '[(.notes // [])[] | .id | tostring]' "$rdir/decision.json")
+    rdest="$rdir/replies.json"
+  fi
+  rdefects=$(replies_defects "$2" "$rids")
+  [ -z "$rdefects" ] || refuse "$rdefects (the approval-packet skill)"
+  store_replies "$2" "$rdest"
+  exit 0
+fi
+
+# merge <id>: merges each PR of a decided approve, in heads.json order, and records each success in merged.json.
+if [ "${1:-}" = merge ]; then
+  shift
+  skips=() dones=()
   while [ $# -gt 0 ]; do
     case "$1" in
-      --notes) [ $# -ge 2 ] || { echo "$usage" >&2; exit 2; }; notes=$2; shift 2 ;;
-      --replies) [ $# -ge 2 ] || { echo "$usage" >&2; exit 2; }; replies=$2; shift 2 ;;
-      --description) [ $# -ge 2 ] || { echo "$usage" >&2; exit 2; }; description=$2; shift 2 ;;
-      --*) echo "$usage" >&2; exit 2 ;;
-      *) args+=("$1"); shift ;;
+      --skip | --premerge-done)
+        [ $# -ge 2 ] && [[ $2 =~ $ref_pattern ]] || { echo "$usage" >&2; exit 2; }
+        if [ "$1" = --skip ]; then skips+=("$2"); else dones+=("$2"); fi
+        shift 2 ;;
+      *) break ;;
     esac
   done
-  if [ "${#args[@]}" -ne 3 ]; then echo "$usage" >&2; exit 2; fi
-  worktree=${args[0]} pr=${args[1]} title=${args[2]}
-  if [[ ! $pr =~ ^([A-Za-z0-9._-]+/[A-Za-z0-9._-]+)#([0-9]+)$ ]]; then
-    echo "approval-queue: give the pull request as owner/repo#n, not $pr" >&2; exit 2
-  fi
-  pr_repo=${BASH_REMATCH[1]} number=${BASH_REMATCH[2]}
-elif [ "${1:-}" = collect ]; then
+  if [ $# -ne 1 ]; then echo "$usage" >&2; exit 2; fi
+  [[ $1 =~ $id_pattern ]] || refuse "$1 is not an item id"
+  mdir="$root/items/$1"
+  [ -e "$mdir/item.json" ] || refuse "no item $1 is queued"
+  if [ -e "$mdir/design.json" ] || [ ! -e "$mdir/heads.json" ]; then refuse "$1 has no pull requests to merge"; fi
+  [ -e "$mdir/decision.json" ] || refuse "$1 is not decided yet"
+  [ "$(jq -r '.decision' "$mdir/decision.json")" = approve ] || refuse "$1 was not approved"
+  [ ! -e "$mdir/stale.json" ] || refuse "$1 is out of date: a head moved since it was queued"
+  [ -e "$mdir/merged.json" ] || echo '[]' >"$mdir/merged.json"
+  merged=() failed=() skipped=() notreached=()
+  mapfile -t mrefs < <(jq -r '.[].ref' "$mdir/heads.json")
+  # merge_report: prints the one-line summary.
+  merge_report() {
+    jq -nc --argjson m "$(jq -nc '$ARGS.positional' --args "${merged[@]}")" --argjson f "$(jq -nc '$ARGS.positional' --args "${failed[@]}")" \
+      --argjson s "$(jq -nc '$ARGS.positional' --args "${skipped[@]}")" --argjson n "$(jq -nc '$ARGS.positional' --args "${notreached[@]}")" \
+      '{merged: $m, failed: $f, skipped: $s, notReached: $n}'
+  }
+  stopped_at=""
+  for mref in "${mrefs[@]}"; do
+    if printf '%s\n' "${skips[@]}" | grep -qxF -- "$mref"; then skipped+=("$mref"); continue; fi
+    if [ -n "$stopped_at" ]; then notreached+=("$mref"); continue; fi
+    mhead=$(jq -r --arg r "$mref" '.[] | select(.ref == $r) | .head' "$mdir/heads.json")
+    mview=$(view_pr "$mref" state,headRefOid,body) || { failed+=("$mref"); stopped_at=$mref; continue; }
+    if [ "$(jq -r '.state' <<<"$mview")" = MERGED ] && [ "$(jq -r '.headRefOid' <<<"$mview")" = "$mhead" ]; then
+      :
+    else
+      mbody=$(jq -r '.body // ""' <<<"$mview")
+      if has_before_merge "$mbody" && ! printf '%s\n' "${dones[@]}" | grep -qxF -- "$mref"; then
+        echo "approval-queue: $mref has a Before merge section; do it, then pass --premerge-done $mref" >&2
+        awk 'tolower($0) ~ /^##[ \t]+before merge/ {on = 1; print; next} /^##[ \t]/ {on = 0} on' <<<"$mbody"
+        exit 2
+      fi
+      merge_pr "$mref" "$mhead" || { failed+=("$mref"); stopped_at=$mref; continue; }
+    fi
+    if ! jq -e --arg r "$mref" 'any(.[]; .ref == $r)' "$mdir/merged.json" >/dev/null; then
+      jq --arg r "$mref" --arg h "$mhead" --arg t "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '. + [{ref: $r, head: $h, at: $t}]' "$mdir/merged.json" >"$mdir/merged.json.tmp"
+      mv "$mdir/merged.json.tmp" "$mdir/merged.json"
+    fi
+    merged+=("$mref")
+  done
+  merge_report
+  [ -z "$stopped_at" ] || exit 1
+  exit 0
+fi
+
+# digest_line <ref> <head> <claim> <lane>: appends one line to digest.jsonl.
+digest_line() {
+  mkdir -p "$root"
+  jq -nc --arg t "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg r "$1" --arg h "$2" --arg c "$3" --arg l "$4" \
+    '{time: $t, ref: $r, head: $h, claim: $c, lane: $l}' >>"$root/digest.jsonl"
+}
+
+# land <ref> <claim>: merges a small PR the session judged, once its checks are not failing, at the head it read.
+if [ "${1:-}" = land ]; then
+  shift
+  if [ $# -ne 2 ] || [[ ! $1 =~ $ref_pattern ]]; then echo "$usage" >&2; exit 2; fi
+  lref=$1 lclaim=$2
+  for lf in "$root"/items/*/item.json; do
+    [ -e "$lf" ] && [ ! -e "$(dirname "$lf")/decision.json" ] || continue
+    if jq -e --arg r "$lref" '(.refs // []) | index($r)' "$lf" >/dev/null 2>&1 \
+      || { [ -e "$(dirname "$lf")/heads.json" ] && jq -e --arg r "$lref" 'any(.[]; .ref == $r)' "$(dirname "$lf")/heads.json" >/dev/null 2>&1; }; then
+      refuse "$lref is in the waiting item $(basename "$(dirname "$lf")"); decide it first"
+    fi
+  done
+  waited=0
+  while :; do
+    lview=$(view_pr "$lref" state,headRefOid,body,statusCheckRollup)
+    [ "$(jq -r '.state' <<<"$lview")" = OPEN ] || refuse "$lref is $(jq -r '.state' <<<"$lview"), not open"
+    has_before_merge "$(jq -r '.body // ""' <<<"$lview")" && refuse "$lref has a Before merge section; send it in a packet"
+    ! rollup_failing "$lview" || refuse "$lref has a failing check"
+    rollup_pending "$lview" || break
+    [ "$waited" -lt "$check_cap" ] || refuse "$lref still has checks pending after ${check_cap}s"
+    sleep "$check_poll"
+    waited=$((waited + check_poll))
+  done
+  lhead=$(jq -r '.headRefOid' <<<"$lview")
+  merge_pr "$lref" "$lhead" || exit 1
+  digest_line "$lref" "$lhead" "$lclaim" land
+  exit 0
+fi
+
+# digest <ref> <claim>: records a PR already merged or closed by hand.
+if [ "${1:-}" = digest ]; then
+  shift
+  if [ $# -ne 2 ] || [[ ! $1 =~ $ref_pattern ]]; then echo "$usage" >&2; exit 2; fi
+  dview=$(view_pr "$1" state,headRefOid)
+  [ "$(jq -r '.state' <<<"$dview")" != OPEN ] || refuse "$1 is still open; land it or send it in a packet"
+  digest_line "$1" "$(jq -r '.headRefOid' <<<"$dview")" "$2" record
+  exit 0
+fi
+
+# The retired forms exit 2, each naming its replacement.
+case "${1:-}" in
+  docs | notes)
+    echo "approval-queue: the $1 form is retired; put a review in a packet, where Geoff's notes anchor to any text (the approval-packet skill)" >&2
+    exit 2 ;;
+  pr)
+    echo "approval-queue: the pr form is retired; send the pull request in a packet (the approval-packet skill), or merge a small one with approval-queue land" >&2
+    exit 2 ;;
+esac
+
+collecting="" check="" replies_file="" initiative="" repo="" title="" source="" facts_file="" text_file="" file=""
+if [ "${1:-}" = collect ]; then
   shift
   if [ $# -ne 1 ]; then echo "$usage" >&2; exit 2; fi
   if [[ ! $1 =~ $id_pattern ]]; then echo "approval-queue: $1 is not an item id" >&2; exit 2; fi
   if [ ! -e "$root/items/$1/item.json" ]; then echo "approval-queue: no item $1 is queued" >&2; exit 2; fi
   ckind=$(jq -r '.kind' "$root/items/$1/item.json")
-  case "$ckind" in pr | design | triage | packet | docs) ;; *) echo "approval-queue: $1 is a $ckind item, which this queue no longer reads" >&2; exit 2 ;; esac
-  kind=collect collecting=$1
-elif [ "${1:-}" = notes ]; then
-  shift
-  # The target id lives in notes_id, never in id or item: the exit trap retires $item when it has no decision.
-  if [ "${1:-}" = --check ]; then
-    shift
-    if [ $# -ne 2 ]; then echo "$usage" >&2; exit 2; fi
-    kind=notes worktree=$1 notes=$2
-  else
-    if [ $# -ne 2 ]; then echo "$usage" >&2; exit 2; fi
-    if [[ ! $1 =~ $id_pattern ]]; then echo "approval-queue: $1 is not an item id" >&2; exit 2; fi
-    kind=notes notes_id=$1 notes=$2
+  case "$ckind" in design | triage | packet) ;; *) echo "approval-queue: $1 is a $ckind item, which this queue no longer reads" >&2; exit 2 ;; esac
+  if [ "$ckind" = packet ] && [ ! -e "$root/items/$1/facts.json" ]; then
+    echo "approval-queue: $1 was queued in an old shape, which this queue no longer reads" >&2
+    exit 2
   fi
+  kind=collect collecting=$1
 elif [ "${1:-}" = packet ]; then
   shift
-  if [ "${1:-}" = --check ]; then check=1; shift; fi
-  if [ $# -ne 2 ]; then echo "$usage" >&2; exit 2; fi
-  kind=packet initiative=$1 source=$2
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --check) check=1; shift ;;
+      --replies)
+        [ $# -ge 2 ] || { echo "$usage" >&2; exit 2; }
+        replies_file=$2
+        shift 2 ;;
+      *) break ;;
+    esac
+  done
+  if [ $# -eq 2 ]; then refuse "the one-file packet form is retired; write a fact file and a text file and pass both (the approval-packet skill)"; fi
+  if [ $# -ne 3 ]; then echo "$usage" >&2; exit 2; fi
+  kind=packet initiative=$1 facts_file=$2 text_file=$3
 else
   if [ $# -ne 4 ]; then echo "$usage" >&2; exit 2; fi
   kind=$1 repo=$2 title=$3 source=$4
-  case "$kind" in pr | design | triage) ;; *) echo "$usage" >&2; exit 2 ;; esac
+  case "$kind" in design | triage) ;; *) echo "$usage" >&2; exit 2 ;; esac
 fi
 
 log="$root/server.log"
@@ -180,16 +446,17 @@ mkdir -p "$root"
 check_body="$root/check-$id.md"
 check_err="$root/check-$id.err"
 
-# A command that leaves without a decision takes its item off the index, unless Geoff deferred it: a deferred
-# item stays on the board with no waiter. The trap never fails: under set -e a failing last command would
-# turn the exit status to 1.
+# A command that fails without a decision takes its item off the index. A stop signal (a reboot, a closed
+# terminal) leaves it for `collect`, unless `withdraw` wrote its marker first (#59). The trap never fails: under
+# set -e a failing last command would turn the exit status to 1.
+stopped=""
 if [ -n "$collecting" ]; then
   # A collect never takes the item off the board, however it ends.
   trap 'rm -f "$check_body" "$check_err"; rm -rf "$fetch"' EXIT
 else
-  trap '[ -e "$item/decision.json" ] || [ -e "$item/deferred.json" ] || retire_item "$item" || true; rm -f "$check_body" "$check_err"; rm -rf "$fetch"' EXIT
+  trap '[ -e "$item/decision.json" ] || { [ -n "$stopped" ] && [ ! -e "$item/withdrawn" ]; } || retire_item "$item" || true; rm -f "$check_body" "$check_err"; rm -rf "$fetch"' EXIT
 fi
-trap 'exit 143' TERM HUP INT
+trap 'stopped=1; exit 143' TERM HUP INT
 
 app=$(realpath "$(dirname "$(realpath "$0")")/../../../approval-queue")
 
@@ -208,44 +475,6 @@ check_brief() {
   headline=$(jq -r '.headline' <<<"$out")
 }
 
-# pr_diff <owner/repo> <n> <file>: saves PR n's diff into file. GitHub refuses a diff of more than
-# 300 files (HTTP 406, too_large), so that one refusal falls back to the PR's file list, which
-# carries each file's patch for up to 3,000 files. A rename with no content change has no patch.
-pr_diff() {
-  local r=$1 n=$2 out=$3 err
-  if err=$(gh pr diff "$n" -R "$r" 2>&1 >"$out" </dev/null); then return 0; fi
-  case $err in
-    *too_large*) ;;
-    *) printf '%s\n' "$err" >&2; return 1 ;;
-  esac
-  gh api --paginate "repos/$r/pulls/$n/files?per_page=100" </dev/null | jq -rs '
-    add | .[] | (.previous_filename // .filename) as $old
-    | "diff --git a/\($old) b/\(.filename)",
-      (if .status == "renamed" then "rename from \($old)", "rename to \(.filename)" else empty end),
-      (if .patch then "--- a/\($old)", "+++ b/\(.filename)", .patch else empty end)' >"$out"
-}
-
-# fetch_pr <dir> <owner/repo> <n>: saves PR n's metadata, body, and diff into dir. The diff must be
-# the diff of the head the decision pins, so a head that moved while fetching is fetched again, and
-# a third move exits 1.
-fetch_pr() {
-  local d=$1 r=$2 n=$3 view again try
-  mkdir -p "$d"
-  for try in 1 2 3; do
-    view=$(gh pr view "$n" -R "$r" --json body,headRefOid,number,url,headRefName,baseRefName,statusCheckRollup,state </dev/null)
-    pr_diff "$r" "$n" "$d/diff.patch"
-    again=$(gh pr view "$n" -R "$r" --json headRefOid </dev/null | jq -r '.headRefOid')
-    if [ "$again" = "$(jq -r '.headRefOid' <<<"$view")" ]; then
-      jq -r '.body' <<<"$view" >"$d/body.md"
-      jq --arg ref "$r#$n" '{ref: $ref, head: .headRefOid} + del(.body, .headRefOid)' <<<"$view" >"$d/pr.json"
-      return 0
-    fi
-  done
-  echo "approval-queue: $r#$n moved its head three times while it was fetched; try again" >&2
-  exit 1
-}
-
-register='~/.claude/docs/voice/approval-brief.md'
 
 # refuse_packet <defect>: prints the defect, logs {time, initiative, defect} to refusals.jsonl, exit 2.
 refuse_packet() {
@@ -255,353 +484,200 @@ refuse_packet() {
   exit 2
 }
 
-# check_description: refuses (exit 2) a docs review with no --description file, or one whose title or paragraphs
-# break the register's rules, before any item directory exists.
-check_description() {
-  local rc=0
-  if [ -z "$description" ]; then
-    echo "approval-queue: docs needs --description <file>: two or three paragraphs, a background paragraph and then one or two summary paragraphs, that the page shows under the title (see the README's \"The description\" section)" >&2
-    exit 2
-  fi
-  if [ ! -f "$description" ]; then echo "approval-queue: no description file at $description" >&2; exit 2; fi
-  node "$app/src/check-brief.ts" description "$description" "$title" >/dev/null 2>"$check_err" || rc=$?
-  if [ "$rc" -ne 0 ]; then
-    cat "$check_err" >&2
-    [ "$rc" -eq 2 ] || echo "approval-queue: the description check failed to run" >&2
-    exit "$((rc == 2 ? 2 : 1))"
-  fi
-}
-
-# The revision lookup. Given $refs, an array of {ref, kind}, it prints null, or {item, revision, parts} when
-# one or more refs are sent back. A ref is sent back when its latest log line (a line that does not parse is
-# skipped) is a reject that counts. A reject counts unless Geoff marked that part approve inside a packet where he
-# sent another part back: its `sentBack` is false and a line of its packet says true. A line with no `sentBack`
-# (written before the field), and the lines of a note-only send-back, count. `item` is the packet id of the latest
-# such line and `revision` is one more than the number of distinct packet ids among the counting reject lines
-# naming any ref after that ref's latest approve. `parts` holds the head or sha256 of each sent-back ref's reject
-# line in that item, and its commit when the line has one (a docs review's).
-revision_program=$(cat <<'JQ'
-[inputs | fromjson? | objects] as $L
-| ($L | to_entries) as $E
-| def lines($r): [$E[] | select(.value.ref == $r.ref and .value.kind == $r.kind)];
-  def counts($l): $l.sentBack != false or (any($L[]; .packet == $l.packet and .sentBack == true) | not);
-  [$refs[] | . as $r | (lines($r) | last) as $last
-   | select($last != null and $last.value.verdict == "reject" and counts($last.value))
-   | {ref: $r.ref, at: $last.key, item: $last.value.packet}] as $sent
-| if ($sent | length) == 0 then null
-  else
-    ($sent | max_by(.at)) as $latest
-    | {item: $latest.item,
-       revision: (1 + ([$refs[] | . as $r | lines($r) as $mine
-           | (([$mine[] | select(.value.verdict == "approve") | .key] | last) // -1) as $ap
-           | $mine[] | select(.value.verdict == "reject" and .key > $ap and counts(.value)) | .value.packet] | unique | length)),
-       parts: [$sent[] | select(.item == $latest.item) | $L[.at] as $l
-           | {ref: .ref} + (if $l.head then {head: $l.head} elif $l.sha256 then {sha256: $l.sha256} else {} end)
-                  + (if $l.commit then {commit: $l.commit} else {} end)]}
-  end
-JQ
-)
-
-# revision_of <refs json>: prints the lookup's answer, null when nothing is sent back or no log exists yet.
-revision_of() {
-  [ -e "$root/decisions.jsonl" ] || { echo null; return 0; }
-  jq -R -n -c --argjson refs "$1" "$revision_program" "$root/decisions.jsonl"
-}
-
-# amend_of <ref>: prints the commit of a docs review's latest line for the PR when that line is an approve, else
-# nothing. A queue of the PR after an approve is an amend review of what changed since that commit. A line that does
-# not parse is skipped.
-amend_of() {
-  [ -e "$root/decisions.jsonl" ] || return 0
-  jq -R -n -r --arg ref "$1" '
-    [inputs | fromjson? | objects | select(.kind == "docs" and .ref == $ref)]
-    | (last // {}) | select(.verdict == "approve") | .commit | strings' "$root/decisions.jsonl"
-}
-
 # waiting_item <ref>: prints the id of a waiting item (one with an item.json and no decision.json)
-# that holds the PR, whether a packet part, a pr-kind item, or a docs review.
+# that holds the PR.
 waiting_item() {
-  local f
+  local f d
   for f in "$root"/items/*/item.json; do
-    [ -e "$f" ] && [ ! -e "$(dirname "$f")/decision.json" ] || continue
-    jq -r --arg ref "$1" 'select((.kind == "packet" and (.refs | index($ref)))
-      or ((.kind == "pr" or .kind == "docs") and "\(.repo)#\(.number)" == $ref)) | .id' "$f"
+    d=$(dirname "$f")
+    [ -e "$f" ] && [ ! -e "$d/decision.json" ] && [ -e "$d/heads.json" ] || continue
+    if jq -e --arg ref "$1" 'any(.[]; .ref == $ref)' "$d/heads.json" >/dev/null; then basename "$d"; fi
   done | head -n 1
 }
 
-# since_diff <dir> <owner/repo> <old head> <new head>: for a part whose head moved since Geoff sent it back,
-# saves what changed since as since.patch when the old head is still behind the new one, and as since.json
-# {"gone": true} when it is not (a force-push: GitHub answers another status, 404, or 422). A diff too large to
-# serve (406) saves neither, so the part shows its full list; any other gh failure is a tool failure.
-since_diff() {
-  local d=$1 r=$2 old=$3 new=$4 status err
-  [ "$old" != "$new" ] || return 0
-  if status=$(gh api "repos/$r/compare/$old...$new" --jq '.status' 2>"$check_err" </dev/null); then
-    if [ "$status" = ahead ]; then
-      if err=$(gh api -H 'Accept: application/vnd.github.diff' "repos/$r/compare/$old...$new" 2>&1 >"$d/since.patch" </dev/null); then return 0; fi
-      rm -f "$d/since.patch"
-      case $err in *406*) return 0 ;; esac
-      printf '%s\n' "$err" >&2
-      exit 1
-    fi
-    echo '{"gone": true}' >"$d/since.json"
-    return 0
+# check_waiting <ref>...: prints a defect for each ref a waiting item already holds.
+check_waiting() {
+  local ref other
+  for ref in "$@"; do
+    other=$(waiting_item "$ref")
+    [ -z "$other" ] || echo "$ref is already in the waiting item $other; decide it first"
+  done
+}
+
+# sent_back <prs json> <design key>: prints null, or {item, revision} when the latest decided item that holds any
+# of the pull requests, or the design (as repo:path), was sent back. The revision is one more than that item's.
+# Items are ordered by the time their decision was written.
+sent_back() {
+  local d f latest="" decided=()
+  mapfile -t decided < <(ls -1tr -- "$root"/items/*/decision.json 2>/dev/null)
+  for f in "${decided[@]}"; do
+    d=$(dirname "$f")
+    [ -e "$d/item.json" ] && [ -e "$d/facts.json" ] || continue
+    jq -e --argjson prs "$1" --arg dk "$2" '
+      (.prs // []) as $mine | (.design // null) as $dsg
+      | any($mine[]; . as $x | ($prs | index([$x])) != null)
+        or ($dk != "" and $dsg != null and "\($dsg.repo):\($dsg.path)" == $dk)' "$d/facts.json" >/dev/null || continue
+    latest=$d
+  done
+  if [ -n "$latest" ] && [ "$(jq -r '.decision' "$latest/decision.json")" = reject ]; then
+    jq -nc --arg i "${latest##*/}" --argjson r "$(jq '(.revises.revision // 1) + 1' "$latest/item.json")" '{item: $i, revision: $r}'
+  else
+    echo null
   fi
-  case $(cat "$check_err") in
-    *404* | *422*) echo '{"gone": true}' >"$d/since.json" ;;
-    *) cat "$check_err" >&2; exit 1 ;;
+}
+
+# rank_of <path>: prints where a file sorts in the packet's file list (the global `held` holds the fact file's
+# globs): held paths 0, workflows 1, configuration 2, other files 3, tests 4, generated files 5.
+rank_of() {
+  local p=$1 g
+  for g in "${held[@]}"; do
+    # shellcheck disable=SC2053
+    if [[ $p == $g ]]; then echo 0; return 0; fi
+  done
+  case $p in
+    .github/workflows/*) echo 1 ;;
+    *package-lock.json | *yarn.lock | *pnpm-lock.yaml | *.lock | *go.sum | *.snap | *.min.js | dist/* | build/* | */generated/* | generated/*) echo 5 ;;
+    package.json | */package.json | *.config.* | .*rc | *.yml | *.yaml | *.toml | tsconfig*.json | Makefile | Dockerfile) echo 2 ;;
+    *.test.* | *.spec.* | *_test.* | test/* | tests/* | */test/* | */tests/* | */__tests__/*) echo 4 ;;
+    *) echo 3 ;;
   esac
 }
 
-# queue_packet: parses the packet, fetches every part under the queue lock, checks the PR data, and
-# writes the item directory, item.json last. With --check it stops before writing anything. Sets
-# repo and leaves the lock released.
+# queue_packet: checks the fact file and text against the snapshot, reads each PR (waiting for pending checks),
+# and writes the item directory, item.json last. With --check it stops before writing anything. Leaves the lock
+# released.
 queue_packet() {
-  local rc=0 k kind_k owner_k repo_k number_k path_k headline initiative_title="" ref st other old revises defects=()
+  local rc=0 k ref pinned view st waited ranks prev="" have ids missing rdefects dkey="" dsrc="" snapdir checked="$fetch/checked.json"
+  local revises prs=() held=() defects=()
   if [ "$initiative" != none ]; then
     [[ $initiative =~ ^[a-z0-9-]+$ && -e "$projects/initiatives/$initiative/initiative.yaml" ]] \
-      || refuse_packet "the initiative is none or the id of a record: no initiatives/$initiative/initiative.yaml under $projects ($register)"
-    initiative_title=$(sed -nE '/^title:/{s/^title:[[:space:]]*//;s/[[:space:]]+$//;s/^"(.*)"$/\1/;s/^'"'"'(.*)'"'"'$/\1/;p;q}' \
-      "$projects/initiatives/$initiative/initiative.yaml")
+      || refuse_packet "the initiative is none or the id of a record: no initiatives/$initiative/initiative.yaml under $projects (the approval-packet skill)"
   fi
-  node "$app/src/check-brief.ts" packet "$source" >"$fetch.json" 2>"$check_err" || rc=$?
+  [ -r "$facts_file" ] && [ -r "$text_file" ] && { [ -z "$replies_file" ] || [ -r "$replies_file" ]; } \
+    || { echo "approval-queue: cannot read $facts_file, $text_file, or $replies_file" >&2; exit 1; }
+  jq -e . "$facts_file" >/dev/null 2>&1 \
+    || refuse_packet "$facts_file is not JSON: the one-file packet grammar is retired; write a fact file and a text file (the approval-packet skill)"
+  snapdir=$(dirname "$facts_file")/snapshot
+  if [ "$(jq 'try (.prs | length) catch 0' "$facts_file")" -gt 0 ] && [ ! -e "$snapdir/heads.json" ]; then
+    refuse_packet "no snapshot beside $facts_file; run approval-queue snapshot $facts_file first (the approval-packet skill)"
+  fi
+  mkdir -p "$fetch/prs"
+  node "$app/src/check-brief.ts" facts "$facts_file" "$text_file" "$snapdir" >"$checked" 2>"$check_err" || rc=$?
   if [ "$rc" -ne 0 ]; then
     [ "$rc" -eq 2 ] && refuse_packet "$(cat "$check_err")"
     cat "$check_err" >&2
     echo "approval-queue: the packet check failed to run" >&2
     exit 1
   fi
-  mkdir -p "$fetch/parts"
-  mv "$fetch.json" "$fetch/packet.json"
-  revises=$(revision_of "$(jq -c '[.parts[].part | select(.kind == "pr" or .kind == "design") | {ref, kind}]' "$fetch/packet.json")")
-  if [ "$revises" != null ] && ! jq -e '.whatChanged' "$fetch/packet.json" >/dev/null; then
-    refuse_packet "this packet resends $(jq -r '[.parts[].ref] | join(", ")' <<<"$revises") that you sent back in the item $(jq -r '.item' <<<"$revises"); add a \`## What changed\` section of bullets saying what changed ($register)"
-  elif [ "$revises" = null ] && jq -e '.whatChanged' "$fetch/packet.json" >/dev/null; then
-    refuse_packet "\`## What changed\` is for a packet that resends a part you sent back, and no part of this packet was sent back (a part you marked approve inside a rejected packet was not); drop the section ($register)"
+  mapfile -t prs < <(jq -r '.facts.prs[]' "$checked")
+  mapfile -t held < <(jq -r '.facts.held[]' "$checked")
+  if [ "${#prs[@]}" -gt 0 ]; then
+    jq -e --argjson prs "$(jq -c '.facts.prs' "$checked")" '([.[].ref] | sort) == ($prs | sort)' "$snapdir/heads.json" >/dev/null \
+      || refuse_packet "the snapshot holds other pull requests than the fact file's prs; run approval-queue snapshot again (the approval-packet skill)"
   fi
-  exec 8>"$root/queue.lock"
-  flock 8
-  while IFS=$'\x1f' read -r k kind_k owner_k repo_k number_k path_k; do
-    case "$kind_k" in
-      pr) fetch_pr "$fetch/parts/$k" "$owner_k/$repo_k" "$number_k" ;;
-      design)
-        mkdir -p "$fetch/parts/$k"
-        cp "$projects/$repo_k/$path_k" "$fetch/parts/$k/doc.md"
-        jq -n --arg path "$path_k" --arg sha "$(sha256sum "$fetch/parts/$k/doc.md" | cut -d' ' -f1)" \
-          '{path: $path, sha256: $sha}' >"$fetch/parts/$k/doc.json"
-        ;;
-    esac
-  done < <(jq -r '.parts | to_entries[] | .value.part as $p
-    | [.key, $p.kind, ($p.owner // ""), ($p.repo // ""), ($p.number // "" | tostring), ($p.path // "")] | join("\u001f")' "$fetch/packet.json")
-  while IFS=$'\x1f' read -r k ref; do
-    st=$(node "$app/src/check-pr.ts" "$fetch/parts/$k/pr.json" "$fetch/parts/$k/body.md") \
-      || { echo "approval-queue: the PR check failed to run for $ref" >&2; exit 1; }
-    if [ "$(jq -r '.state' <<<"$st")" != OPEN ]; then
-      defects+=("$ref is $(jq -r '.state' <<<"$st"); a merged or closed PR cannot be queued")
-      continue
+  if jq -e '.facts.design' "$checked" >/dev/null; then
+    dkey=$(jq -r '.facts.design | "\(.repo):\(.path)"' "$checked")
+    dsrc="$projects/$(jq -r '.facts.design.repo' "$checked")/$(jq -r '.facts.design.path' "$checked")"
+    [ -r "$dsrc" ] || refuse_packet "the design $dkey is not at $dsrc (the approval-packet skill)"
+  fi
+
+  # A resend of an item Geoff sent back answers each of its notes.
+  revises=$(sent_back "$(jq -c '.facts.prs' "$checked")" "$dkey")
+  if [ "$revises" != null ]; then
+    prev="$root/items/$(jq -r '.item' <<<"$revises")"
+    ids=$(jq -c '[(.notes // [])[] | .id | tostring]' "$prev/decision.json")
+    have='[]'
+    if [ -n "$replies_file" ]; then
+      rdefects=$(replies_defects "$replies_file" "$ids")
+      [ -z "$rdefects" ] || refuse_packet "$rdefects (the approval-packet skill)"
+      have=$(jq -c '[.[] | .note | tostring]' "$replies_file")
     fi
-    other=$(waiting_item "$ref")
-    [ -z "$other" ] || { defects+=("$ref is already in the waiting item $other; decide it first"); continue; }
-    if [ "$(jq -r '.pending' <<<"$st")" -gt 0 ]; then
-      defects+=("$ref has checks still pending; wait for the checks to finish")
-      continue
+    [ ! -e "$prev/replies.json" ] || have=$(jq -c --argjson h "$have" '$h + [.[] | .note | tostring]' "$prev/replies.json")
+    missing=$(jq -nr --argjson ids "$ids" --argjson h "$have" '$ids - $h | join(", ")')
+    [ -z "$missing" ] || refuse_packet "this packet resends the item $(jq -r '.item' <<<"$revises") that you sent back, and leaves its notes $missing unanswered; pass --replies with a reply to each (the approval-packet skill)"
+  elif [ -n "$replies_file" ]; then
+    refuse_packet "--replies answers an item that was sent back, and no item holding these pull requests was (the approval-packet skill)"
+  fi
+
+  mapfile -t defects < <(check_waiting "${prs[@]}")
+  for k in "${!prs[@]}"; do
+    ref=${prs[k]}
+    pinned=$(jq -r --arg r "$ref" '.[] | select(.ref == $r) | .head' "$snapdir/heads.json")
+    waited=0
+    while :; do
+      view=$(view_pr "$ref" state,headRefOid,title,body,statusCheckRollup,files)
+      if [ "$(jq -r '.state' <<<"$view")" != OPEN ]; then
+        defects+=("$ref is $(jq -r '.state' <<<"$view"); a merged or closed pull request cannot be queued")
+        continue 2
+      fi
+      if [ "$(jq -r '.headRefOid' <<<"$view")" != "$pinned" ]; then
+        defects+=("$ref moved to $(jq -r '.headRefOid[:7]' <<<"$view") since the snapshot at ${pinned:0:7}; run approval-queue snapshot again")
+        continue 2
+      fi
+      # A failing check refuses at once; a pending one is waited for, except under --check.
+      rollup_failing "$view" && break
+      rollup_pending "$view" || break
+      if [ -n "$check" ]; then
+        defects+=("$ref has checks still pending; wait for the checks to finish")
+        continue 2
+      fi
+      if [ "$waited" -ge "$check_cap" ]; then
+        defects+=("$ref still has checks pending after ${check_cap}s")
+        continue 2
+      fi
+      sleep "$check_poll"
+      waited=$((waited + check_poll))
+    done
+    jq -r '.body // ""' <<<"$view" >"$fetch/body-$k.md"
+    jq '{state, statusCheckRollup}' <<<"$view" >"$fetch/pr-$k.json"
+    st=$(node "$app/src/check-pr.ts" "$fetch/pr-$k.json" "$fetch/body-$k.md") \
+      || { echo "approval-queue: the pull request check failed to run for $ref" >&2; exit 1; }
+    if { rollup_failing "$view" || jq -e '.verdict == "fix" or .verdict == "escalate"' <<<"$st" >/dev/null; } \
+      && ! jq -e '.facts.calls | any(.forced and .rule == "gate-failed")' "$checked" >/dev/null; then
+      defects+=("$ref has a failing check or a review verdict of fix or escalate; that is a forced call with the rule gate-failed")
     fi
-    if jq -e '(.failed | length) > 0 or .verdict == "fix" or .verdict == "escalate"' <<<"$st" >/dev/null \
-      && ! jq -e --arg r "$ref" 'any(.asks[]; .rule == "gate-failed" and .part.ref == $r)' "$fetch/packet.json" >/dev/null; then
-      defects+=("$ref has a failing check or a review verdict of fix or escalate; a failing gate is an ask with the rule gate-failed naming it")
+    if jq -e '.beforeMerge' <<<"$st" >/dev/null && ! jq -e '.facts.calls | any(.forced)' "$checked" >/dev/null; then
+      defects+=("$ref has a Before merge section; that is a forced call")
     fi
-    if jq -e '.beforeMerge' <<<"$st" >/dev/null \
-      && ! jq -e --arg r "$ref" 'any(.asks[]; .part.ref == $r)' "$fetch/packet.json" >/dev/null; then
-      defects+=("$ref has a Before merge section; a Before merge step is an ask naming the PR")
-    fi
-  done < <(jq -r '.parts | to_entries[] | select(.value.part.kind == "pr") | [.key, .value.part.ref] | join("\u001f")' "$fetch/packet.json")
+    ranks=$(jq -r '(.files // [])[].path' <<<"$view" | while IFS= read -r p; do rank_of "$p"; done | jq -sc .)
+    jq --arg ref "$ref" --argjson ranks "$ranks" '
+      def row: if .__typename == "StatusContext"
+        then {name: (.context // ""), bucket: (if .state == "SUCCESS" then "pass" elif (.state == "PENDING" or .state == "EXPECTED") then "pending" else "fail" end)}
+        else {name: (if (.workflowName // "") != "" then "\(.workflowName) / \(.name)" else (.name // "") end),
+              bucket: (if .status != "COMPLETED" then "pending" elif (.conclusion == "SUCCESS" or .conclusion == "NEUTRAL") then "pass" elif .conclusion == "SKIPPED" then "skipping" else "fail" end)}
+        end;
+      {ref: $ref, title: (.title // ""), body: (.body // ""), checks: [(.statusCheckRollup // [])[] | row],
+       files: ([(.files // []), $ranks] | transpose | map((.[0] + {rank: .[1]}) | {path, additions, deletions, rank}) | sort_by(.rank))}' \
+      <<<"$view" >"$fetch/prs/$k.json"
+  done
   if [ "${#defects[@]}" -gt 0 ]; then
-    refuse_packet "$(printf '%s\n' "${defects[@]}") (see $register)"
+    refuse_packet "$(printf '%s\n' "${defects[@]}" | sed 's/$/ (the approval-packet skill)/')"
   fi
   if [ -n "$check" ]; then exit 0; fi
-  if [ "$revises" != null ]; then
-    while IFS=$'\x1f' read -r k owner_k repo_k old; do
-      since_diff "$fetch/parts/$k" "$owner_k/$repo_k" "$old" "$(jq -r '.head' "$fetch/parts/$k/pr.json")"
-    done < <(jq -r --argjson r "$revises" '.parts | to_entries[] | select(.value.part.kind == "pr") | .key as $k | .value.part as $p
-      | $r.parts[] | select(.ref == $p.ref and .head != null) | [$k, $p.owner, $p.repo, .head] | join("\u001f")' "$fetch/packet.json")
-  fi
-  headline=$(jq -r '.headline' "$fetch/packet.json")
-  repo=$(jq -r '[.parts[].part | select(.kind != "step")][0] | "\(.owner)/\(.repo)"' "$fetch/packet.json")
+
+  exec 8>"$root/queue.lock"
+  flock 8
+  mapfile -t defects < <(check_waiting "${prs[@]}")
+  [ "${#defects[@]}" -eq 0 ] || refuse_packet "$(printf '%s\n' "${defects[@]}")"
   mkdir -p "$item"
-  cp "$source" "$item/packet.md"
-  mv "$fetch/packet.json" "$item/packet.json"
-  mv "$fetch/parts" "$item/parts"
-  jq -n --arg id "$id" --arg initiative "$initiative" --arg ititle "$initiative_title" --arg repo "$repo" --arg headline "$headline" \
-    --arg created "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --slurpfile packet "$item/packet.json" --argjson revises "$revises" \
-    --argjson pid "$$" --argjson pidstart "$pidstart" \
-    '{id: $id, kind: "packet", initiative: $initiative, initiativeTitle: $ititle, repo: $repo, title: $headline, created: $created,
-      headline: $headline, refs: [$packet[0].parts[].part.ref], pid: $pid, pidStart: $pidstart} + (if $revises == null then {} else {revises: $revises} end)' >"$item/item.json.tmp"
+  cp "$facts_file" "$item/facts.json"
+  cp "$text_file" "$item/text.md"
+  if [ -d "$snapdir" ]; then cp -r "$snapdir" "$item/snapshot"; fi
+  if [ "${#prs[@]}" -gt 0 ]; then
+    jq -c --argjson prs "$(jq -c '.facts.prs' "$checked")" '. as $h | [$prs[] | . as $r | $h[] | select(.ref == $r)]' "$snapdir/heads.json" >"$item/heads.json"
+    mv "$fetch/prs" "$item/prs"
+  fi
+  if [ -n "$dsrc" ]; then
+    cp "$dsrc" "$item/design.md"
+    jq -n --arg sha "$(sha256sum "$item/design.md" | cut -d' ' -f1)" '{sha256: $sha}' >"$item/design.json"
+  fi
+  [ -z "$replies_file" ] || store_replies "$replies_file" "$prev/replies.json"
+  jq -n --arg id "$id" --arg initiative "$initiative" --arg title "$(jq -r '.facts.title' "$checked")" \
+    --arg created "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --argjson revises "$revises" --argjson pid "$$" --argjson pidstart "$pidstart" \
+    '{id: $id, kind: "packet", title: $title, initiative: $initiative, created: $created, pid: $pid, pidStart: $pidstart}
+     + (if $revises == null then {} else {revises: $revises} end)' >"$item/item.json.tmp"
   mv "$item/item.json.tmp" "$item/item.json"
   exec 8>&-
-}
-
-# The shape of a --notes file: each note's fields and types, the kinds, and unique ids. Prints one defect per
-# line, so a refusal names every problem at once.
-notes_program=$(cat <<'JQ'
-def str: type == "string";
-def opt($k; f): (has($k) | not) or (.[$k] | f);
-def opt_in($o; $k): ($o | has($k) | not) or ($o[$k] | str);
-def name($i): "note \($i + 1)" + (if (.id? | type) == "string" then " (\(.id))" else "" end);
-# An anchor quotes the text: a non-empty quote and an optional prefix and suffix, which tell apart a quote that
-# occurs more than once.
-def anchor_defects($n):
-  .anchor as $a
-  | if ($a | type) != "object" then "\($n) needs an anchor object quoting the text"
-    else
-      (if ($a.quote | str) and $a.quote != "" then empty else "\($n) needs an anchor quote that is a non-empty string" end),
-      (if opt_in($a; "prefix") then empty else "\($n) has an anchor prefix that is not a string" end),
-      (if opt_in($a; "suffix") then empty else "\($n) has an anchor suffix that is not a string" end),
-      ((($a | keys) - ["quote", "prefix", "suffix"])[] | "\($n) has an unknown anchor key \(.)")
-    end;
-if type != "array" then "the file must hold a JSON array of notes"
-else
-  (to_entries[] | .key as $i | .value
-   | if type != "object" then "note \($i + 1) is not an object"
-     else name($i) as $n
-     | ((keys - ["id", "file", "kind", "anchor", "title", "body", "was", "now", "sides", "choices"])[] | "\($n) has an unknown field \(.)"),
-       (if (.id | str) and .id != "" then empty else "\($n) needs an id string" end),
-       (if (.file | str) and .file != "" then empty else "\($n) needs a file string naming a changed page" end),
-       (if .kind | IN("info", "decide", "question") then empty else "\($n) has kind \(.kind | tojson); kind is info, decide, or question" end),
-       anchor_defects($n),
-       (if .title | str then empty else "\($n) needs a title string" end),
-       (if (.body | type) == "array" and all(.body[]; str) then empty else "\($n) needs a body that is an array of strings" end),
-       (if opt("was"; str) and opt("now"; str) then empty else "\($n) has a was or now that is not a string" end),
-       (if has("was") == has("now") then empty else "\($n) has one of was and now without the other" end),
-       (if opt("sides"; type == "array" and all(.[]; type == "object" and (.who | str) and (.text | str))) then empty
-        else "\($n) needs sides as an array of {who, text} strings" end),
-       (if opt("choices"; type == "array" and all(.[]; type == "object" and (.label | str) and (.done | str)
-            and ((keys - ["label", "done"]) | length == 0))) then empty
-        else "\($n) needs choices as an array of {label, done} strings" end),
-       (if .kind == "info" or ((.choices | type) == "array" and (.choices | length) > 0) then empty
-        else "\($n) is a \(.kind) note with no choices, so it could never be answered" end)
-     end),
-  ([.[] | objects | .id | strings] | group_by(.)[] | select(length > 1) | "the id \(.[0] | tojson) is used \(length) times")
-end
-JQ
-)
-
-# check_notes: refuses (exit 2) a notes file that is missing, is not JSON, or does not match the notes shape.
-check_notes() {
-  local defects
-  [ -n "$notes" ] || return 0
-  if [ ! -f "$notes" ]; then echo "approval-queue: no notes file at $notes" >&2; exit 2; fi
-  if ! defects=$(jq -r "$notes_program" "$notes" 2>/dev/null); then
-    echo "approval-queue: $notes is not JSON" >&2; exit 2
-  fi
-  if [ -n "$defects" ]; then
-    printf 'approval-queue: %s does not match the notes shape (see the README'"'"'s "The docs kind" section):\n' "$notes" >&2
-    printf '  %s\n' "$defects" >&2
-    exit 2
-  fi
-}
-
-# check_quotes <dir>: refuses (exit 2) a notes file with a quote that matches more than once in its page, read as
-# <dir>/<the note's file>, since the screen would have to guess which occurrence the note means.
-check_quotes() {
-  local rc=0
-  [ -n "$notes" ] || return 0
-  node "$app/src/check-notes.ts" "$1" "$notes" 2>"$check_err" || rc=$?
-  if [ "$rc" -eq 2 ]; then
-    printf 'approval-queue: %s has a quote that matches more than once:\n' "$notes" >&2
-    sed 's/^/  /' "$check_err" >&2
-    exit 2
-  elif [ "$rc" -ne 0 ]; then
-    cat "$check_err" >&2
-    echo "approval-queue: the quote check failed to run" >&2
-    exit 1
-  fi
-}
-
-# check_named <file> <jq expr> <pages>: refuses (exit 2) a notes or replies file that names a page outside <pages>,
-# a JSON array of the changed pages' paths. The expression lists the file's page paths.
-check_named() {
-  local unnamed
-  [ -n "$1" ] || return 0
-  unnamed=$(jq -r --argjson pages "$3" "[$2] | unique - \$pages | .[]" "$1")
-  if [ -n "$unnamed" ]; then
-    printf 'approval-queue: %s names files that are not changed docs pages:\n' "$1" >&2
-    printf '  %s\n' "$unnamed" >&2
-    exit 2
-  fi
-}
-
-# The shape of a --replies file: an array of threads, each the original comment's id, quote, and anchor with
-# the author's status and reply text, as `Thread` in approval-queue/src/lib/editor/comments.ts sets it. Prints
-# one defect per line. Each anchor names its page in `file`.
-replies_program=$(cat <<'JQ'
-def str: type == "string";
-def whole: type == "number" and . >= 0 and . == floor;
-def name($i): "thread \($i + 1)" + (if (.id? | type) == "string" then " (\(.id))" else "" end);
-if type != "array" then "the file must hold a JSON array of threads"
-else
-  (to_entries[] | .key as $i | .value
-   | if type != "object" then "thread \($i + 1) is not an object"
-     else name($i) as $n
-     | ((keys - ["id", "status", "text", "quote", "anchor"])[] | "\($n) has an unknown field \(.)"),
-       (if (.id | str) and .id != "" then empty else "\($n) needs an id string" end),
-       (if .status | IN("done", "kept", "answered") then empty
-        else "\($n) has status \(.status | tojson); status is done, kept, or answered" end),
-       (if .text | str then empty else "\($n) needs a text string" end),
-       (if (.quote | str) and .quote != "" then empty else "\($n) needs a quote string" end),
-       (if (.anchor | type) != "object" then "\($n) needs an anchor object"
-        else .anchor
-        | ((keys - ["quote", "prefix", "suffix", "from", "to", "commit", "file"])[] | "\($n) has an unknown anchor field \(.)"),
-          (if (.quote | str) and (.prefix | str) and (.suffix | str) and (.commit | str) then empty
-           else "\($n) needs an anchor with quote, prefix, suffix, and commit strings" end),
-          (if (.from | whole) and (.to | whole) and .from < .to then empty
-           else "\($n) needs an anchor whose from and to are whole numbers, from before to" end),
-          (if (.file | str) and .file != "" then empty else "\($n) needs an anchor file naming a changed page" end)
-        end)
-     end),
-  ([.[] | objects | .id | strings] | group_by(.)[] | select(length > 1) | "the id \(.[0] | tojson) is used \(length) times")
-end
-JQ
-)
-
-# check_replies: refuses (exit 2) a --replies file that does not match the thread shape.
-check_replies() {
-  local defects
-  [ -n "$replies" ] || return 0
-  if [ ! -f "$replies" ]; then echo "approval-queue: no replies file at $replies" >&2; exit 2; fi
-  if ! defects=$(jq -r "$replies_program" "$replies" 2>/dev/null); then
-    echo "approval-queue: $replies is not JSON" >&2; exit 2
-  fi
-  if [ -n "$defects" ]; then
-    printf 'approval-queue: %s does not match the replies shape (see the README'"'"'s Comments and replies):\n' "$replies" >&2
-    printf '  %s\n' "$defects" >&2
-    exit 2
-  fi
-}
-
-# resolve_worktree: refuses (exit 2) a worktree that is not a git worktree's top, and sets worktree to its
-# absolute path.
-resolve_worktree() {
-  local top
-  if ! top=$(git -C "$worktree" rev-parse --show-toplevel 2>/dev/null); then
-    echo "approval-queue: $worktree is not a git worktree" >&2; exit 2
-  fi
-  if [ "$(cd "$worktree" && pwd -P)" != "$(cd "$top" && pwd -P)" ]; then
-    echo "approval-queue: $worktree is inside a worktree; give the worktree's top, $top" >&2; exit 2
-  fi
-  worktree=$(cd "$top" && pwd -P)
-}
-
-# check_origin: refuses (exit 2) a docs review whose PR names a repository other than the worktree's origin, so
-# the approval can never name a pull request the reviewed pages do not belong to.
-check_origin() {
-  local url slug
-  if ! url=$(git -C "$worktree" remote get-url origin 2>/dev/null); then
-    echo "approval-queue: $worktree has no origin remote to match $pr against" >&2; exit 2
-  fi
-  slug=$(sed -E 's#^(https://github\.com/|ssh://git@github\.com/|git@github\.com:)##; s#/$##; s#\.git$##' <<<"$url")
-  if [ "${slug,,}" != "${pr_repo,,}" ]; then
-    echo "approval-queue: $pr is not in $worktree's repository, whose origin is $url" >&2; exit 2
-  fi
 }
 
 # pr_head <owner/repo> <n>: prints the PR's head commit, asking three times; returns 1 when gh cannot say.
@@ -617,209 +693,25 @@ pr_head() {
   return 1
 }
 
-# refuse <reason> <stderr line>: records the refusal where the app's rail shows it, then prints the line and
-# exits 1 with nothing logged. refused.json goes through a temp file and mv, so the app never reads half of it.
-refuse() {
-  jq -nc --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg reason "$1" '{at: $at, reason: $reason}' >"$item/refused.json.tmp"
-  mv "$item/refused.json.tmp" "$item/refused.json"
-  echo "$2" >&2
-  exit 1
-}
-
-# head_unmoved <queued head>: refuses a docs approve when the PR's head is no longer the head the item was
-# queued at and the screen showed, since the approval would name commits Geoff never saw.
-head_unmoved() {
-  local now
-  now=$(pr_head "$pr_repo" "$number") \
-    || { echo "approval-queue: could not read the head of $pr to check it against $1; nothing was logged" >&2; exit 1; }
-  if [ "$now" != "$1" ]; then
-    refuse "The pull request moved after it was queued, so the approval wasn't recorded. The session will queue it again." \
-      "approval-queue: $pr moved from $1 to $now while it waited, so the approval does not cover it; nothing was logged; queue it again"
-  fi
-}
-
-# worktree_diff <commit> <patch> <gone>: saves what the worktree's HEAD holds beyond <commit> as <patch> when
-# <commit> is an ancestor of HEAD, else {"gone": true} as <gone> (a rebase, or a commit the worktree never had).
-worktree_diff() {
-  if git -C "$worktree" merge-base --is-ancestor "$1" HEAD 2>/dev/null; then
-    git -C "$worktree" diff "$1" HEAD >"$2"
-  else
-    echo '{"gone": true}' >"$3"
-  fi
-}
-
-# queue_docs: checks the worktree against the PR, reads each changed page at the merge base and the head with local
-# git, checks the notes and replies against those pages, and writes the item directory under the queue lock,
-# item.json last. Sets repo and head, and leaves the lock released.
-queue_docs() {
-  local state tip base_sha c status path from k=0 pages='[]' paths other rev revises=null amends=""
-  check_description
-  resolve_worktree
-  check_origin
-  if [ -n "$(git -C "$worktree" status --porcelain --untracked-files=no)" ]; then
-    echo "approval-queue: $worktree has uncommitted changes; commit or stash first" >&2; exit 2
-  fi
-  repo=$pr_repo
-  fetch_pr "$fetch/pr" "$repo" "$number"
-  head=$(jq -r '.head' "$fetch/pr/pr.json")
-  if [ "$(git -C "$worktree" rev-parse HEAD)" != "$head" ]; then
-    echo "approval-queue: $worktree is not at the head of $pr, $head; push first, or pull the PR head" >&2; exit 2
-  fi
-  state=$(jq -r '.state' "$fetch/pr/pr.json")
-  if [ "$state" != OPEN ]; then echo "approval-queue: $pr is $state; a merged or closed PR cannot be queued" >&2; exit 2; fi
-  tip=$(gh pr view "$number" -R "$repo" --json baseRefOid </dev/null | jq -er '.baseRefOid') \
-    || { echo "approval-queue: could not read the base of $pr" >&2; exit 1; }
-  # The merge base, not the base branch's tip, so edits main gained after the branch was cut never read as the PR's.
-  base_sha=$(gh api "repos/$repo/compare/$tip...$head" --jq '.merge_base_commit.sha' </dev/null) && [ -n "$base_sha" ] \
-    || { echo "approval-queue: could not read the merge base of $pr" >&2; exit 1; }
-  for c in "$base_sha" "$head"; do
-    git -C "$worktree" cat-file -e "$c^{commit}" 2>/dev/null || git -C "$worktree" fetch -q origin "$c" </dev/null 2>/dev/null \
-      || { echo "approval-queue: could not fetch $c from origin" >&2; exit 1; }
-  done
-  git -C "$worktree" diff -z --name-status -M "$base_sha" "$head" >"$fetch/names"
-  while IFS= read -r -d '' status; do
-    IFS= read -r -d '' path
-    from=""
-    case $status in R*) from=$path; IFS= read -r -d '' path ;; esac
-    case $status in A | M | R*) ;; *) continue ;; esac
-    case $path in docs/*.md) ;; *) continue ;; esac
-    mkdir -p "$fetch/pages/$k" "$fetch/shown/${path%/*}"
-    if [ "$status" = A ]; then : >"$fetch/pages/$k/base.md"; else git -C "$worktree" cat-file blob "$base_sha:${from:-$path}" >"$fetch/pages/$k/base.md"; fi
-    git -C "$worktree" cat-file blob "$head:$path" >"$fetch/pages/$k/queued.md"
-    cp "$fetch/pages/$k/queued.md" "$fetch/shown/$path"
-    pages=$(jq -c --arg p "$path" --arg f "$from" '. + [{path: $p} + (if $f == "" then {} else {from: $f} end)]' <<<"$pages")
-    k=$((k + 1))
-  done <"$fetch/names"
-  if [ "$k" -eq 0 ]; then
-    echo "approval-queue: $pr changes no docs/**/*.md page that exists at its head; queue it with the pr form" >&2
-    exit 2
-  fi
-  check_notes
-  check_replies
-  paths=$(jq -c '[.[].path]' <<<"$pages")
-  check_named "$notes" '.[].file' "$paths"
-  check_named "$replies" '.[].anchor.file' "$paths"
-  check_quotes "$fetch/shown"
-  exec 8>"$root/queue.lock"
-  flock 8
-  other=$(waiting_item "$pr")
-  if [ -n "$other" ]; then
-    echo "approval-queue: $pr is already in the waiting item $other; decide it first" >&2
-    exit 2
-  fi
-  mkdir -p "$item"
-  mv "$fetch/pr/body.md" "$fetch/pr/pr.json" "$fetch/pr/diff.patch" "$fetch/pages" "$item/"
-  printf '%s\n' "$pages" >"$item/pages.json"
-  cp "$description" "$item/description.md"
-  if [ -n "$notes" ]; then jq -c . "$notes" >"$item/notes.json"; else echo '[]' >"$item/notes.json"; fi
-  if [ -n "$replies" ]; then jq -c . "$replies" >"$item/replies.json"; fi
-  rev=$(revision_of "$(jq -nc --arg ref "$pr" '[{ref: $ref, kind: "docs"}]')")
-  if [ "$rev" != null ]; then
-    revises=$(jq -c '{item, revision, commit: .parts[0].commit}' <<<"$rev")
-    worktree_diff "$(jq -r '.commit' <<<"$revises")" "$item/since.patch" "$item/since.json"
-  fi
-  amends=$(amend_of "$pr")
-  if [ -n "$amends" ]; then worktree_diff "$amends" "$item/approved.patch" "$item/approved.json"; fi
-  jq -n --arg id "$id" --arg repo "$repo" --argjson number "$number" --arg title "$title" --arg created "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-    --arg worktree "$worktree" --arg head "$head" --arg base "$base_sha" --argjson revises "$revises" --arg amends "$amends" \
-    --argjson pid "$$" --argjson pidstart "$pidstart" \
-    '{id: $id, kind: "docs", repo: $repo, number: $number, title: $title, headline: $title, created: $created,
-      worktree: $worktree, head: $head, base: $base, pid: $pid, pidStart: $pidstart}
-     + (if $revises == null then {} else {revises: $revises} end)
-     + (if $amends == "" then {} else {amends: {commit: $amends}} end)' >"$item/item.json.tmp"
-  mv "$item/item.json.tmp" "$item/item.json"
-  exec 8>&-
-}
-
-# notes --check <worktree> <notes.json> runs the queue-time notes checks against the pages as the worktree's HEAD
-# holds them, without queueing. notes <id> <notes.json> replaces a waiting docs review's notes after the same checks
-# against its pages as the screen shows them: the worktree's HEAD copy, else the copy queued when the worktree or
-# file is gone. It keeps the item's id, URL, and waiter.
-if [ "$kind" = notes ]; then
-  mkdir -p "$fetch"
-  if [ -z "$notes_id" ]; then
-    resolve_worktree
-    check_notes
-    while IFS= read -r nfile; do
-      if ! git -C "$worktree" cat-file blob "HEAD:$nfile" >"$fetch/page.tmp" 2>/dev/null; then
-        echo "approval-queue: $nfile is not in $worktree at HEAD" >&2; exit 2
-      fi
-      mkdir -p "$fetch/shown/${nfile%/*}"
-      mv "$fetch/page.tmp" "$fetch/shown/$nfile"
-    done < <(jq -r '[.[].file] | unique | .[]' "$notes")
-    check_quotes "$fetch/shown"
-    exit 0
-  fi
-  ndir="$root/items/$notes_id"
-  if [ ! -e "$ndir/item.json" ]; then echo "approval-queue: no item $notes_id is queued" >&2; exit 2; fi
-  if [ -e "$ndir/decision.json" ]; then echo "approval-queue: $notes_id is decided; its notes cannot be replaced" >&2; exit 2; fi
-  nkind=$(jq -r '.kind' "$ndir/item.json")
-  if [ "$nkind" != docs ]; then echo "approval-queue: $notes_id is a $nkind item, which takes no notes" >&2; exit 2; fi
-  nwt=$(jq -r '.worktree // empty' "$ndir/item.json")
-  check_notes
-  check_named "$notes" '.[].file' "$(jq -c '[.[].path]' "$ndir/pages.json")"
-  k=0
-  while IFS= read -r nfile; do
-    src="$ndir/pages/$k/queued.md"
-    if [ -d "$nwt" ] && git -C "$nwt" cat-file blob "HEAD:$nfile" >"$fetch/page.tmp" 2>/dev/null; then src="$fetch/page.tmp"; fi
-    mkdir -p "$fetch/shown/${nfile%/*}"
-    cp "$src" "$fetch/shown/$nfile"
-    k=$((k + 1))
-  done < <(jq -r '.[].path' "$ndir/pages.json")
-  check_quotes "$fetch/shown"
-  jq -c . "$notes" >"$ndir/notes.json.tmp"
-  mv "$ndir/notes.json.tmp" "$ndir/notes.json"
-  echo "replaced the notes of $notes_id at $base/item/$notes_id"
-  exit 0
-fi
-
-head="" file=""
-
-# load_collected: reads the item a `collect` was asked for back into the variables the decision step reads. A docs
-# review's item.json has no pr, so its pull request is rebuilt from the repo and number, as head_unmoved reads it.
+# load_collected: reads the item a `collect` was asked for back into the variables the decision step reads.
 load_collected() {
-  IFS=$'\x1f' read -r kind repo file number head < <(jq -r '
-    [.kind, (.repo // ""), (.file // ""), (.number // "" | tostring), (.head // "")] | join("\u001f")' "$item/item.json")
-  if [ "$kind" = docs ]; then pr="$repo#$number" pr_repo=$repo; fi
+  IFS=$'\x1f' read -r kind repo file < <(jq -r '[.kind, (.repo // ""), (.file // "")] | join("\u001f")' "$item/item.json")
 }
 
 # queue_item: writes the item directory for the kind, starts the app if it is down, and hands the item to
 # a tab. A `collect` skips it, since its item is already queued.
 queue_item() {
   case "$kind" in
-    pr)
-      view=$(gh pr view "$source" -R "$repo" --json body,headRefOid,number,url,headRefName,baseRefName,statusCheckRollup)
-      jq -r '.body' <<<"$view" >"$check_body"
-      check_brief "$check_body"
-      # The lock keeps two commands from both passing the waiting-item check; item.json lands before it drops.
-      exec 8>"$root/queue.lock"
-      flock 8
-      other=$(waiting_item "$repo#$(jq -r '.number' <<<"$view")")
-      if [ -n "$other" ]; then
-        echo "approval-queue: $repo#$(jq -r '.number' <<<"$view") is already in the waiting item $other; decide it first" >&2
-        exit 2
-      fi
-      mkdir -p "$item"
-      jq -r '.body' <<<"$view" >"$item/body.md"
-      jq 'del(.body, .headRefOid)' <<<"$view" >"$item/pr.json"
-      head=$(jq -r '.headRefOid' <<<"$view")
-      number=$(jq -r '.number' <<<"$view")
-      pr_diff "$repo" "$source" "$item/diff.patch"
-      ;;
     design) check_brief "$source"; mkdir -p "$item"; cp "$source" "$item/doc.md"; file=$(basename "$source") ;;
     triage) check_brief "$source"; mkdir -p "$item"; cp "$source" "$item/triage.json" ;;
     packet) queue_packet ;;
-    docs) queue_docs ;;
   esac
 
-  if [ "$kind" = pr ] || [ "$kind" = design ] || [ "$kind" = triage ]; then
+  if [ "$kind" = design ] || [ "$kind" = triage ]; then
     jq -n --arg id "$id" --arg kind "$kind" --arg repo "$repo" --arg title "$title" \
-      --arg created "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg head "$head" \
-      --arg number "$number" --arg file "$file" --arg headline "$headline" \
+      --arg created "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg file "$file" --arg headline "$headline" \
       --argjson pid "$$" --argjson pidstart "$pidstart" \
       '{id: $id, kind: $kind, repo: $repo, title: $title, created: $created, headline: $headline, pid: $pid, pidStart: $pidstart}
-       + (if $head == "" then {} else {head: $head} end)
-       + (if $number == "" then {} else {number: ($number | tonumber)} end)
        + (if $file == "" then {} else {file: $file} end)' >"$item/item.json.tmp"
     mv "$item/item.json.tmp" "$item/item.json"
     exec 8>&-
@@ -891,154 +783,79 @@ append_log() {
   ) 8>"$root/queue.lock" || echo "approval-queue: could not write $root/decisions.jsonl" >&2
 }
 
-# The packet decision: validates decision.json against the stored packet, joins each PR's head and
-# each design's hash from the item directory, and builds the line printed on stdout plus the log lines.
-# A part you did not approve never comes back approved: an ask-bound part must carry the tag of the
-# choice picked, and a design whose file changed since queueing comes back hold.
-decision_program=$(cat <<'JQ'
-def kinds: {pr: ["approve", "hold", "send-back"], design: ["approve", "hold", "send-back"], step: ["session", "you", "skip"]};
-$pk[0] as $p
-| (.) as $dec
-| ($p.parts | map({key: .part.ref, value: .part.kind}) | from_entries) as $kind
-| ($p.asks | to_entries | map(.value + {index: (.key + 1)})) as $asks
-| ($asks | map(select(.part != null) | {key: .part.ref, value: .}) | from_entries) as $bound
-| ($p.routine | map({key: .part.ref, value: .verdict}) | from_entries) as $routine
-| ($fx | map({key: .ref, value: (. | del(.ref))}) | from_entries) as $fact
-| def partline($e; $extra):
-    {time: $t, packet: $id, initiative: $ini, ref: $e.part.ref, kind: $e.part.kind, lane: $e.in}
-    + (if $bound[$e.part.ref] then {rule: $bound[$e.part.ref].rule} else {} end) + $extra;
-  if ($dec | type) != "object" then error("shape")
-  elif $dec.decision == "reject" then
-    if (($dec | keys) == ["decision", "note"] or ($dec | keys) == ["calls", "decision", "note"]) and ($dec.note | type) == "string"
-      and (($dec | has("calls") | not) or ($dec.calls | type) == "array")
-      and all(($dec.calls // [])[]; type == "object" and
-        ((keys == ["ref", "verdict"] and (.ref | type) == "string" and (.verdict | type | IN("string", "null")))
-         or (keys == ["ask", "choice", "question"] and (.ask | type) == "number" and (.question | type) == "string" and (.choice | type | IN("string", "null")))))
-    then
-      {out: {decision: "reject", note: $dec.note, calls: ($dec.calls // [])},
-       log: [$p.parts[] | . as $e | partline($e; {verdict: "reject",
-              sentBack: any(($dec.calls // [])[]; .ref? == $e.part.ref and .verdict == "send-back")}
-              + ($fact[$e.part.ref] // {} | del(.changed)))]}
-    else error("shape") end
-  elif $dec.decision == "approve" and ($dec | keys) == ["asks", "decision", "parts"]
-    and ($dec.parts | type) == "array" and ($dec.asks | type) == "array"
-    and all($dec.parts[]; type == "object" and keys == ["ref", "verdict"] and (.ref | type) == "string" and (.verdict | type) == "string")
-    and all($dec.asks[]; type == "object" and keys == ["choice", "index"] and (.index | type) == "number" and (.choice | type) == "string")
-  then
-    ($dec.parts | map({key: .ref, value: .verdict}) | from_entries) as $v
-    | ($dec.asks | map({key: (.index | tostring), value: .choice}) | from_entries) as $c
-    | if ([$dec.parts[].ref] | sort) != ($kind | keys) then error("refs")
-      elif any($dec.parts[]; . as $x | (kinds[$kind[$x.ref]] | any(.[]; . == $x.verdict)) | not) then error("verdict")
-      elif ([$dec.asks[].index] | sort) != [range(1; ($asks | length) + 1)] then error("asks")
-      elif any($asks[]; . as $a | ($a.choices | any(.[]; .label == $c[$a.index | tostring])) | not) then error("choice")
-      elif any($bound | to_entries[]; . as $b
-          | ($b.value.choices[] | select(.label == $c[$b.value.index | tostring]) | .verdict) != $v[$b.key]) then error("tag")
-      else
-        [$p.parts[] | . as $e
-          | $v[$e.part.ref] as $given
-          | ($fact[$e.part.ref] // {}) as $f
-          | (if $f.changed == true and $given == "approve" then "hold" else $given end) as $final
-          | {e: $e, given: $given, final: $final, f: $f}] as $rows
-        | {out: {decision: "approve",
-                 parts: [$rows[] | {ref: .e.part.ref, kind: .e.part.kind, lane: .e.in, verdict: .final} + .f],
-                 asks: [$asks[] | {index, part: (.part.ref // null), rule, choice: $c[.index | tostring],
-                                   followed: ($c[.index | tostring] == .choices[.recommended - 1].label)}]},
-           log: ([$rows[] | . as $r
-                  | ($bound[$r.e.part.ref]) as $a
-                  | (if $a then [$a.choices[$a.recommended - 1].label, $c[$a.index | tostring]]
-                     else [$routine[$r.e.part.ref], $r.given] end) as $rc
-                  | partline($r.e; {verdict: $r.final} + $r.f
-                      + {recommended: $rc[0], chosen: $rc[1], overridden: ($rc[0] != $rc[1])})]
-                 + [$asks[] | select(.part == null)
-                    | {time: $t, packet: $id, initiative: $ini, ref: "ask:\(.index)", kind: "ask", lane: "ask", rule: .rule,
-                       recommended: .choices[.recommended - 1].label, chosen: $c[.index | tostring],
-                       overridden: (.choices[.recommended - 1].label != $c[.index | tostring])}])}
-      end
-  else error("shape") end
-JQ
-)
 
+# The packet decision: joins each PR's pinned head (or the design's hash) from the item directory onto decision.json,
+# and prints it, then logs one line. The server checked the decision's shape against the packet when it was posted.
 packet_decision() {
-  local facts res k kind_k ref repo_k path_k queued now
-  facts=$(
-    jq -r '.parts | to_entries[] | .value.part as $p | [.key, $p.kind, $p.ref, ($p.repo // ""), ($p.path // "")] | join("\u001f")' "$item/packet.json" |
-      while IFS=$'\x1f' read -r k kind_k ref repo_k path_k; do
-        case "$kind_k" in
-          pr) jq -c '{ref, head}' "$item/parts/$k/pr.json" ;;
-          design)
-            queued=$(jq -r '.sha256' "$item/parts/$k/doc.json")
-            now=$(sha256sum "$projects/$repo_k/$path_k" 2>/dev/null | cut -d' ' -f1) || now=""
-            jq -nc --arg ref "$ref" --arg q "$queued" --arg n "$now" \
-              '{ref: $ref, sha256: $q} + (if $n != $q then {changed: true} else {} end)'
-            ;;
-        esac
-      done | jq -s .
-  )
+  local parts res
   # jq runs its program once per JSON value, so a file holding none or two must be refused first.
   if [ "$(jq -s 'length' "$item/decision.json" 2>/dev/null)" != 1 ]; then
     echo "approval-queue: decision.json does not hold exactly one decision; nothing was logged" >&2
     exit 1
   fi
-  if ! res=$(jq -c --slurpfile pk "$item/packet.json" --argjson fx "$facts" \
-    --arg t "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg id "$id" --arg ini "$(jq -r '.initiative' "$item/item.json")" \
-    "$decision_program" "$item/decision.json" 2>/dev/null); then
-    echo "approval-queue: decision.json does not match the packet; nothing was logged" >&2
-    exit 1
+  jq -e 'type == "object" and (.decision | IN("approve", "reject")) and (.calls | type) == "array"
+    and (.decidedForYou | type) == "array" and (.notes | type) == "array"' "$item/decision.json" >/dev/null 2>&1 \
+    || { echo "approval-queue: decision.json does not match the packet; nothing was logged" >&2; exit 1; }
+  if [ -e "$item/design.json" ]; then
+    parts=$(jq -c --arg k "$(jq -r '.design | "\(.repo):\(.path)"' "$item/facts.json")" '[{ref: $k, sha256: .sha256}]' "$item/design.json")
+  else
+    parts=$(jq -c . "$item/heads.json")
   fi
-  jq -c '.log[]' <<<"$res" | append_log
-  jq -c '.out' <<<"$res"
+  res=$(jq -c --argjson parts "$parts" '. + {parts: $parts}' "$item/decision.json")
+  jq -c --arg t "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg id "$id" --arg ini "$(jq -r '.initiative' "$item/item.json")" \
+    --arg k "$(jq -r '.kind' "$item/facts.json")" \
+    '{time: $t, packet: $id, initiative: $ini, kind: $k, decision, calls, decidedForYou, notes: (.notes | length), parts}' <<<"$res" | append_log
+  printf '%s\n' "$res"
 }
 
-# single_log <ref> <kind> <verdict> <key> <value>: the pr and design kinds log one lane-single line.
+# single_log <ref> <kind> <verdict> <key> <value>: the design kind logs one lane-single line.
 single_log() {
   jq -nc --arg t "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg id "$id" --arg ref "$1" --arg kind "$2" --arg v "$3" --arg k "$4" --arg val "$5" \
     '{time: $t, packet: $id, initiative: null, ref: $ref, kind: $kind, lane: "single", verdict: $v, ($k): $val}' | append_log
 }
 
-# The comments and replies a docs review's decision carries, and its log line's counts of them.
-carried='{comments: (.comments // []), threads: (.threads // [])}'
-counts='{comments: (.comments // [] | length), replies: (.threads // [] | length)}'
-
-# docs_decision: an approve and a send-back both name the head the review was queued at and the commit the app
-# recorded at the worktree's HEAD, and an approve is refused when the PR has moved since. Both log one line with
-# the calls Geoff answered and the counts of his comments and replies, and print the comments and replies. A
-# refusal also writes refused.json, which a later approve that passes removes.
-docs_decision() {
-  local d verdict
-  d="$item/decision.json"
-  verdict=$(jq -r '.decision // empty' "$d")
-  case "$verdict" in
-    approve) head_unmoved "$head" ;;
-    reject) ;;
-    *) echo "approval-queue: decision.json holds no approve or reject; nothing was logged" >&2; exit 1 ;;
-  esac
-  jq -c --arg t "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg id "$id" --arg ref "$pr" --arg v "$verdict" --arg head "$head" \
-    '{time: $t, packet: $id, initiative: null, ref: $ref, kind: "docs", lane: "single", verdict: $v, head: $head,
-      commit: .commit, calls: (.calls // [])} + '"$counts" "$d" | append_log
-  [ "$verdict" != approve ] || rm -f "$item/refused.json"
-  jq -c --arg pr "$pr" --arg head "$head" \
-    '(if .decision == "approve" then {decision: "approve"} else {decision: "reject", note: (.note // "")} end)
-     + {pr: $pr, head: $head, commit: .commit, calls: (.calls // [])} + '"$carried" "$d"
+# stale_poll: writes stale.json {ref, queued, now} when a pinned head, or the design's hash, differs from what
+# was queued. A gh failure is skipped; the next poll asks again.
+stale_poll() {
+  local ref head now dkey found
+  [ ! -e "$item/stale.json" ] || return 0
+  if [ -e "$item/design.json" ]; then
+    dkey=$(jq -r '.design | "\(.repo):\(.path)"' "$item/facts.json")
+    now=$(sha256sum "$projects/$(jq -r '.design.repo' "$item/facts.json")/$(jq -r '.design.path' "$item/facts.json")" 2>/dev/null | cut -d' ' -f1) || now=""
+    head=$(jq -r '.sha256' "$item/design.json")
+    ref=$dkey
+    [ -n "$now" ] && [ "$now" != "$head" ] || return 0
+  else
+    found=""
+    while IFS=$'\x1f' read -r ref head; do
+      now=$(pr_head "${ref%#*}" "${ref##*#}") || continue
+      [ "$now" != "$head" ] || continue
+      found=1
+      break
+    done < <(jq -r '.[] | [.ref, .head] | join("\u001f")' "$item/heads.json")
+    [ -n "$found" ] || return 0
+  fi
+  jq -nc --arg r "$ref" --arg q "$head" --arg n "$now" '{ref: $r, queued: $q, now: $n}' >"$item/stale.json.tmp"
+  mv "$item/stale.json.tmp" "$item/stale.json"
 }
 
-# A decision ends the wait first. A deferral ends the queuing command's wait only, since a collect waits for the decision.
-# So does item.json going away: a withdraw has taken the item off the board, and nothing will decide it.
-while [ ! -e "$item/decision.json" ] && [ -e "$item/item.json" ] && { [ -n "$collecting" ] || [ ! -e "$item/deferred.json" ]; }; do sleep 1; done
-if [ ! -e "$item/decision.json" ]; then
-  if [ ! -e "$item/item.json" ]; then
-    echo "approval-queue: $id was withdrawn; nothing to collect" >&2
-    exit 1
+# A decision ends the wait. So does item.json going away: a withdraw has taken the item off the board, and
+# nothing will decide it. A packet's wait also polls its heads (or its design file) every 60 seconds.
+stale_every=${APPROVAL_QUEUE_POLL_S:-60}
+stale_next=$((SECONDS + stale_every))
+while [ ! -e "$item/decision.json" ] && [ -e "$item/item.json" ]; do
+  sleep 1
+  if [ "$kind" = packet ] && [ "$SECONDS" -ge "$stale_next" ]; then
+    stale_poll
+    stale_next=$((SECONDS + stale_every))
   fi
-  jq -nc --arg id "$id" '{decision: "defer", id: $id}'
-  exit 0
+done
+if [ ! -e "$item/decision.json" ]; then
+  echo "approval-queue: $id was withdrawn; nothing to collect" >&2
+  exit 1
 fi
 case "$kind" in
   packet) packet_decision ;;
-  pr)
-    single_log "$repo#$number" pr "$(jq -r '.decision // empty' "$item/decision.json")" head "$head"
-    jq -c --arg h "$head" '. + {head: $h}' "$item/decision.json"
-    ;;
-  docs) docs_decision ;;
   design)
     single_log "$repo:$file" design "$(jq -r '.decision // empty' "$item/decision.json")" sha256 "$(sha256sum "$item/doc.md" | cut -d' ' -f1)"
     jq -c . "$item/decision.json"

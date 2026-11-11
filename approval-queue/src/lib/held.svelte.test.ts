@@ -16,7 +16,7 @@ function decision(id: string, outcome: HeldDecision['outcome'] = 'approve'): Hel
 	return {
 		id,
 		title: `Item ${id}`,
-		kind: 'docs',
+		kind: 'design',
 		subject: `the page ${id}`,
 		href: `http://127.0.0.1:7907/item/${id}?/${outcome}`,
 		form,
@@ -29,7 +29,8 @@ function setup(answer: ActionResult | (() => Promise<ActionResult>) = SUCCESS) {
 	const post = vi.fn(typeof answer === 'function' ? answer : async () => answer);
 	const refresh = vi.fn(async () => {});
 	const open = vi.fn(async () => {});
-	return { store: new Held({ post, refresh, open }), post, refresh, open };
+	const beacon = vi.fn(async (_href: string, _body: FormData) => {});
+	return { store: new Held({ post, refresh, open, beacon }), post, refresh, open, beacon };
 }
 
 describe('Held', () => {
@@ -55,16 +56,6 @@ describe('Held', () => {
 		expect(store.ids.size).toBe(0);
 		expect(desk.drafts.has('a')).toBe(false);
 		expect(store.ended).toBe('sent');
-	});
-
-	it('keeps the drafts of a deferred item, which comes back to the reader', async () => {
-		const { store, post, refresh } = setup();
-		desk.drafts.set('a', []);
-		store.hold(decision('a', 'defer'));
-		await vi.advanceTimersByTimeAsync(HOLD_MS);
-		expect(post).toHaveBeenCalledTimes(1);
-		expect(refresh).toHaveBeenCalledTimes(1);
-		expect(desk.drafts.has('a')).toBe(true);
 	});
 
 	it('sends nothing on Undo, opens the item again, and hands its decision back once', async () => {
@@ -109,29 +100,6 @@ describe('Held', () => {
 		expect(store.hold(decision('a', 'reject'))).toBe(false);
 		expect(store.current).toBe(first);
 		expect(store.hold(decision('b'))).toBe(true);
-	});
-
-	it('keeps an Undo cancelled by an open comment box, and opens the item once the box closes', async () => {
-		const { store, post, open } = setup();
-		const d = decision('a');
-		store.hold(d);
-		open.mockImplementationOnce(async () => {
-			expect(store.blockRestore('/item/b')).toBe(false);
-			expect(store.blockRestore('/item/a')).toBe(true);
-		});
-		await store.undo();
-		expect(store.restoreBlocked).toBe(true);
-		expect(store.current).toBeNull();
-		await vi.advanceTimersByTimeAsync(HOLD_MS * 2);
-		expect(post).not.toHaveBeenCalled();
-		expect(open).toHaveBeenCalledTimes(1);
-		await store.resumeRestore();
-		expect(open).toHaveBeenCalledTimes(2);
-		expect(open).toHaveBeenLastCalledWith('/item/a');
-		expect(store.restoreBlocked).toBe(false);
-		expect(store.take('a')).toBe(d);
-		await store.resumeRestore();
-		expect(open).toHaveBeenCalledTimes(2);
 	});
 
 	it('keeps a second decision paused while the pointer stays on the toast', async () => {
@@ -229,17 +197,15 @@ describe('Held', () => {
 });
 
 describe('seedFrom', () => {
-	it('reads a packet’s note, answers, and verdicts back from its form data', () => {
+	it('reads a packet’s note and answers back from its form data', () => {
 		const form = new FormData();
 		form.set('fingerprint', 'f');
 		form.set('note', 'Please split it.');
 		form.set('ask:0', 'Ship it');
 		form.set('ask:2', 'Wait');
-		form.set('part:glw907/x#4', 'reject');
 		expect(seedFrom(form, 'packet')).toEqual({
 			note: 'Please split it.',
 			answers: { 0: 'Ship it', 2: 'Wait' },
-			verdicts: { 'glw907/x#4': 'reject' },
 			picks: [],
 			rows: []
 		});
@@ -255,29 +221,14 @@ describe('seedFrom', () => {
 		expect(seed.note).toBe('');
 	});
 
-	it('reads triage rows in order, pairing each disposition with its note', () => {
+	it('reads triage rows in order', () => {
 		const form = new FormData();
-		for (const [d, n] of [['now', ''], ['drop', 'Not worth it'], ['defer', '']]) {
-			form.append('disposition', d);
-			form.append('note', n);
-		}
+		for (const d of ['now', 'drop', 'defer']) form.append('disposition', d);
 		const seed = seedFrom(form, 'triage');
-		expect(seed.rows).toEqual([
-			{ disposition: 'now', note: '' },
-			{ disposition: 'drop', note: 'Not worth it' },
-			{ disposition: 'defer', note: '' }
-		]);
+		expect(seed.rows).toEqual([{ disposition: 'now' }, { disposition: 'drop' }, { disposition: 'defer' }]);
 		expect(seed.note).toBe('');
 	});
 
-	it('reads a docs review’s send-back note from a post carrying two pages and a call', () => {
-		const form = new FormData();
-		form.set('blob:docs/a.md', 'abc');
-		form.set('blob:docs/b.md', 'def');
-		form.set('call:B3', 'Keep it');
-		form.set('note', '- Still open: Why\n');
-		expect(seedFrom(form, 'docs')).toMatchObject({ note: '- Still open: Why\n', answers: {}, verdicts: {}, picks: [] });
-	});
 });
 
 describe('desk.flash', () => {
@@ -349,5 +300,60 @@ describe('desk.flash', () => {
 		desk.releaseFlash();
 		vi.advanceTimersByTime(FLASH_UNDO_MS);
 		expect(desk.toast).toBeNull();
+	});
+
+	describe('leaving the page', () => {
+		it('sends the held decision once on pagehide, and the timer and a second pagehide send nothing more', async () => {
+			const { store, post, beacon } = setup();
+			const d = decision('a');
+			store.hold(d);
+			await vi.advanceTimersByTimeAsync(1000);
+			store.leave();
+			expect(beacon).toHaveBeenCalledTimes(1);
+			expect(beacon).toHaveBeenCalledWith(d.href, d.form);
+			expect(store.current).toBeNull();
+			await vi.advanceTimersByTimeAsync(HOLD_MS * 2);
+			store.leave();
+			expect(beacon).toHaveBeenCalledTimes(1);
+			expect(post).not.toHaveBeenCalled();
+		});
+
+		it('sends nothing when no decision is held, or after Undo', async () => {
+			const { store, beacon } = setup();
+			store.leave();
+			store.hold(decision('a'));
+			await store.undo();
+			store.leave();
+			expect(beacon).not.toHaveBeenCalled();
+		});
+
+		it('sends nothing for a decision whose timer already posted it', async () => {
+			const { store, beacon } = setup();
+			store.hold(decision('a'));
+			await vi.advanceTimersByTimeAsync(HOLD_MS);
+			store.leave();
+			expect(beacon).not.toHaveBeenCalled();
+		});
+
+		it('keeps the item out of the waiting list while the keepalive send is in flight, then frees it', async () => {
+			let done!: () => void;
+			const { store, beacon } = setup();
+			beacon.mockImplementationOnce(() => new Promise<void>((r) => (done = r)));
+			store.hold(decision('a'));
+			store.leave();
+			expect(store.ids).toEqual(new Set(['a']));
+			done();
+			await vi.advanceTimersByTimeAsync(0);
+			expect(store.ids.size).toBe(0);
+		});
+
+		it('says the tab may not close while a decision is held or posting', async () => {
+			const { store } = setup();
+			expect(store.canClose()).toBe(true);
+			store.hold(decision('a'));
+			expect(store.canClose()).toBe(false);
+			await vi.advanceTimersByTimeAsync(HOLD_MS);
+			expect(store.canClose()).toBe(true);
+		});
 	});
 });

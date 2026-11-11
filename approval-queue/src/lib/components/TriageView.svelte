@@ -1,8 +1,7 @@
 <!-- @component
 A triage item: the session's calls in three groups (Do now, Do later, Don't do), each row with a
-verdict segment (amber once it differs from the session's proposal), a Note button, and a Technical
-detail disclosure. Choosing moves the row to the group
-it names, and keys `1`, `2`, `3` do the same for the focused row. The rows are bound to `ItemPanel`,
+verdict segment (amber once it differs from the session's proposal) and a Technical detail
+disclosure. Choosing moves the row to the group it names, and keys `1`, `2`, `3` do the same for the focused row. The rows are bound to `ItemPanel`,
 which submits them; nothing here posts. A row's number is its position in the file and never changes.
 -->
 <script lang="ts">
@@ -29,8 +28,6 @@ which submits them; nothing here posts. A row's number is its position in the fi
 	const groups = $derived(groupRows(rows));
 	/** The row that holds the roving tabindex. */
 	let current = $state(0);
-	let editing = $state<number | null>(null);
-	let original = '';
 
 	$effect(() =>
 		desk.register({
@@ -73,37 +70,6 @@ which submits them; nothing here posts. A row's number is its position in the fi
 		await tick();
 		focusRow(rowEl(index));
 	}
-
-	async function startEdit(index: number) {
-		original = rows[index].note;
-		editing = index;
-		await tick();
-		const input = document.querySelector<HTMLInputElement>(`[data-note-input="${index}"]`);
-		input?.focus();
-		input?.select();
-	}
-
-	/** Ends the edit, keeping what was typed; the input is bound, so the text is already in the row. */
-	async function endEdit(index: number, refocus: boolean) {
-		if (editing !== index) return;
-		editing = null;
-		if (!refocus) return;
-		await tick();
-		document.querySelector<HTMLElement>(`[data-edit="${index}"]`)?.focus();
-	}
-
-	function onNoteKey(e: KeyboardEvent, index: number) {
-		if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
-			endEdit(index, false);
-		} else if (e.key === 'Enter') {
-			e.preventDefault();
-			endEdit(index, true);
-		} else if (e.key === 'Escape') {
-			e.stopPropagation();
-			rows[index].note = original;
-			endEdit(index, true);
-		}
-	}
 </script>
 
 {#each SECTIONS as section (section.key)}
@@ -129,32 +95,7 @@ which submits them; nothing here posts. A row's number is its position in the fi
 							</p>
 							<p class="sx why-text">
 								{@html html[index].why}
-								{#if row.note}<span class="italic">Your note: {row.note}</span>{/if}
 							</p>
-							<div class="flex flex-wrap items-center gap-x-1 gap-y-2">
-								{#if editing === index}
-									<input
-										class="input input-sm w-full max-w-[60ch]"
-										data-note-input={index}
-										placeholder="Your note on this item"
-										aria-label="Note for item {index + 1}"
-										bind:value={rows[index].note}
-										onkeydown={(e) => onNoteKey(e, index)}
-										onblur={() => endEdit(index, false)}
-									/>
-								{:else}
-									<button
-										type="button"
-										class="btn btn-xs btn-ghost font-normal text-(--color-muted)"
-										data-edit={index}
-										aria-label="{row.note ? 'Edit note' : 'Add a note'} for item {index + 1}"
-										onclick={() => startEdit(index)}
-									>
-										<svg class="size-3 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m4 20 4-1 11-11-3-3L5 16l-1 4zM14 6l3 3" /></svg>
-										Note
-									</button>
-								{/if}
-							</div>
 							{#if html[index].detail}
 								<details class="why">
 									<summary><PacketIcon name="chev" class="chev" />Technical detail</summary>

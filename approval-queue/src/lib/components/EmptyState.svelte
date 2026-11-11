@@ -1,6 +1,6 @@
 <!-- @component
 The empty state, shown when `/` finds nothing waiting. It counts 30 seconds with Keep focused,
-then calls `window.close()`, which works only while the tab holds one history entry; every
+then calls `window.close()` unless a decision is still held or posting (the count then starts over), which works only while the tab holds one history entry; every
 navigation in the desk replaces its entry for that reason. The saved `desk.autoClose` setting
 turns the count off, and turning it back on restarts the count. The countdown line, the Keep button, and
 the toggle show only once the saved setting is read, so no frame says the tab closes when auto-close is off. The page
@@ -9,6 +9,7 @@ unmounts it when an item arrives, which cancels the count.
 <script lang="ts">
 	import { onMount, tick } from 'svelte';
 	import { desk } from '#lib/desk.svelte.ts';
+	import { held } from '#lib/held.svelte.ts';
 	import { startHold } from '#lib/hold.ts';
 
 	const SECONDS = 30;
@@ -40,6 +41,11 @@ unmounts it when an item arrives, which cancels the count.
 		hold = startHold(SECONDS * 1000, {
 			tick: (left) => (secs = left),
 			fire: () => {
+				// A held decision sends only while this tab lives, so the count starts over until it has gone.
+				if (!held.canClose()) {
+					void start(false);
+					return;
+				}
 				phase = 'closing';
 				window.close();
 			}

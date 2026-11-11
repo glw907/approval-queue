@@ -1,0 +1,535 @@
+/*
+ * The packet page: a reading column in Spectral, a notes margin on its right, and the queue rail on its
+ * left (the layout's). Ported from the redesign prototype's CSS. Everything sits under `.packet`, so no
+ * rule reaches another screen. Folds are stock daisyUI `collapse`, tightened here and nowhere else.
+ */
+.packet {
+	display: grid;
+	grid-template-columns: minmax(0, 46rem) minmax(16rem, 22rem);
+	justify-content: start;
+	min-height: 100vh;
+}
+.packet-main {
+	padding: 30px 44px 0;
+	display: flex;
+	flex-direction: column;
+	min-width: 0;
+}
+.packet-main > .packet-body {
+	flex: 1;
+}
+.packet .kicker {
+	font-size: 0.86rem;
+	color: var(--color-muted);
+	margin-bottom: 8px;
+}
+.packet .kicker b {
+	color: var(--cairn-warning-ink);
+	font-weight: 600;
+}
+.packet .reason {
+	font-size: 0.92rem;
+	margin: 0 0 10px;
+	max-width: 41rem;
+}
+.packet h1.head {
+	font: 500 2.1rem/1.15 var(--font-display);
+	letter-spacing: -0.008em;
+	margin: 0 0 18px;
+}
+.packet h1.head .benchmark {
+	display: inline-block;
+	width: 0;
+	height: 0;
+	border-inline: 7px solid transparent;
+	border-bottom: 12px solid var(--site-contour);
+	margin-inline-end: 10px;
+	transform: translateY(-3px);
+}
+.packet .prose p,
+.packet .prose.lead {
+	font: 400 1.09rem/1.58 var(--font-display);
+	margin: 0 0 0.8em;
+	max-width: 41rem;
+}
+.packet code {
+	font-family: var(--font-mono);
+	font-size: 0.86em;
+	background: var(--color-base-200);
+	padding: 1px 4px;
+	border-radius: var(--radius-field);
+	white-space: nowrap;
+	letter-spacing: 0;
+}
+.packet .prose code {
+	font-size: 0.8em;
+}
+.packet h2.sec {
+	font: 500 1.55rem/1.2 var(--font-display);
+	margin: 46px 0 10px;
+	padding-top: 24px;
+	border-top: 1px dashed var(--site-rule-color);
+}
+.packet .secnote {
+	font-size: 0.9rem;
+	color: var(--color-muted);
+	margin: 2px 0 12px;
+}
+.packet .muted {
+	color: var(--color-muted);
+}
+
+/* Folds: stock daisyUI collapse, tightened. */
+.packet .collapse {
+	border-radius: 0;
+	border-top: 1px solid var(--color-base-300);
+}
+.packet .collapse:last-of-type {
+	border-bottom: 1px solid var(--color-base-300);
+}
+.packet .collapse > .collapse-title {
+	padding: 10px 34px 10px 2px;
+	min-height: 2.5rem;
+	font-size: 0.98rem;
+	font-weight: 600;
+	line-height: 1.4;
+}
+.packet .collapse > .collapse-title .sub {
+	display: block;
+	font-weight: 400;
+	font-size: 0.86rem;
+	color: var(--color-muted);
+	margin-top: 1px;
+}
+.packet .collapse > .collapse-title.claim {
+	font: 400 1.05rem/1.5 var(--font-display);
+}
+.packet .collapse > .collapse-title.claim .sub {
+	font-family: var(--font-body);
+}
+.packet .collapse-arrow > .collapse-title::after {
+	inset-inline-end: 10px;
+	top: 1.25rem;
+}
+.packet .collapse > .collapse-content {
+	padding: 0 2px;
+	font-size: 0.94rem;
+}
+.packet .collapse[open] > .collapse-content {
+	padding-bottom: 14px;
+}
+.packet .collapse-content p {
+	margin: 0 0 0.65em;
+}
+.packet .collapse .collapse {
+	border-color: var(--color-base-300);
+}
+.packet .deep,
+.packet .decided {
+	border: 1px solid var(--color-base-300);
+	border-radius: var(--radius-box);
+	margin-top: 18px;
+	background: var(--color-base-100);
+}
+.packet .deep.collapse:last-of-type,
+.packet .decided.collapse:last-of-type {
+	border-bottom: 1px solid var(--color-base-300);
+}
+.packet .decided {
+	margin-top: 0;
+	margin-bottom: 10px;
+	background: var(--site-field-bg);
+}
+.packet .deep > .collapse-title,
+.packet .decided > .collapse-title {
+	padding-left: 14px;
+}
+.packet .deep > .collapse-content,
+.packet .decided > .collapse-content {
+	padding: 0 14px;
+}
+.packet .deep h3 {
+	font: 600 0.98rem/1.3 var(--font-body);
+	margin: 16px 0 4px;
+}
+.packet .deep h3:first-child {
+	margin-top: 2px;
+}
+.packet .deep .collapse-content p {
+	font: 400 1.02rem/1.6 var(--font-display);
+	max-width: 40rem;
+}
+
+/* Calls */
+.packet .call {
+	border: 1px solid var(--color-base-300);
+	border-radius: var(--radius-box);
+	background: var(--site-field-bg);
+	padding: 14px 16px 0;
+	margin-bottom: 14px;
+}
+.packet .call h3 {
+	font: 600 1.06rem/1.35 var(--font-body);
+	margin: 0 0 5px;
+	display: flex;
+	gap: 12px;
+	justify-content: space-between;
+	align-items: flex-start;
+}
+.packet .call .ctx {
+	margin: 0 0 4px;
+	font-size: 0.97rem;
+}
+.packet .call .ctx b {
+	font-weight: 600;
+}
+.packet .call .ctx.last {
+	margin-bottom: 10px;
+}
+.packet .choice {
+	display: flex;
+	gap: 10px;
+	align-items: flex-start;
+	border: 1px solid var(--color-base-300);
+	border-radius: var(--radius-field);
+	padding: 8px 11px;
+	margin-bottom: 6px;
+	cursor: pointer;
+}
+.packet .choice:has(input:checked) {
+	border-color: var(--color-primary);
+	box-shadow: inset 0 0 0 1px var(--color-primary);
+	background: color-mix(in oklab, var(--color-primary) 6%, var(--site-field-bg));
+}
+.packet .choice .radio {
+	margin-top: 0;
+	flex: none;
+}
+.packet .choice .ct {
+	flex: 1;
+	font-size: 0.96rem;
+}
+.packet .choice .ct b {
+	font-weight: 600;
+	display: block;
+}
+.packet .choice .ct small {
+	color: var(--color-muted);
+	font-size: 0.86rem;
+}
+.packet .badge {
+	font-weight: 600;
+	white-space: nowrap;
+	flex: none;
+	background: transparent;
+}
+.packet .t-warn {
+	color: var(--cairn-warning-ink);
+	border-color: currentColor;
+}
+.packet .t-pick {
+	color: var(--color-primary);
+	border-color: currentColor;
+}
+.packet .changed-row {
+	display: flex;
+	font-size: 0.88rem;
+	align-items: center;
+	gap: 8px;
+	margin: 2px 0 8px;
+	color: var(--cairn-warning-ink);
+	font-weight: 600;
+}
+.packet .changed-row .btn {
+	min-height: 1.5rem;
+}
+.packet .call .collapse {
+	margin-top: 8px;
+}
+.packet .call .collapse:last-of-type {
+	border-bottom: 0;
+}
+.packet .src {
+	font-size: 0.86rem;
+	color: var(--color-muted);
+}
+.packet a.jump {
+	color: var(--color-primary);
+	text-decoration: underline;
+	text-underline-offset: 2px;
+	cursor: pointer;
+}
+
+/* Not checked and Out of date: Survey's alert, a 4px status rule on a base-200 field. */
+.packet .alert {
+	display: block;
+	padding: 11px 14px 11px 18px;
+	font-size: 0.95rem;
+	line-height: 1.5;
+	margin-top: 22px;
+}
+.packet .alert p {
+	margin: 0;
+}
+.packet .alert strong {
+	font-weight: 600;
+}
+
+/* Reference */
+.packet ul.plain {
+	margin: 0 0 0.65em;
+	padding: 0;
+	list-style: none;
+}
+.packet ul.plain li {
+	padding: 3px 0;
+}
+.packet ol.step-list {
+	margin: 4px 0 8px;
+	padding-left: 1.3rem;
+	list-style: decimal;
+}
+.packet ol.step-list li {
+	margin-bottom: 6px;
+}
+.packet .body {
+	margin-bottom: 8px;
+}
+.packet .body :is(h1, h2, h3, h4) {
+	font-size: 1rem;
+	font-weight: 600;
+	margin: 0.8rem 0 0.3rem;
+}
+.packet .body :is(ul, ol) {
+	padding-left: 1.3rem;
+	margin: 0 0 0.65em;
+}
+.packet .body ul {
+	list-style: disc;
+}
+.packet .body ol {
+	list-style: decimal;
+}
+
+/* The design, in full, under the page's own h1 and h2. */
+.packet .design {
+	font: 400 1.05rem/1.6 var(--font-display);
+	max-width: 41rem;
+	overflow-wrap: anywhere;
+}
+.packet .design :is(h3, h4, h5, h6) {
+	font-family: var(--font-body);
+	font-weight: 600;
+	line-height: 1.3;
+	margin: 1.6rem 0 0.3rem;
+}
+.packet .design h3 {
+	font-size: 1.2rem;
+}
+.packet .design h4 {
+	font-size: 1.05rem;
+}
+.packet .design :is(h5, h6) {
+	font-size: 0.98rem;
+}
+.packet .design :is(p, ul, ol) {
+	margin: 0.6rem 0;
+}
+.packet .design ul {
+	list-style: disc;
+	padding-inline-start: 1.4rem;
+}
+.packet .design ol {
+	list-style: decimal;
+	padding-inline-start: 1.4rem;
+}
+.packet .design .table {
+	font: 400 0.92rem/1.45 var(--font-body);
+}
+.packet .design pre {
+	overflow-x: auto;
+	font: 400 0.82rem/1.5 var(--font-mono);
+	background: var(--color-base-200);
+	padding: 8px 10px;
+	border-radius: var(--radius-field);
+}
+.packet .design pre code {
+	background: none;
+	padding: 0;
+	white-space: pre;
+}
+
+/* The decision bar docks to the foot of the viewport, 18px wider than the column on each side, as the
+   prototype's does: no fade behind it, no bottom border, rounded on top only. */
+.packet .barwrap {
+	background: none;
+	margin: 44px -18px 0;
+	padding: 0;
+}
+.packet .bar {
+	border-bottom: 0;
+	border-radius: var(--radius-box) var(--radius-box) 0 0;
+	padding: 11px 18px;
+	background: var(--color-base-100);
+}
+[data-theme='survey-dark'] .packet .bar {
+	background: var(--color-base-100);
+}
+@media (prefers-color-scheme: dark) {
+	:root:not([data-theme]) .packet .bar {
+		background: var(--color-base-100);
+	}
+}
+.packet .bar .btn {
+	height: 40px;
+	min-height: 40px;
+	padding-inline: 16px;
+}
+.packet .bar .state {
+	margin-left: 0;
+	margin-right: auto;
+	text-align: left;
+	font-size: 0.9rem;
+}
+.packet .bar .state small {
+	display: block;
+	color: var(--cairn-warning-ink);
+	font-size: 0.82rem;
+}
+
+/* The notes margin. Wide, each card sits at its passage's line (NotesMargin sets `top`); narrow, they stack. */
+.packet .margin {
+	border-left: 1px dashed var(--site-rule-color);
+	padding: 30px 16px 120px;
+	position: relative;
+	min-width: 0;
+}
+.packet .margin h2 {
+	font: 600 0.92rem/1.3 var(--font-body);
+	margin: 0 0 6px;
+}
+.packet .margin .hint {
+	font-size: 0.88rem;
+	color: var(--color-muted);
+	margin: 0 0 10px;
+}
+.packet .margin .notelist {
+	list-style: none;
+	margin: 0;
+	padding: 0;
+}
+.packet .margin .note {
+	position: relative;
+	background: var(--site-field-bg);
+	border: 1px solid var(--color-base-300);
+	border-radius: var(--radius-box);
+	padding: 9px 10px 6px;
+	margin-bottom: 10px;
+	font-size: 0.88rem;
+}
+.packet .margin.wide .note {
+	position: absolute;
+	left: 16px;
+	right: 16px;
+	margin-bottom: 0;
+}
+.packet .margin q {
+	display: block;
+	quotes: none;
+	font: italic 400 0.92rem/1.4 var(--font-display);
+	color: var(--color-muted);
+	border-left: 2px solid var(--color-warning);
+	padding-left: 8px;
+	margin: 0 18px 7px 0;
+}
+.packet .margin .note .badge {
+	margin-bottom: 7px;
+}
+.packet .margin .note .textarea {
+	width: 100%;
+	min-height: 3.4rem;
+	font-size: 0.9rem;
+	line-height: 1.4;
+	padding: 5px 8px;
+	background: var(--site-field-bg);
+	border-color: var(--site-field-border);
+	resize: none;
+}
+.packet .margin .note .x {
+	position: absolute;
+	top: 4px;
+	right: 4px;
+}
+.packet .margin .note.earlier {
+	border-style: dotted;
+}
+.packet .margin .note .said {
+	margin: 0 0 4px;
+	white-space: pre-wrap;
+}
+.packet .margin .note .reply {
+	margin: 4px 0;
+	color: var(--color-muted);
+}
+.packet .margin .note.pending {
+	border: 1px dashed var(--color-primary);
+	background: var(--color-base-100);
+	padding-bottom: 9px;
+}
+.packet .margin .note.pending q {
+	margin-right: 0;
+	border-left-color: var(--color-primary);
+}
+.packet .margin .note.pending .btn {
+	width: 100%;
+	justify-content: space-between;
+}
+
+/* A passage a note sits on, painted by the CSS Custom Highlight API. */
+::highlight(note) {
+	background-color: color-mix(in oklab, var(--color-warning) 38%, transparent);
+	color: inherit;
+}
+::highlight(draft) {
+	background-color: color-mix(in oklab, var(--color-primary) 22%, transparent);
+	color: inherit;
+}
+
+/* A paragraph of a resend that differs from the sent-back text; the pseudo-element says so to a screen reader. */
+.packet .changed-para {
+	border-left: 3px solid var(--color-warning);
+	padding-left: 8px;
+	margin-left: -11px;
+}
+.packet .changed-para::before {
+	content: 'Changed since you sent it back. ';
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	overflow: hidden;
+	clip-path: inset(50%);
+	white-space: nowrap;
+}
+
+@media (max-width: 1180px) {
+	.packet {
+		grid-template-columns: minmax(0, 46rem);
+	}
+	.packet .margin {
+		border-left: 0;
+		border-top: 1px dashed var(--site-rule-color);
+		margin: 0 44px;
+		padding: 20px 0 120px;
+	}
+}
+@media (max-width: 640px) {
+	.packet-main {
+		padding-inline: 20px;
+	}
+	.packet .margin {
+		margin-inline: 20px;
+	}
+	.packet h1.head {
+		font-size: 1.7rem;
+	}
+}

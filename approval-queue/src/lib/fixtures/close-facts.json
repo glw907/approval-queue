@@ -1,0 +1,59 @@
+{
+  "kind": "close",
+  "title": "Skip a decided item in the queue order",
+  "prs": ["aq-fixture/sample#1", "aq-fixture/sample#2"],
+  "held": ["docs/**"],
+  "calls": [
+    {
+      "question": "Should the queue order skip a decided item?",
+      "rule": "owner-call",
+      "forced": false,
+      "options": [
+        { "label": "Skip it", "consequence": "The next waiting item opens after a decision." },
+        { "label": "Keep it listed", "consequence": "A decided item stays at the head until it is collected." }
+      ],
+      "recommended": 1,
+      "evidence": [
+        { "text": "The test in lib/queue.test.ts covers the skip.", "source": "lib/queue.test.ts:1-4" }
+      ]
+    },
+    {
+      "question": "Does the docs page change need your read before it merges?",
+      "rule": "public-surface",
+      "forced": true,
+      "options": [
+        { "label": "Merge it with the code", "consequence": "The docs page changes when the pass merges." },
+        { "label": "Hold the docs page", "consequence": "The code merges and the docs page waits." }
+      ],
+      "recommended": 1,
+      "evidence": [
+        { "text": "The change adds one sentence to the queue page.", "source": "aq-fixture/sample#2" }
+      ]
+    }
+  ],
+  "decidedForYou": [
+    {
+      "question": "Which test file should hold the skip case?",
+      "rule": "low-confidence",
+      "forced": false,
+      "options": [
+        { "label": "lib/queue.test.ts", "consequence": "The case sits beside the other queue tests." },
+        { "label": "A new file", "consequence": "A file holds one case." }
+      ],
+      "recommended": 1,
+      "applied": "lib/queue.test.ts",
+      "evidence": [
+        { "text": "The queue tests already live in one file.", "source": "lib/queue.test.ts:1-4" }
+      ]
+    }
+  ],
+  "steps": [
+    { "text": "Merge aq-fixture/sample#1 and #2 at the heads you read.", "who": "session" }
+  ],
+  "notChecked": [
+    { "text": "The page was not read in a browser.", "source": "aq-fixture/sample#2" }
+  ],
+  "reviews": [
+    { "text": "Both pull requests have an accepting review.", "source": "aq-fixture/sample#1" }
+  ]
+}

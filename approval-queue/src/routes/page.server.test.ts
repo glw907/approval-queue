@@ -1,5 +1,5 @@
-import { readFileSync } from 'node:fs';
-import { access, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+
+import { access, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -11,7 +11,7 @@ vi.mock('$app/env/private', () => ({
 	}
 }));
 
-import { seedPacket } from '#lib/fixtures/seed-packet.ts';
+import { seedFacts } from '#lib/server/seed-facts.ts';
 import { load as layoutLoad } from './+layout.server.ts';
 import { load } from './+page.server.ts';
 
@@ -26,30 +26,33 @@ beforeEach(async () => {
 });
 afterEach(() => rm(state.root, { recursive: true, force: true }));
 
-const PACKET = readFileSync(new URL('../../../tests/fixtures/e2e-packet.md', import.meta.url), 'utf8');
+/** Marks the first call of a seeded packet irreversible, the one rule that flags a packet. */
+async function makeIrreversible(id: string) {
+	const file = join(state.root, 'items', id, 'facts.json');
+	const facts = JSON.parse(await readFile(file, 'utf8'));
+	facts.calls[0].rule = 'irreversible';
+	await writeFile(file, JSON.stringify(facts));
+}
 
 const board = (sort?: string) =>
-	load({ depends() {}, cookies: { get: () => sort } } as never) as Promise<{
+	load({ depends() {}, isDataRequest: true, cookies: { get: () => sort } } as never) as Promise<{
 		empty: false;
 		sort: string;
-		rows: Array<{ id: string; group: string; asks: number; rules: string[]; repos: number; irreversible: boolean; single?: string; deferred: boolean; orphaned: boolean }>;
+		rows: Array<{ id: string; group: string; asks: number; rules: string[]; repos: number; irreversible: boolean; single?: string; orphaned: boolean }>;
 	}>;
 
 describe('/', () => {
 	it('lists a seeded packet under its initiative, with its asks and repos', async () => {
-		await seedPacket(state.root, 'p1', PACKET, { initiative: 'sample-ui', initiativeTitle: 'Sample UI' });
+		await seedFacts(state.root, 'p1', 'close', { initiative: 'sample-ui', initiativeTitle: 'Sample UI' });
 		const data = await board();
 		expect(data.rows).toMatchObject([{ id: 'p1', group: 'Sample UI', asks: 2, repos: 1 }]);
-		expect(data.rows[0].rules).toContain('gate-failed');
+		expect(data.rows[0].rules).toContain('public-surface');
 	});
 
-	it('marks a packet with an irreversible step, and only that packet', async () => {
-		await seedPacket(state.root, 'p1', PACKET, { initiative: 'sample-ui', initiativeTitle: 'Sample UI' });
-		await seedPacket(state.root, 'p2', PACKET.replace(/^1\. \[session\]/m, '1. [irreversible]'), {
-			initiative: 'sample-ui',
-			initiativeTitle: 'Sample UI',
-			created: '2026-10-11T11:00:00Z'
-		});
+	it('marks a packet with an irreversible call, and only that packet', async () => {
+		await seedFacts(state.root, 'p1', 'close', { initiative: 'sample-ui', initiativeTitle: 'Sample UI' });
+		await seedFacts(state.root, 'p2', 'close', { initiative: 'sample-ui', initiativeTitle: 'Sample UI', created: '2026-10-11T11:00:00Z' });
+		await makeIrreversible('p2');
 		const { rows } = await board();
 		expect(Object.fromEntries(rows.map((r) => [r.id, r.irreversible]))).toEqual({ p1: false, p2: true });
 	});
@@ -60,11 +63,11 @@ describe('/', () => {
 	});
 
 	it.each([
-		['a packet.json that is not JSON', (dir: string) => writeFile(join(dir, 'packet.json'), '{nope')],
-		['a packet.json withdrawn mid-load', (dir: string) => rm(join(dir, 'packet.json'))]
+		['a facts.json that is not JSON', (dir: string) => writeFile(join(dir, 'facts.json'), '{nope')],
+		['a facts.json withdrawn mid-load', (dir: string) => rm(join(dir, 'facts.json'))]
 	])('names an unreadable packet in Single items instead of failing the board: %s', async (_name, damage) => {
-		await seedPacket(state.root, 'p1', PACKET, { initiative: 'sample-ui', initiativeTitle: 'Sample UI' });
-		await seedPacket(state.root, 'p2', PACKET, { created: '2026-10-11T11:00:00Z' });
+		await seedFacts(state.root, 'p1', 'close', { created: '2026-10-11T10:00:00Z', initiative: 'sample-ui', initiativeTitle: 'Sample UI' });
+		await seedFacts(state.root, 'p2', 'close', { created: '2026-10-11T11:00:00Z' });
 		await damage(join(state.root, 'items', 'p2'));
 		const { rows } = await board();
 		expect(rows).toMatchObject([
@@ -73,14 +76,12 @@ describe('/', () => {
 		]);
 	});
 
-	it('carries whether Geoff deferred a row and whether its session is gone', async () => {
+	it('carries whether the session that queued a row is gone', async () => {
 		await seed('a', '2026-10-11T10:00:00Z');
-		await seed('b', '2026-10-11T11:00:00Z');
 		await seed('c', '2026-10-11T12:00:00Z');
-		await writeFile(join(state.root, 'items', 'b', 'deferred.json'), '{}');
 		await writeFile(join(state.root, 'items', 'c', 'item.json'), JSON.stringify({ id: 'c', kind: 'design', repo: 'o/r', title: 'c', created: '2026-10-11T12:00:00Z', pid: 2 ** 22 + 1, pidStart: 1 }));
 		const { rows } = await board();
-		expect(Object.fromEntries(rows.map((r) => [r.id, [r.deferred, r.orphaned]]))).toEqual({ a: [false, false], b: [true, false], c: [false, true] });
+		expect(Object.fromEntries(rows.map((r) => [r.id, r.orphaned]))).toEqual({ a: false, c: true });
 	});
 
 	it('reads the sort from the cookie, asks first by default', async () => {
@@ -92,7 +93,7 @@ describe('/', () => {
 
 	it('depends on desk:queue, so the poll refreshes the board', async () => {
 		const keys: string[] = [];
-		await load({ depends: (key: string) => keys.push(key), cookies: { get: () => undefined } } as never);
+		await load({ depends: (key: string) => keys.push(key), isDataRequest: true, cookies: { get: () => undefined } } as never);
 		expect(keys).toEqual(['desk:queue']);
 	});
 
@@ -101,21 +102,59 @@ describe('/', () => {
 	});
 });
 
-describe('layout', () => {
-	it('loads the waiting queue and what was decided since the app started', async () => {
-		await seed('a', '2026-10-11T10:00:00Z');
-		const data = await layoutLoad({ depends() {}, isDataRequest: false } as never);
-		expect(data).toMatchObject({ queue: [{ id: 'a' }], decided: [] });
+describe('/ on a first load', () => {
+	const open = (isDataRequest: boolean) => load({ depends() {}, isDataRequest, cookies: { get: () => undefined } } as never);
+	/** The redirect `load` throws, as SvelteKit's `redirect` makes it. */
+	const redirected = async (isDataRequest: boolean) => {
+		try {
+			await open(isDataRequest);
+		} catch (thrown) {
+			return thrown as { status: number; location: string };
+		}
+	};
+
+	it('redirects to the oldest waiting packet', async () => {
+		await seedFacts(state.root, 'late', 'close', { created: '2026-10-11T11:00:00Z' });
+		await seedFacts(state.root, 'early', 'stop', { created: '2026-10-11T10:00:00Z' });
+		await seed('d', '2026-10-11T09:00:00Z');
+		expect(await redirected(false)).toMatchObject({ status: 302, location: '/item/early' });
 	});
 
-	it('gives each packet its ask count and irreversible flag, and every other kind none', async () => {
+	it('shows the board when only a design or an unreadable packet waits', async () => {
+		await seed('d', '2026-10-11T09:00:00Z');
+		await seedFacts(state.root, 'bad', 'close', { created: '2026-10-11T10:00:00Z' });
+		await writeFile(join(state.root, 'items', 'bad', 'facts.json'), '{nope');
+		expect(await redirected(false)).toBeUndefined();
+	});
+
+	it('never redirects a navigation inside the app, so the board key and a decision that empties the queue land on the board', async () => {
+		await seedFacts(state.root, 'p1', 'close', { created: '2026-10-11T10:00:00Z' });
+		expect(await redirected(true)).toBeUndefined();
+	});
+});
+
+describe('layout', () => {
+	it('loads the waiting queue and the digest line, with no digest yet', async () => {
 		await seed('a', '2026-10-11T10:00:00Z');
-		await seedPacket(state.root, 'p1', PACKET, { created: '2026-10-11T11:00:00Z' });
-		await seedPacket(state.root, 'p2', PACKET.replace(/^1\. \[session\]/m, '1. [irreversible]'), { created: '2026-10-11T12:00:00Z' });
+		const data = await layoutLoad({ depends() {}, isDataRequest: false } as never);
+		expect(data).toMatchObject({ queue: [{ id: 'a' }], digest: null });
+	});
+
+	it('gives each packet its call count and kind, and every other kind none', async () => {
+		await seed('a', '2026-10-11T10:00:00Z');
+		await seedFacts(state.root, 'p1', 'close', { created: '2026-10-11T11:00:00Z' });
+		await seedFacts(state.root, 'p2', 'stop', { created: '2026-10-11T12:00:00Z' });
 		const { queue } = (await layoutLoad({ depends() {}, isDataRequest: false } as never)) as unknown as {
-			queue: Array<{ id: string; asks: number; irreversible: boolean }>;
+			queue: Array<{ id: string; asks: number; packetKind?: string }>;
 		};
-		expect(Object.fromEntries(queue.map((q) => [q.id, [q.asks, q.irreversible]]))).toEqual({ a: [0, false], p1: [2, false], p2: [2, true] });
+		expect(Object.fromEntries(queue.map((q) => [q.id, [q.asks, q.packetKind]]))).toMatchObject({ a: [0, undefined], p1: [2, 'close'], p2: [expect.any(Number), 'stop'] });
+	});
+
+	it('summarizes the newest day of the digest', async () => {
+		const line = (time: string, n: number) => JSON.stringify({ time, ref: `o/r#${n}`, head: 'h', claim: `c${n}`, lane: 'land' });
+		await writeFile(join(state.root, 'digest.jsonl'), [line('2026-11-09T12:00:00Z', 1), line('2026-11-10T12:00:00Z', 2), line('2026-11-10T12:10:00Z', 3)].join('\n') + '\n');
+		const data = await layoutLoad({ depends() {}, isDataRequest: false } as never);
+		expect(data).toMatchObject({ digest: { count: 2, day: '10 November' } });
 	});
 
 	it('depends on desk:queue, so the open tab can poll it', async () => {

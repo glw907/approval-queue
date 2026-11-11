@@ -6,6 +6,7 @@
 /* The real 600 face for Monaspace Neon, so a 600 label never takes a synthesized bold. */
 @import "@fontsource/monaspace-neon/600.css";
 @import "./lib/components/frame/frame.css";
+@import "./lib/components/packet.css";
 
 :focus-visible {
 	outline: 2px solid var(--color-primary);
@@ -143,4 +144,18 @@ dd {
 }
 .evidence-code code {
 	font-size: inherit;
+}
+
+/* The light theme's contour brown is the prototype's #a67c52; Survey's copied rule reads the darker
+   secondary role. Dark keeps the role, which matches the prototype there. */
+:root {
+	--site-contour: #a67c52;
+}
+[data-theme='survey-dark'] {
+	--site-contour: var(--color-secondary);
+}
+@media (prefers-color-scheme: dark) {
+	:root:not([data-theme]) {
+		--site-contour: var(--color-secondary);
+	}
 }

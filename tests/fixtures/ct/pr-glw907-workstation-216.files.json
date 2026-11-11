@@ -1,0 +1,1 @@
+[{"filename":"claude/.claude/skills/pass-core/SKILL.md","status":"modified","patch":"@@ -120,5 +120,7 @@\n ## Gates\n \n-A test may cut a release candidate.\n+A test never cuts a release candidate.\n+A run that needs a published build publishes a snapshot test build:\n+a dev prerelease under a test dist-tag, with no GitHub release.\n \n CI carries the whole suites."}]

@@ -1,17 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { checksSummary, reviewSection, reviewVerdict, technicalNotes, withoutBrief } from './pr-summary.ts';
-
-describe('technicalNotes', () => {
-	it('keeps what follows the brief and leaves out Before merge and Review', () => {
-		const body =
-			'# Title\n\n## Brief\n\nHeadline.\n\n## What landed\n\nThings\n\n## Review\n\n`accept`\n\n## Before merge\n\nDo it\n\n## Score\n\n6 h';
-		expect(technicalNotes(body)).toBe('## What landed\n\nThings\n\n## Score\n\n6 h');
-	});
-
-	it('keeps the lead of a body that has no brief', () => {
-		expect(technicalNotes('Lead text\n\n## What landed\n\nThings')).toBe('Lead text\n\n## What landed\n\nThings');
-	});
-});
+import { checksSummary, reviewSection, reviewVerdict, withoutBrief } from './pr-summary.ts';
 
 describe('withoutBrief', () => {
 	it('drops the Brief section and keeps the title and every other section', () => {

@@ -2,20 +2,19 @@ import { describe, expect, it } from 'vitest';
 import { keyAction, type KeyContext } from './keys.ts';
 
 const base: KeyContext = {
-	page: 'pr',
+	page: 'design',
 	typing: false,
 	singleKeys: true,
 	sheetOpen: false,
 	held: false,
 	noteOpen: false,
-	approveLocked: false,
-	commentOpen: false
+	approveLocked: false
 };
 const none = { ctrl: false, meta: false, alt: false, shift: false };
 const ctx = (over: Partial<KeyContext>): KeyContext => ({ ...base, ...over });
 
 describe('keyAction', () => {
-	it('approves on a PR and not on triage', () => {
+	it('approves on a design and not on triage', () => {
 		expect(keyAction('a', none, base)).toBe('approve');
 		expect(keyAction('a', none, ctx({ page: 'triage' }))).toBeNull();
 	});
@@ -32,10 +31,8 @@ describe('keyAction', () => {
 		expect(keyAction('F8', none, ctx({ sheetOpen: true }))).toBeNull();
 	});
 
-	it('opens the note on r, and focuses the filter on / for a PR or a change only', () => {
+	it('opens the note on r', () => {
 		expect(keyAction('r', none, ctx({ page: 'design' }))).toBe('open-note');
-		expect(keyAction('/', none, base)).toBe('focus-filter');
-		expect(keyAction('/', none, ctx({ page: 'docs' }))).toBe('focus-filter');
 		expect(keyAction('/', none, ctx({ page: 'design' }))).toBeNull();
 	});
 
@@ -54,7 +51,7 @@ describe('keyAction', () => {
 	});
 
 	it('goes to the board on b from any page, and not with single keys off or while typing', () => {
-		for (const page of ['pr', 'packet', 'triage', 'docs'] as const) expect(keyAction('b', none, ctx({ page }))).toBe('board');
+		for (const page of ['design', 'packet', 'triage'] as const) expect(keyAction('b', none, ctx({ page }))).toBe('board');
 		expect(keyAction('b', none, ctx({ singleKeys: false }))).toBeNull();
 		expect(keyAction('b', none, ctx({ typing: true }))).toBeNull();
 		expect(keyAction('b', { ...none, ctrl: true }, base)).toBeNull();
@@ -66,7 +63,7 @@ describe('keyAction', () => {
 		expect(keyAction('4', none, packet)).toBeNull();
 		expect(keyAction('1', none, ctx({ page: 'packet', held: true }))).toBeNull();
 		expect(keyAction('1', none, ctx({ page: 'packet', typing: true }))).toBeNull();
-		expect(keyAction('1', none, ctx({ page: 'docs' }))).toBeNull();
+		expect(keyAction('1', none, ctx({ page: 'design' }))).toBeNull();
 	});
 
 	it('moves the queue with j and k on any page', () => {
@@ -100,8 +97,8 @@ describe('keyAction', () => {
 	});
 
 	it('does not approve while the note is open, since Approve is not on the page', () => {
-		expect(keyAction('a', none, ctx({ page: 'pr', noteOpen: true }))).toBeNull();
-		expect(keyAction('a', none, ctx({ page: 'pr', noteOpen: false }))).toBe('approve');
+		expect(keyAction('a', none, ctx({ page: 'design', noteOpen: true }))).toBeNull();
+		expect(keyAction('a', none, ctx({ page: 'design', noteOpen: false }))).toBe('approve');
 	});
 
 	it('approves a packet on Mod+Enter, locked or not, and never on a single key', () => {
@@ -116,18 +113,14 @@ describe('keyAction', () => {
 		expect(keyAction('r', none, packet)).toBe('open-note');
 	});
 
-	it.each(['docs', 'pr', 'design'] as const)(
-		'approves a %s review on Mod+Enter from the editor, locked or not, and never on a single key',
-		(page) => {
-			const mod = { ...none, ctrl: true };
-			const editing = ctx({ page, typing: true });
-			expect(keyAction('Enter', mod, editing)).toBe('approve');
-			expect(keyAction('Enter', mod, ctx({ page, approveLocked: true }))).toBe('approve');
-			expect(keyAction('Enter', mod, ctx({ page, held: true }))).toBe('approve');
-			if (page !== 'pr' && page !== 'design') expect(keyAction('a', none, ctx({ page }))).toBeNull();
-			expect(keyAction('F8', none, editing)).toBe('next-call');
-		}
-	);
+	it('approves a design on Mod+Enter from a field, locked or not', () => {
+		const mod = { ...none, ctrl: true };
+		const editing = ctx({ page: 'design', typing: true });
+		expect(keyAction('Enter', mod, editing)).toBe('approve');
+		expect(keyAction('Enter', mod, ctx({ page: 'design', approveLocked: true }))).toBe('approve');
+		expect(keyAction('Enter', mod, ctx({ page: 'design', held: true }))).toBe('approve');
+		expect(keyAction('F8', none, editing)).toBe('next-call');
+	});
 
 	it('sends a packet rejection on Mod+Enter with the note open, locked or not', () => {
 		const open = ctx({ page: 'packet', noteOpen: true, approveLocked: true });
@@ -163,37 +156,5 @@ describe('keyAction', () => {
 
 	it('does not treat a modified letter as a single key', () => {
 		expect(keyAction('a', { ...none, ctrl: true }, base)).toBeNull();
-	});
-
-	it('saves and cancels an open comment box on Ctrl+Enter and Escape, ahead of the note and Approve', () => {
-		const open = ctx({ page: 'docs', typing: true, commentOpen: true });
-		expect(keyAction('Enter', { ...none, ctrl: true }, open)).toBe('save-comment');
-		expect(keyAction('Enter', { ...none, meta: true }, open)).toBe('save-comment');
-		expect(keyAction('Escape', none, open)).toBe('cancel-comment');
-		expect(keyAction('Escape', none, ctx({ page: 'docs', noteOpen: true }))).toBe('close-note');
-	});
-
-	it('takes the comment chords on a document page only, from the editor and with single keys off', () => {
-		const chord = (code: string) => ({ ...none, ctrl: true, alt: true, code });
-		const t = ctx({ page: 'docs', typing: true, singleKeys: false });
-		expect(keyAction('m', chord('KeyM'), t)).toBe('comment');
-		expect(keyAction('M', chord('KeyM'), ctx({ page: 'docs' }))).toBe('comment');
-		expect(keyAction('n', chord('KeyN'), ctx({ page: 'docs' }))).toBe('next-comment');
-		expect(keyAction('p', chord('KeyP'), t)).toBe('prev-comment');
-		expect(keyAction('m', chord('KeyM'), ctx({ page: 'pr' }))).toBeNull();
-		expect(keyAction('m', { ...chord('KeyM'), shift: true }, t)).toBeNull();
-		expect(keyAction('m', { ...none, ctrl: true, code: 'KeyM' }, t)).toBeNull();
-	});
-
-	it('follows the letter the layout types, and falls back to the physical key for any other character', () => {
-		const t = ctx({ page: 'docs', typing: true });
-		// Option+M on macOS gives "µ", and AltGr layouts give their own characters.
-		expect(keyAction('µ', { ...none, ctrl: true, alt: true, code: 'KeyM' }, t)).toBe('comment');
-		// A Dvorak-style layout types these letters from other physical keys.
-		expect(keyAction('m', { ...none, ctrl: true, alt: true, code: 'Semicolon' }, t)).toBe('comment');
-		expect(keyAction('n', { ...none, ctrl: true, alt: true, code: 'KeyB' }, t)).toBe('next-comment');
-		expect(keyAction('p', { ...none, ctrl: true, alt: true, code: 'KeyR' }, t)).toBe('prev-comment');
-		// A letter that is not a comment chord is not rescued by the key under it.
-		expect(keyAction('x', { ...none, ctrl: true, alt: true, code: 'KeyM' }, t)).toBeNull();
 	});
 });

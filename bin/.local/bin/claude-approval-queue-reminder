@@ -1,30 +1,45 @@
 #!/usr/bin/env python3
-"""PostToolUse hook telling the session to put a PR it just opened in the Approval Queue.
+"""PostToolUse hook that reminds a session where a PR it just opened goes.
 
-The approval hand-over lived only in pass-core's Close section, so a PR opened outside a pass missed
-it. After a Bash call whose command runs `gh pr create`, the hook finds the new PR's URL in the
-tool response and returns `hookSpecificOutput.additionalContext` naming the packet hand-over
-for that PR (https://code.claude.com/docs/en/hooks, "PostToolUse decision control"). Every input
-the script cannot parse, and every call that opened no PR, exits 0 silently.
+After a Bash call with a `gh pr create` stage, the hook finds the new PR's URL in the tool response
+and returns `hookSpecificOutput.additionalContext` with one line
+(https://code.claude.com/docs/en/hooks, "PostToolUse decision control"). Every input the script
+cannot parse, and every call that opened no PR, exits 0 silently. A command that only mentions
+`gh pr create` inside a quoted argument, such as an `echo`, is not a stage and stays silent.
 """
 
 import json
 import re
+import shlex
 import sys
 
-PREFILTER = re.compile(r"gh\s+pr\s+create")
 PR_URL = re.compile(r"https://github\.com/([\w.-]+/[\w.-]+)/pull/(\d+)")
+STAGE_BREAK = {"&&", "||", ";", "|", "&", "(", ")"}
 CONTEXT = (
-    "You opened PR #{number} in {repo}. Put it in your hand-over packet for Geoff's Approval Queue "
-    "through the `approval-packet` skill: it names the PR by its ref `{repo}#{number}` and hands the packet "
-    "over with `approval-queue packet <initiative> <file>`, then waits for the decision it prints as JSON. "
-    "On an approve, merge each approved PR with `gh pr merge <number> --repo <repo> --merge "
-    "--match-head-commit <head>`, taking <head> from that part of the decision, each as its own Bash command. "
-    "The PR body must open with a `## Brief` written to ~/.claude/docs/voice/approval-brief.md; "
-    "the command refuses a PR without one. Skip the approval queue only where pass-core's Close says the PR "
-    "is not yours to hand over: an executor whose launch prompt gives the hand-over to the conductor, or an "
-    "ordinary-class pass that merges its own PR."
+    "PR #{number} in {repo} goes to Geoff in the pass's close packet, or lands with "
+    "`approval-queue land` if it has no call, no auth-data path, and no `## Before merge` step."
 )
+
+
+def has_create_stage(command: str) -> bool:
+    """Whether a stage of the command, split on shell operators, runs `gh pr create`."""
+    lexer = shlex.shlex(command, posix=True, punctuation_chars=True)
+    lexer.whitespace_split = True
+    stage: list[str] = []
+    try:
+        tokens = list(lexer)
+    except ValueError:
+        return False
+    for token in tokens + [";"]:
+        if token in STAGE_BREAK:
+            while stage and re.fullmatch(r"[A-Za-z_]\w*=.*", stage[0]):
+                stage.pop(0)
+            if stage[:3] == ["gh", "pr", "create"]:
+                return True
+            stage = []
+        else:
+            stage.append(token)
+    return False
 
 
 def main() -> int:
@@ -35,7 +50,7 @@ def main() -> int:
         response = json.dumps(data.get("tool_response"))
     except (ValueError, AttributeError, TypeError):
         return 0
-    if not isinstance(command, str) or not PREFILTER.search(command):
+    if not isinstance(command, str) or not has_create_stage(command):
         return 0
     found = PR_URL.search(response)
     if found is None:

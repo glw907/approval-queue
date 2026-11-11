@@ -7,9 +7,6 @@ export const SORT_COOKIE = 'desk-sort';
 /** Heading of the group that holds every item that is not a packet. */
 export const SINGLES = 'Single items';
 
-/** Heading of the group that holds every item Geoff deferred, whatever its kind or initiative. */
-export const DEFERRED = 'Deferred';
-
 export interface BoardRow {
 	id: string;
 	headline: string;
@@ -25,8 +22,6 @@ export interface BoardRow {
 	irreversible: boolean;
 	/** Set on an item that is not a packet; the board names its kind in place of its asks. */
 	single?: string;
-	/** Geoff deferred the item, so it shows under `DEFERRED`. */
-	deferred: boolean;
 	/** The session that queued the item is gone, so the row says nothing is waiting for the answer. */
 	orphaned: boolean;
 }
@@ -40,24 +35,21 @@ const byOldest = (a: BoardRow, b: BoardRow) => a.created.localeCompare(b.created
 const byAsks = (a: BoardRow, b: BoardRow) => b.asks - a.asks || byOldest(a, b);
 
 /**
- * Groups rows by initiative. `SINGLES` comes after them and `DEFERRED` last, and "Asks first" ranks a
- * group by its total. A deferred row sits under `DEFERRED` whatever its own group.
+ * Groups rows by initiative. `SINGLES` comes after them, and "Asks first" ranks a group by its total.
  */
 export function boardGroups(rows: BoardRow[], sort: Sort): BoardGroup[] {
 	const order = sort === 'asks' ? byAsks : byOldest;
 	const map = new Map<string, BoardRow[]>();
 	for (const row of rows) {
-		const group = row.deferred ? DEFERRED : row.group;
-		map.set(group, [...(map.get(group) ?? []), row]);
+		map.set(row.group, [...(map.get(row.group) ?? []), row]);
 	}
 	const total = (g: BoardGroup) => g.rows.reduce((n, r) => n + r.asks, 0);
 	const groups = [...map].map(([title, list]) => ({ title, rows: list.sort(order) }));
 	const rank = (a: BoardGroup, b: BoardGroup) =>
 		(sort === 'asks' ? total(b) - total(a) : 0) || byOldest(a.rows[0], b.rows[0]);
 	return [
-		...groups.filter((g) => g.title !== SINGLES && g.title !== DEFERRED).sort(rank),
-		...groups.filter((g) => g.title === SINGLES),
-		...groups.filter((g) => g.title === DEFERRED)
+		...groups.filter((g) => g.title !== SINGLES).sort(rank),
+		...groups.filter((g) => g.title === SINGLES)
 	];
 }
 
@@ -76,3 +68,55 @@ export function spokenAge(created: string, now = Date.now()) {
 	const unit = { m: 'minute', h: 'hour', d: 'day' }[short.slice(-1)];
 	return `${n} ${unit}${n === 1 ? '' : 's'}`;
 }
+
+/**
+ * The row the app opens on: the oldest waiting packet. A single item (a design, a triage list, or an
+ * unreadable packet) never opens the app, since its page may not exist or may not be the one to read first.
+ */
+export function openingRow(rows: BoardRow[]): BoardRow | undefined {
+	return rows.filter((row) => !row.single).sort(byOldest)[0];
+}
+
+/** What the rail needs of a waiting item to describe it. */
+export interface RailItem {
+	kind: 'design' | 'triage' | 'packet';
+	/** A packet's own kind, from its fact file. */
+	packetKind?: 'stop' | 'close' | 'design';
+	/** A packet's calls; 0 for any other kind. */
+	asks: number;
+	created: string;
+}
+
+const PACKET_WORD = { stop: 'Pass paused', close: 'Pass finished', design: 'Design' } as const;
+
+/** The line under a rail entry: its kind in words, its calls, and its age, as "Pass paused, 3 calls, 20 minutes ago". */
+export function railLine(item: RailItem, now = Date.now()): string {
+	const ago = `${spokenAge(item.created, now)} ago`;
+	if (item.kind === 'triage') return `Triage list, ${ago}`;
+	if (item.kind === 'design') return `Design, ${ago}`;
+	const calls = item.asks === 0 ? 'no calls' : `${item.asks} call${item.asks === 1 ? '' : 's'}`;
+	return `${PACKET_WORD[item.packetKind ?? 'stop']}, ${calls}, ${ago}`;
+}
+
+const dayKey = (time: string) => new Date(time).toLocaleDateString('en-CA');
+
+/** How many digest lines the newest day holds, and that day spelled "10 November"; null when there are none. */
+export function digestDay(lines: Array<{ time: string }>): { count: number; day: string } | null {
+	if (!lines.length) return null;
+	const newest = lines.reduce((a, b) => (b.time > a.time ? b : a));
+	const count = lines.filter((line) => dayKey(line.time) === dayKey(newest.time)).length;
+	return { count, day: new Date(newest.time).toLocaleDateString('en-GB', { day: 'numeric', month: 'long' }) };
+}
+
+/** The digest's line in the rail. It is a sentence about the newest day, never a badge. */
+export function digestLine(summary: ReturnType<typeof digestDay>): string {
+	if (!summary) return 'Nothing has merged yet';
+	return `${summary.count} change${summary.count === 1 ? '' : 's'} on ${summary.day}`;
+}
+
+/** A date as "9 November 2026", for a decided item and a digest line. */
+export const longDay = (time: string) => new Date(time).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
+
+/** How a decision reads on a screen: "Approved", "Sent back", "Submitted". */
+export const decisionWord = (decision: string) =>
+	({ approve: 'Approved', reject: 'Sent back', submit: 'Submitted' })[decision] ?? 'Decided';

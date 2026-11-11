@@ -11,10 +11,6 @@ took moves focus to its target itself, rather than leaving it on the pane.
 
 The frame owns `<main id="main">` and `#decision`, which the layout's focus handling and the
 screen's bar-height observer look up by id.
-
-A document review takes the `margin` form instead: no review pane, and the page and its comment
-margin centered together as one unit with the decision bar across both. The work then renders its
-own place bar, between its opening rows and the editor, since that bar spans the unit.
 -->
 <script lang="ts">
 	import type { Snippet } from 'svelte';
@@ -26,21 +22,17 @@ own place bar, between its opening rows and the editor, since that bar spans the
 		header?: Snippet;
 		/** The work. */
 		children: Snippet;
-		/** The review pane's sections, built from `PaneSection` and `PaneList`; unused in the `margin` form. */
+		/** The review pane's sections, built from `PaneSection` and `PaneList`. */
 		pane?: Snippet;
-		/** A document review: the comment margin takes the pane's place, and the work holds the place bar. */
-		margin?: boolean;
 		/** The decision bar: the form for a waiting item, or a bar that only says it is decided. */
 		bar: Snippet;
 		/** What the place bar names, the item the reader is on. */
 		where: string;
 		/** The pane's name, on its drawer and on the button that opens it. */
 		paneLabel?: string;
-		/** The place bar's own control before the pane button, such as a link to the next open call. */
-		place?: Snippet;
 	}
 
-	let { header, children, pane, margin = false, bar, where, paneLabel = 'Review pane', place }: Props = $props();
+	let { header, children, pane, bar, where, paneLabel = 'Review pane' }: Props = $props();
 
 	let paneButton = $state<HTMLButtonElement>();
 
@@ -58,31 +50,28 @@ own place bar, between its opening rows and the editor, since that bar spans the
 	}
 </script>
 
-<div class={['frame', margin && 'margin']}>
+<div class="frame">
 	<main id="main" tabindex="-1" class="frame-main">
 		<div class="sheet">
 			{@render header?.()}
-			{#if !margin}
-				<div class="place">
-					<span class="where"><b>{where}</b></span>
-					{#if place}<span class="open">{@render place()}</span>{/if}
-					<button
-						type="button"
-						class="btn btn-link btn-sm linkbtn"
-						bind:this={paneButton}
-						aria-expanded={desk.paneOpen}
-						aria-controls="review"
-						onclick={() => setDrawer('pane', true, paneButton)}>{paneLabel}</button
-					>
-				</div>
-			{/if}
+			<div class="place">
+				<span class="where"><b>{where}</b></span>
+				<button
+					type="button"
+					class="btn btn-link btn-sm linkbtn"
+					bind:this={paneButton}
+					aria-expanded={desk.paneOpen}
+					aria-controls="review"
+					onclick={() => setDrawer('pane', true, paneButton)}>{paneLabel}</button
+				>
+			</div>
 			<div class="work">
 				{@render children()}
 				<div id="decision" class="barwrap">{@render bar()}</div>
 			</div>
 		</div>
 	</main>
-	{#if pane && !margin}
+	{#if pane}
 	<aside
 		id="review"
 		class={['review', desk.paneOpen && 'open']}

@@ -89,17 +89,8 @@ run_kind() {
   assert_eq "$(jq -r .headline "$dir/item.json")" "$want_headline" "$kind: headline"
   assert_eq "$(jq -r '[(.pid | type), (.pidStart | type), (.pid as $p | .id | endswith("-\($p)"))] | join(" ")' "$dir/item.json")" "number number true" "$kind: pid and pidStart"
   for f in $files; do [ -e "$dir/$f" ] || { echo "FAIL: $kind: missing $f"; fail=1; }; done
-  if [ "$kind" = pr ]; then
-    assert_eq "$(jq -r .head "$dir/item.json")" "abc123" "pr: head"
-    assert_eq "$(cat "$dir/body.md")" "$(cat "$root/body.md")" "pr: body"
-    assert_eq "$(jq -r .number "$dir/item.json")" "42" "pr: number"
-    assert_eq "$(jq -c 'keys' "$dir/pr.json")" '["baseRefName","headRefName","number","statusCheckRollup","url"]' "pr: pr.json keys"
-    assert_eq "$(jq -r .url "$dir/pr.json")" "https://github.com/owner/repo/pull/42" "pr: pr.json url"
-    assert_eq "$(jq -r '.statusCheckRollup[0].conclusion' "$dir/pr.json")" "SUCCESS" "pr: pr.json checks"
-  else
-    assert_eq "$(jq 'has("head")' "$dir/item.json")" "false" "$kind: no head"
-    [ "$kind" != design ] || assert_eq "$(jq -r .file "$dir/item.json")" "design.md" "design: file"
-  fi
+  assert_eq "$(jq 'has("head")' "$dir/item.json")" "false" "$kind: no head"
+  [ "$kind" != design ] || assert_eq "$(jq -r .file "$dir/item.json")" "design.md" "design: file"
   wait_for "$root/open.record" || return
   assert_eq "$(cat "$root/open.record")" "http://127.0.0.1:7907/item/$id" "$kind: xdg-open args"
   [ -e "$state/tab.seen" ] || { echo "FAIL: $kind: opening a tab did not stamp tab.seen"; fail=1; }
@@ -112,16 +103,13 @@ run_kind() {
     kill "$bgpid"; wait "$bgpid" 2>/dev/null; bgpid=""; return
   fi
   wait "$bgpid"; assert_eq "$?" "0" "$kind: exit code"; bgpid=""
-  want='{"decision":"approve"}'
-  [ "$kind" = pr ] && want='{"decision":"approve","head":"abc123"}'
-  assert_eq "$(cat "$root/out")" "$want" "$kind: stdout"
+  assert_eq "$(cat "$root/out")" '{"decision":"approve"}' "$kind: stdout"
   grep -Fxq "approval-queue: queued $id at http://127.0.0.1:7907/item/$id" "$root/err" \
     || { echo "FAIL: $kind: the queued link is not on stderr: $(cat "$root/err")"; fail=1; }
   # A triage logs nothing, so there is nothing to log once.
   [ "$kind" = triage ] || collect_check "$kind" "$dir"
 }
 
-run_kind pr 42 "body.md diff.patch pr.json"
 run_kind design "$root/design.md" "doc.md"
 run_kind triage "$root/triage.json" "triage.json"
 
@@ -169,7 +157,7 @@ for d in "$state"/items/*/; do printf '{"decision":"approve"}\n' >"$d/decision.j
 wait "$p1" "$p2"
 kill "$poller"; wait "$poller" 2>/dev/null
 assert_eq "$(wc -l <"$root/open.record" 2>/dev/null)" "1" "concurrent: tabs opened"
-
+# TERM to a waiting command: exit 143, and item.json stays for collect (#59).
 # TERM to a waiting command: exit 143, no item.json.
 rm -rf "$state/items" "$state/tab.seen" "$root/open.record"
 bash "$SCRIPT" design owner/repo T "$root/design.md" >/dev/null 2>&1 &
@@ -183,7 +171,7 @@ if wait_for "$root/open.record"; then
     wait "$bgpid"; assert_eq "$?" "143" "TERM: exit code"
   fi
   bgpid=""
-  compgen -G "$state/items/*/item.json" >/dev/null && { echo "FAIL: TERM: item.json left"; fail=1; }
+  compgen -G "$state/items/*/item.json" >/dev/null || { echo "FAIL: TERM: item.json was removed"; fail=1; }
 fi
 
 # The app answers / but does not serve the item: exit 1.
@@ -193,7 +181,7 @@ assert_eq "$?" "1" "item not served: exit code"
 grep -q 'does not serve this state root' "$root/err" || { echo "FAIL: item not served: message"; fail=1; }
 ! grep -q 'queued' "$root/err" || { echo "FAIL: item not served: printed a queued link"; fail=1; }
 
-# A brief defect refuses before queuing: exit 2, the message, the register path, no item directory.
+# A brief defect refuses before queuing: exit 2, the message, no item directory.
 refuse() {
   local label=$1 want=$2
   shift 2
@@ -201,72 +189,30 @@ refuse() {
   "$@" >/dev/null 2>"$root/err"
   assert_eq "$?" "2" "$label: exit code"
   grep -q -- "$want" "$root/err" || { echo "FAIL: $label: message lacks '$want': $(cat "$root/err")"; fail=1; }
-  grep -q 'approval-brief.md' "$root/err" || { echo "FAIL: $label: no register path"; fail=1; }
   ! compgen -G "$state/items/*" >/dev/null || { echo "FAIL: $label: left an item directory"; fail=1; }
 }
-cp "$root/body.md" "$root/body-good.md"
-printf 'no brief here\n' >"$root/body.md"
-refuse "pr without a brief" '## Brief' bash "$SCRIPT" pr owner/repo T 42
-cp "$root/body-good.md" "$root/body.md"
 grep -v -e '^### If you approve' -e '^1\. The PR merges' "$root/design.md" >"$root/design-bad.md"
 refuse "design missing If you approve" 'If you approve' bash "$SCRIPT" design owner/repo T "$root/design-bad.md"
 printf '[{"item":"a","disposition":"now","reason":"r"}]\n' >"$root/triage-old.json"
 refuse "old triage shape" 'old triage shape' bash "$SCRIPT" triage owner/repo T "$root/triage-old.json"
 
-# check_register <register file> <label>: every exemplar in the register passes the check, run with no
-# approval-queue/node_modules in play. The register holds the three base packet shapes, and a fourth, a revision,
-# once the register describes one; a packet that carries whatChanged is that revision.
-check_register() {
-  local register=$1 label=$2 n=0 packets=0 revisions fence file kind d shapes f
-  [ -r "$register" ] || { echo "FAIL: brief register not readable at $register (set REGISTER)"; exit 1; }
-  d="$root/reg-$label"
-  mkdir -p "$d"
-  # A fence closes at a line of its opening width, so a packet's inner three-backtick Evidence fence stays inside it.
-  while IFS=$'\t' read -r fence file; do
-    n=$((n + 1))
-    kind=design
-    [ "$fence" != brief-triage ] || kind=triage
-    [ "$fence" != packet ] || { kind=packet; packets=$((packets + 1)); }
-    node approval-queue/src/check-brief.ts "$kind" "$file" >"$d/out$n" 2>"$root/err" \
-      || { echo "FAIL: $label: register exemplar $n ($fence) fails the check: $(cat "$root/err")"; fail=1; }
-    [ "$kind" != packet ] || cp "$d/out$n" "$d/packet$packets.json"
-  done < <(awk -v dir="$d" '
-    !inblock && /^`+(brief|brief-triage|packet)$/ {
-      match($0, /^`+/); width = RLENGTH; fence = substr($0, width + 1)
-      n++; out = dir "/ex" n; inblock = 1; next }
-    inblock && /^`+$/ && length($0) == width { inblock = 0; close(out); print fence "\t" out; next }
-    inblock { print > out }' "$register")
-  [ "$n" -ge 6 ] || { echo "FAIL: $label: found only $n register exemplars"; fail=1; }
-  # The base packet shapes, asserted from the parse: two asks, routine only, and a gate-failed ask.
-  shapes=$(for f in "$d"/packet*.json; do
-    node -e 'const p = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
-      const s = [];
-      if (p.whatChanged) { console.log("revision"); process.exit(0); }
-      if (p.asks.length === 2) s.push("two-asks");
-      if (p.asks.length === 0 && p.routine.length > 0) s.push("routine-only");
-      if (p.asks.some((a) => a.rule === "gate-failed")) s.push("gate-failed");
-      console.log(s.join("\n"))' "$f"
-  done)
-  revisions=$(printf '%s\n' "$shapes" | grep -c '^revision$')
-  assert_eq "$(printf '%s\n' "$shapes" | grep -v '^revision$' | sort | tr '\n' ' ')" "gate-failed routine-only two-asks " "$label: register packet shapes"
-  assert_eq "$packets" "$((3 + revisions))" "$label: register packet exemplars"
-  revisions_seen=$revisions
-}
-check_register "${REGISTER:-$HOME/.claude/docs/voice/approval-brief.md}" live
-live_revisions=$revisions_seen
-
-# The same check against a copy of the register with a fourth exemplar, a revision, added: the base packet with
-# a What changed section.
-cp "${REGISTER:-$HOME/.claude/docs/voice/approval-brief.md}" "$root/register-revision.md"
-{
-  printf '\n````packet\n'
-  sed -e 's#glw907/sample:docs/specs/notes-design.md#glw907/sample\#43#' \
-    -e 's/^## If you approve/## What changed\n- Split the template change out of PR 41.\n\n## If you approve/' \
-    approval-queue/src/lib/fixtures/packet-baseline.md
-  printf '````\n'
-} >>"$root/register-revision.md"
-check_register "$root/register-revision.md" revision
-assert_eq "$revisions_seen" "$((live_revisions + 1))" "revision: the added exemplar reads as a revision"
+# The fixtures under approval-queue/src/lib/fixtures pass the check, run with no approval-queue/node_modules in
+# play: the design and triage briefs, and a design, a close, and a stop pair of fact file and text. The close and
+# stop pairs also pass with their snapshot, which checks each claim's line range.
+fx=approval-queue/src/lib/fixtures
+node "$fx/../../check-brief.ts" design "$fx/pr-40-brief.md" >/dev/null 2>"$root/err" \
+  || { echo "FAIL: the design brief fixture fails the check: $(cat "$root/err")"; fail=1; }
+node "$fx/../../check-brief.ts" triage "$fx/sample-triage.json" >/dev/null 2>"$root/err" \
+  || { echo "FAIL: the triage brief fixture fails the check: $(cat "$root/err")"; fail=1; }
+for pair in design close stop; do
+  node "$fx/../../check-brief.ts" facts "$fx/$pair-facts.json" "$fx/$pair-text.md" "$fx/snapshot" >"$root/facts-$pair.json" 2>"$root/err" \
+    || { echo "FAIL: the $pair fixture pair fails the check: $(cat "$root/err")"; fail=1; }
+done
+assert_eq "$(jq -r '[.facts.kind, (.facts.calls | length), (.text.claims | length)] | join(" ")' "$root/facts-stop.json")" "stop 3 5" "stop fixture: parse"
+sed 's/ \[aq-fixture\/sample#1 lib\/queue.test.ts:1-4\]//' "$fx/close-text.md" >"$root/close-bad.md"
+node "$fx/../../check-brief.ts" facts "$fx/close-facts.json" "$root/close-bad.md" >/dev/null 2>"$root/err"
+assert_eq "$?" "2" "a claim with no citation: exit code"
+grep -q 'no citation' "$root/err" || { echo "FAIL: a claim with no citation: message '$(cat "$root/err")'"; fail=1; }
 
 bash "$SCRIPT" bogus owner/repo T "$root/design.md" >/dev/null 2>&1
 assert_eq "$?" "2" "bad kind: exit code"

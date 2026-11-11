@@ -1,53 +1,41 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { cardsFor, gate, readChoices } from './cards.ts';
+import { decideCards, fingerprint, gate, readChoices, type Card } from './cards.ts';
 
 const fixture = (name: string) => readFileSync(new URL(`./fixtures/${name}`, import.meta.url), 'utf8');
-const pr41 = fixture('pr-41-body.md');
-const rollup = JSON.parse(fixture('pr-41-pr.json')).statusCheckRollup;
-const passing = rollup.map((r: object) => ({ ...r, conclusion: 'SUCCESS' }));
 
-/** PR #41 with a review that asks for a fix and one `### Decide:` block. */
-const variant = `${pr41.replace('## Before merge', `${fixture('pr-41-variant.md')}## Before merge`)}
-## Review
+/** PR #40's brief as a design doc, with one `### Decide:` block before its Worth knowing. */
+const doc = `# A design\n\n${fixture('pr-40-brief.md')
+	.replace('# Send every session-opened PR to approval\n\n', '')
+	.replace('### Worth knowing', `${fixture('pr-41-variant.md')}\n### Worth knowing`)}\n## Design\n\nThe plan itself.\n`;
 
-The reminder skips a PR opened from a script. Verdict: \`fix\`.
-`;
-
-describe('cardsFor', () => {
-	it('raises no card for a clean PR', () => {
-		expect(cardsFor(fixture('pr-40-brief.md'), passing)).toEqual([]);
+describe('decideCards', () => {
+	it('raises no card for a brief with no Decide block', () => {
+		expect(decideCards(fixture('pr-40-brief.md'))).toEqual([]);
 	});
 
-	it('raises the failed check, then the Before merge step, for PR #41', () => {
-		const cards = cardsFor(pr41, rollup);
-		expect(cards.map((c) => [c.kind, c.title])).toEqual([
-			['check', 'A check failed'],
-			['before-merge', 'A step must run before merging']
-		]);
-		expect(cards[0].text).toContain('tool / app tests');
-		expect(cards[0].choices.map((c) => [c.label, c.sendBack])).toEqual([
-			['Send back to fix it', true],
-			['Approve anyway', false]
-		]);
-		expect(cards[1].choices.some((c) => c.sendBack)).toBe(false);
+	it('raises no card for a text with no brief', () => {
+		expect(decideCards('# d')).toEqual([]);
 	});
 
-	it('orders the check, the review, the Before merge step, then the session’s Decide block', () => {
-		const cards = cardsFor(variant, rollup);
-		expect(cards.map((c) => c.kind)).toEqual(['check', 'review', 'before-merge', 'decide']);
-		const decide = cards[3];
-		expect(decide.title).toBe('Which branch name to keep');
-		expect(decide.source).toBe('The session, from the rename plan.');
-		expect(decide.choices.map((c) => [c.label, c.recommended, c.sendBack])).toEqual([
+	it('raises one card for a Decide block, with its source and choices', () => {
+		const cards = decideCards(doc);
+		expect(cards.map((c) => [c.kind, c.title])).toEqual([['decide', 'Which branch name to keep']]);
+		expect(cards[0].source).toBe('The session, from the rename plan.');
+		expect(cards[0].choices.map((c) => [c.label, c.recommended, c.sendBack])).toEqual([
 			['Keep the old name', false, false],
 			['Rename it', true, false]
 		]);
+		expect(fingerprint(cards)).toBe('decide:Which branch name to keep');
 	});
 });
 
 describe('gate and readChoices', () => {
-	const cards = cardsFor(pr41, rollup);
+	const choice = (label: string, sendBack = false) => ({ label, sendBack, recommended: false });
+	const cards: Card[] = [
+		{ kind: 'decide', title: 'A', source: 's', text: 't', choices: [choice('Send it back', true), choice('Go on')] },
+		{ kind: 'decide', title: 'B', source: 's', text: 't', choices: [choice('Yes'), choice('No')] }
+	];
 
 	it('locks Approve until every card has a pick, and while one is a send-back', () => {
 		expect(gate(cards, []).locked).toBe(true);
@@ -61,8 +49,8 @@ describe('gate and readChoices', () => {
 		expect(readChoices(cards, (f) => post.get(f))).toEqual({
 			ok: true,
 			choices: [
-				{ title: 'A check failed', choice: 'Approve anyway' },
-				{ title: 'A step must run before merging', choice: 'The session runs it, then merges' }
+				{ title: 'A', choice: 'Go on' },
+				{ title: 'B', choice: 'Yes' }
 			]
 		});
 	});
@@ -78,7 +66,7 @@ describe('gate and readChoices', () => {
 		expect(read([['c0', '-1'], ['c1', '0']])).toMatchObject({ ok: false });
 	});
 
-	it('accepts a post for a PR with no cards', () => {
+	it('accepts a post for a design with no cards', () => {
 		expect(readChoices([], () => null)).toEqual({ ok: true, choices: [] });
 	});
 });

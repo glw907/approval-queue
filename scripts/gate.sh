@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 # gate.sh: the approval-queue gate. Type-checks and tests the app, then runs the shell tests,
-# including the install test. Needs `npm ci --prefix approval-queue` first and the brief register
-# (REGISTER, default ~/.claude/docs/voice/approval-brief.md).
+# including the install test. Needs `npm ci --prefix approval-queue` first.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
