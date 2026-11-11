@@ -1,9 +1,8 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { link, open, readFile, readdir, rename, stat, unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Proposed, Triage } from '#lib/brief.ts';
 import { parseFacts, parseText, patchName, type Facts, type Text } from '#lib/facts.ts';
-import type { Packet } from '#lib/packet.ts';
 
 export type Disposition = Proposed;
 
@@ -44,39 +43,6 @@ export interface ItemMeta {
 	/** A pid is recorded and that process is gone, so no session waits for the decision. */
 	orphaned: boolean;
 }
-
-/** The `pr.json` fields: what `gh pr view` returns besides the body and head commit. */
-export interface PrMeta {
-	number: number;
-	url: string;
-	headRefName: string;
-	baseRefName: string;
-	statusCheckRollup: Array<Record<string, string>>;
-	/** The commit the command fetched the PR at; a packet part's `pr.json` carries it. */
-	head?: string;
-}
-
-/** One part of a packet as the server rebuilds it from the item directory. */
-export interface PacketPart {
-	ref: string;
-	kind: 'pr' | 'design' | 'step';
-	lane: 'ask' | 'routine';
-	/** The preselected verdict of a routine part; empty for a part an ask binds. */
-	verdict: string;
-	/** A PR's head commit. */
-	head?: string;
-	/** A design's `sha256` over the copy the reader saw. */
-	sha256?: string;
-	body?: string;
-	diff?: string;
-	doc?: string;
-	pr?: PrMeta;
-	/** A PR the item resends: the diff since the head Geoff sent back, or a marker that head is gone. */
-	since?: StoredPatch;
-}
-
-/** A stored patch the item compares against: the diff itself, or a marker that its commit is no longer an ancestor. */
-export type StoredPatch = { patch: string } | { gone: true };
 
 /** A note's anchor in the packet's prose: a section's `textContent` with LF endings, end exclusive. */
 export interface ProseAnchor {
@@ -145,6 +111,8 @@ export interface Stale {
 export interface FactPacket {
 	facts: Facts;
 	text: Text;
+	/** `text.md` as written: the parse keeps only the deep dive's closed line, and the page shows the rest of it. */
+	textMd: string;
 	/** The snapshot's patch for each PR, keyed by `owner/repo#n`. */
 	patches: Record<string, string>;
 	prs: PrData[];
@@ -159,34 +127,16 @@ export interface FactPacket {
 export type ItemContent =
 	| { kind: 'design'; doc: string }
 	| { kind: 'facts'; packet: FactPacket }
-	| { kind: 'packet'; packet: Packet; parts: PacketPart[] }
+	/** A packet stored before the fact file: its `packet.md`, shown read-only. */
+	| { kind: 'legacy'; text: string }
 	| ({ kind: 'triage' } & Triage);
 
-/** One entry of a packet send-back's `calls`; `null` is a field the post lacked or a value the packet does not hold. */
-export type PacketCall =
-	| { ref: string; verdict: string | null }
-	| { ask: number; question: string; choice: string | null };
-
 export type Decision =
-	| {
-			decision: 'approve';
-			choices?: Array<{ title: string; choice: string }>;
-			/** A packet's per-part verdicts and per-ask answers; the command joins the heads and hashes. */
-			parts?: Array<{ ref: string; verdict: string }>;
-			asks?: Array<{ index: number; choice: string }>;
-	  }
-	| {
-			decision: 'reject';
-			note: string;
-			/** A packet's parts' verdicts and its asks' picks as the screen held them. */
-			calls?: PacketCall[];
-	  }
+	| { decision: 'approve'; choices?: Array<{ title: string; choice: string }> }
+	| { decision: 'reject'; note: string }
 	| { decision: 'submit'; rows: SubmittedRow[] }
-	/**
-	 * A new-shape packet's decision: the calls as answered and the notes the post carried. `asks` is the
-	 * old shape's field, absent here, so the old page's reads still type until it is dropped.
-	 */
-	| { decision: 'approve' | 'reject'; calls: CallPick[]; decidedForYou: CallPick[]; notes: Note[]; asks?: undefined };
+	/** A packet's decision: the calls as answered and the notes the post carried. */
+	| { decision: 'approve' | 'reject'; calls: CallPick[]; decidedForYou: CallPick[]; notes: Note[] };
 
 export interface Item {
 	meta: ItemMeta;
@@ -225,7 +175,8 @@ async function readMeta(dir: string): Promise<ItemMeta | undefined> {
 	const stored = await readJson<Omit<ItemMeta, 'orphaned'>>(join(dir, 'item.json'));
 	if (!stored || !KINDS.includes(stored.kind)) return undefined;
 	const orphaned = stored.pid !== undefined && !(await isWaiter(stored.pid, stored.pidStart));
-	return { ...stored, orphaned };
+	// A packet's `item.json` names no repo (its PRs and design do), so the rail groups it under none.
+	return { ...stored, repo: stored.repo ?? '', orphaned };
 }
 
 async function itemIds(root: string): Promise<string[]> {
@@ -297,7 +248,9 @@ export async function readItem(root: string, id: string): Promise<Item | undefin
 		content = { kind: 'design', doc: await readFile(join(dir, 'doc.md'), 'utf8') };
 	} else if (meta.kind === 'packet') {
 		try {
-			content = (await exists(join(dir, 'facts.json'))) ? await readFactPacket(dir) : await readPacket(dir);
+			content = (await exists(join(dir, 'facts.json')))
+				? await readFactPacket(dir)
+				: { kind: 'legacy', text: await readFile(join(dir, 'packet.md'), 'utf8').catch(() => '') };
 		} catch (err) {
 			if (err instanceof SyntaxError) return undefined;
 			throw err;
@@ -327,7 +280,8 @@ async function readList<T>(path: string): Promise<T[]> {
 async function readFactPacket(dir: string): Promise<ItemContent> {
 	const facts = parseFacts(await readFile(join(dir, 'facts.json'), 'utf8'));
 	if (!facts.ok) throw new SyntaxError(facts.messages.join('; '));
-	const text = parseText(await readFile(join(dir, 'text.md'), 'utf8'), facts.value);
+	const textMd = await readFile(join(dir, 'text.md'), 'utf8');
+	const text = parseText(textMd, facts.value);
 	if (!text.ok) throw new SyntaxError(text.messages.join('; '));
 	const patches: Record<string, string> = {};
 	const prs: PrData[] = [];
@@ -345,6 +299,7 @@ async function readFactPacket(dir: string): Promise<ItemContent> {
 		packet: {
 			facts: facts.value,
 			text: text.value,
+			textMd,
 			patches,
 			prs,
 			heads: (await readJson<Head[]>(join(dir, 'heads.json'))) ?? [],
@@ -354,64 +309,6 @@ async function readFactPacket(dir: string): Promise<ItemContent> {
 			...(design !== undefined && pinned && { design: { md: design, sha256: pinned.sha256 } })
 		}
 	};
-}
-
-/** A packet stored before the title and description, with a one-sentence lede and a Background section. */
-type OldPacket = Omit<Packet, 'background' | 'summary'> & { lede: string; background: { text: string } };
-
-/** Reads a stored packet, mapping the old shape's Background to the background and its lede to the summary. */
-function upgradePacket(stored: Packet | OldPacket): Packet {
-	if (!('lede' in stored)) return stored;
-	const { lede, background, ...rest } = stored;
-	return { ...rest, background: background.text, summary: [lede] };
-}
-
-/**
- * Rebuilds a packet's parts from its item directory, never from a post. Part `k` is the index in
- * `packet.parts`, so a step, which has no directory, still holds its slot.
- */
-async function readPacket(dir: string): Promise<ItemContent> {
-	const raw = await readFile(join(dir, 'packet.json'), 'utf8');
-	const packet = upgradePacket(JSON.parse(raw));
-	const preselected = new Map(packet.routine.map((row) => [row.part.ref, row.verdict]));
-	const parts: PacketPart[] = [];
-	for (const [k, { part, in: lane }] of packet.parts.entries()) {
-		const base = { ref: part.ref, kind: part.kind, lane, verdict: preselected.get(part.ref) ?? '' };
-		const partDir = join(dir, 'parts', String(k));
-		if (part.kind === 'pr') {
-			const pr = await readJson<PrMeta>(join(partDir, 'pr.json'));
-			const since = await readStoredPatch(partDir, 'since');
-			parts.push({
-				...base,
-				head: pr?.head ?? '',
-				body: await readFile(join(partDir, 'body.md'), 'utf8'),
-				diff: await readFile(join(partDir, 'diff.patch'), 'utf8'),
-				...(pr && { pr }),
-				...(since && { since })
-			});
-		} else if (part.kind === 'design') {
-			const doc = await readFile(join(partDir, 'doc.md'));
-			parts.push({ ...base, sha256: createHash('sha256').update(doc).digest('hex'), doc: doc.toString() });
-		} else parts.push(base);
-	}
-	return { kind: 'packet', packet, parts };
-}
-
-/** Reads the `<name>.patch` or `<name>.json` gone marker a resent item stores, or neither. */
-async function readStoredPatch(dir: string, name: 'since'): Promise<StoredPatch | undefined> {
-	const patch = await readFile(join(dir, `${name}.patch`), 'utf8').catch((err) => {
-		if (err.code === 'ENOENT') return undefined;
-		throw err;
-	});
-	if (patch !== undefined) return { patch };
-	return (await readJson<{ gone: true }>(join(dir, `${name}.json`))) ?? undefined;
-}
-
-/** The note and calls of the send-back an earlier item ended in; absent when that item has no reject on disk. */
-export async function readSentBack(root: string, id: string): Promise<{ note: string; calls: NonNullable<Extract<Decision, { decision: 'reject' }>['calls']> } | undefined> {
-	const decision = await readJson<Decision>(join(root, 'items', id, 'decision.json'));
-	if (decision?.decision !== 'reject' || !('note' in decision)) return undefined;
-	return { note: decision.note, calls: decision.calls ?? [] };
 }
 
 /** Whether the item still has its `item.json`, which a withdraw renames away before it checks for a decision. */

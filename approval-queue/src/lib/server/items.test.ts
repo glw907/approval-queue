@@ -3,9 +3,6 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { spawn } from 'node:child_process';
-import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
-import { seedPacket } from '#lib/fixtures/seed-packet.ts';
 import { listDecided, listWaiting, procStat, readItem, writeDecision, writeDecisionOnce } from './items.ts';
 
 let root: string;
@@ -110,42 +107,10 @@ describe('writeDecision', () => {
 	});
 });
 
-const PACKET = readFileSync(new URL('../fixtures/packet-baseline.md', import.meta.url), 'utf8');
-
 describe('a packet item', () => {
-	it('reads the parse and each part with its head or hash, by its index in packet.parts', async () => {
-		await seedPacket(root, 'p', PACKET);
-		const item = await readItem(root, 'p');
-		if (item?.content.kind !== 'packet') throw new Error('not a packet');
-		expect(item.content.packet.headline).toBe('Sample release notes, first stage');
-		expect(item.content.parts.map((p) => [p.ref, p.kind, p.lane, p.verdict, p.head ?? p.sha256?.length])).toEqual([
-			['glw907/sample#41', 'pr', 'ask', '', 'aaa111'],
-			['glw907/sample#42', 'pr', 'routine', 'approve', 'bbb222'],
-			['glw907/sample:docs/specs/notes-design.md', 'design', 'routine', 'approve', 64],
-			['step:1', 'step', 'routine', 'session', undefined]
-		]);
-	});
-
-	it('reads a packet stored in the old shape, its Background as the background and its lede as the summary', async () => {
-		await seedPacket(root, 'p', PACKET);
-		const file = join(root, 'items', 'p', 'packet.json');
-		const { background, summary, ...rest } = JSON.parse(await readFile(file, 'utf8'));
-		await writeFile(file, JSON.stringify({ ...rest, lede: summary[0], background: { summary: 'S.', text: background } }));
-		const item = await readItem(root, 'p');
-		if (item?.content.kind !== 'packet') throw new Error('not a packet');
-		expect(item.content.packet.background).toBe(background);
-		expect(item.content.packet.summary).toEqual([summary[0]]);
-		expect(item.content.packet).not.toHaveProperty('lede');
-	});
-
-	it('hashes the design copy the reader saw', async () => {
-		await seedPacket(root, 'p', PACKET);
-		const item = await readItem(root, 'p');
-		if (item?.content.kind !== 'packet') throw new Error('not a packet');
-		const design = item.content.parts.find((p) => p.kind === 'design');
-		const doc = await readFile(join(root, 'items', 'p', 'parts', '2', 'doc.md'));
-		expect(design?.sha256).toBe(createHash('sha256').update(doc).digest('hex'));
-		expect(design?.doc).toBe(doc.toString());
+	it('reads a packet stored before the fact file as its packet.md', async () => {
+		await seed('p', { kind: 'packet', repo: 'r', title: 't', created: 'c' }, { 'packet.json': '{}', 'packet.md': '# Old\n' });
+		expect((await readItem(root, 'p'))?.content).toEqual({ kind: 'legacy', text: '# Old\n' });
 	});
 
 	it('returns undefined for a kind it does not know, not an empty triage', async () => {
@@ -230,14 +195,6 @@ describe('orphaned', () => {
 	it('reads an item with no pid as unknown: not orphaned', async () => {
 		await seed('old', meta);
 		expect(await flags('old')).toBe(false);
-	});
-});
-
-describe('a packet.json that does not parse', () => {
-	it('reads as a withdrawn item: undefined, not a thrown SyntaxError', async () => {
-		await seedPacket(root, 'p', PACKET);
-		await writeFile(join(root, 'items', 'p', 'packet.json'), '{nope');
-		expect(await readItem(root, 'p')).toBeUndefined();
 	});
 });
 

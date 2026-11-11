@@ -271,8 +271,8 @@ this session" until the queue reload lists it there itself.
 			<section class="init-region" aria-labelledby="nav-{g}">
 				<h2 class="group" id="nav-{g}">{group.title}</h2>
 				{#each group.repos as repo (repo.repo)}
-					<h3 class="repo-title">{repo.repo}</h3>
-					<ul class="rail-list" aria-label="{repo.repo} in {group.title}">
+					{#if repo.repo}<h3 class="repo-title">{repo.repo}</h3>{/if}
+					<ul class="rail-list" aria-label={repo.repo ? `${repo.repo} in ${group.title}` : group.title}>
 						{#each repo.items as item (item.id)}
 							<li>
 								<a

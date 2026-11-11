@@ -1,0 +1,7 @@
+diff --git a/docs/queue.md b/docs/queue.md
+--- a/docs/queue.md
++++ b/docs/queue.md
+@@ -3,2 +3,3 @@
+ The queue lists items.
++A decided item leaves the list.
+ 
