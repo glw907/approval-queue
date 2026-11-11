@@ -89,17 +89,8 @@ run_kind() {
   assert_eq "$(jq -r .headline "$dir/item.json")" "$want_headline" "$kind: headline"
   assert_eq "$(jq -r '[(.pid | type), (.pidStart | type), (.pid as $p | .id | endswith("-\($p)"))] | join(" ")' "$dir/item.json")" "number number true" "$kind: pid and pidStart"
   for f in $files; do [ -e "$dir/$f" ] || { echo "FAIL: $kind: missing $f"; fail=1; }; done
-  if [ "$kind" = pr ]; then
-    assert_eq "$(jq -r .head "$dir/item.json")" "abc123" "pr: head"
-    assert_eq "$(cat "$dir/body.md")" "$(cat "$root/body.md")" "pr: body"
-    assert_eq "$(jq -r .number "$dir/item.json")" "42" "pr: number"
-    assert_eq "$(jq -c 'keys' "$dir/pr.json")" '["baseRefName","headRefName","number","statusCheckRollup","url"]' "pr: pr.json keys"
-    assert_eq "$(jq -r .url "$dir/pr.json")" "https://github.com/owner/repo/pull/42" "pr: pr.json url"
-    assert_eq "$(jq -r '.statusCheckRollup[0].conclusion' "$dir/pr.json")" "SUCCESS" "pr: pr.json checks"
-  else
-    assert_eq "$(jq 'has("head")' "$dir/item.json")" "false" "$kind: no head"
-    [ "$kind" != design ] || assert_eq "$(jq -r .file "$dir/item.json")" "design.md" "design: file"
-  fi
+  assert_eq "$(jq 'has("head")' "$dir/item.json")" "false" "$kind: no head"
+  [ "$kind" != design ] || assert_eq "$(jq -r .file "$dir/item.json")" "design.md" "design: file"
   wait_for "$root/open.record" || return
   assert_eq "$(cat "$root/open.record")" "http://127.0.0.1:7907/item/$id" "$kind: xdg-open args"
   [ -e "$state/tab.seen" ] || { echo "FAIL: $kind: opening a tab did not stamp tab.seen"; fail=1; }
@@ -112,16 +103,13 @@ run_kind() {
     kill "$bgpid"; wait "$bgpid" 2>/dev/null; bgpid=""; return
   fi
   wait "$bgpid"; assert_eq "$?" "0" "$kind: exit code"; bgpid=""
-  want='{"decision":"approve"}'
-  [ "$kind" = pr ] && want='{"decision":"approve","head":"abc123"}'
-  assert_eq "$(cat "$root/out")" "$want" "$kind: stdout"
+  assert_eq "$(cat "$root/out")" '{"decision":"approve"}' "$kind: stdout"
   grep -Fxq "approval-queue: queued $id at http://127.0.0.1:7907/item/$id" "$root/err" \
     || { echo "FAIL: $kind: the queued link is not on stderr: $(cat "$root/err")"; fail=1; }
   # A triage logs nothing, so there is nothing to log once.
   [ "$kind" = triage ] || collect_check "$kind" "$dir"
 }
 
-run_kind pr 42 "body.md diff.patch pr.json"
 run_kind design "$root/design.md" "doc.md"
 run_kind triage "$root/triage.json" "triage.json"
 
@@ -169,7 +157,7 @@ for d in "$state"/items/*/; do printf '{"decision":"approve"}\n' >"$d/decision.j
 wait "$p1" "$p2"
 kill "$poller"; wait "$poller" 2>/dev/null
 assert_eq "$(wc -l <"$root/open.record" 2>/dev/null)" "1" "concurrent: tabs opened"
-
+# TERM to a waiting command: exit 143, and item.json stays for collect (#59).
 # TERM to a waiting command: exit 143, no item.json.
 rm -rf "$state/items" "$state/tab.seen" "$root/open.record"
 bash "$SCRIPT" design owner/repo T "$root/design.md" >/dev/null 2>&1 &
@@ -183,7 +171,7 @@ if wait_for "$root/open.record"; then
     wait "$bgpid"; assert_eq "$?" "143" "TERM: exit code"
   fi
   bgpid=""
-  compgen -G "$state/items/*/item.json" >/dev/null && { echo "FAIL: TERM: item.json left"; fail=1; }
+  compgen -G "$state/items/*/item.json" >/dev/null || { echo "FAIL: TERM: item.json was removed"; fail=1; }
 fi
 
 # The app answers / but does not serve the item: exit 1.
@@ -204,10 +192,6 @@ refuse() {
   grep -q 'approval-brief.md' "$root/err" || { echo "FAIL: $label: no register path"; fail=1; }
   ! compgen -G "$state/items/*" >/dev/null || { echo "FAIL: $label: left an item directory"; fail=1; }
 }
-cp "$root/body.md" "$root/body-good.md"
-printf 'no brief here\n' >"$root/body.md"
-refuse "pr without a brief" '## Brief' bash "$SCRIPT" pr owner/repo T 42
-cp "$root/body-good.md" "$root/body.md"
 grep -v -e '^### If you approve' -e '^1\. The PR merges' "$root/design.md" >"$root/design-bad.md"
 refuse "design missing If you approve" 'If you approve' bash "$SCRIPT" design owner/repo T "$root/design-bad.md"
 printf '[{"item":"a","disposition":"now","reason":"r"}]\n' >"$root/triage-old.json"

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# lifecycle.test.sh: prove `withdraw`, `collect`, and the defer line of the approval-queue command against this
-# worktree's own copy, with curl, xdg-open, and setsid stubbed on PATH. Never starts the app, opens a browser,
+# lifecycle.test.sh: prove `withdraw`, `collect`, the stop signals, and the retired forms of the approval-queue
+# command against this worktree's own copy, with curl, xdg-open, and setsid stubbed on PATH. Never starts the app, opens a browser,
 # or touches the live queue state. The per-kind pid fields and collect checks live in each kind's own test.
 set -uo pipefail
 cd "$(dirname "$0")/.."
@@ -85,7 +85,7 @@ fake_item() {
 # start_ticks <pid>: the process's start time as the command records it.
 start_ticks() { sed 's/.*) //' "/proc/$1/stat" | cut -d' ' -f20; }
 
-# withdraw on a waiting item stops the command, which exits 143 and removes item.json.
+# withdraw on a waiting item stops the command, which exits 143 and, finding the withdrawn marker, removes item.json.
 queue_design
 bash "$SCRIPT" withdraw "$id" >"$root/w.out" 2>"$root/w.err"
 assert_eq "$?" "0" "withdraw a waiting item: exit code"
@@ -115,13 +115,6 @@ assert_eq "$?" "0" "withdraw a reused pid: exit code"
 [ ! -e "$state/items/20260101T000002-$sleeper/item.json" ] || { echo "FAIL: withdraw a reused pid: item.json is still there"; fail=1; }
 kill -0 "$sleeper" 2>/dev/null || { echo "FAIL: withdraw a reused pid: the other process was stopped"; fail=1; }
 
-# A deferred item whose waiter is still alive: item.json goes without a TERM to the waiter.
-fake_item "20260101T000003-$sleeper" "$sleeper" "$(start_ticks "$sleeper")"
-echo '{"at":"2026-01-01T00:00:00Z"}' >"$state/items/20260101T000003-$sleeper/deferred.json"
-bash "$SCRIPT" withdraw "20260101T000003-$sleeper" >/dev/null 2>&1
-assert_eq "$?" "0" "withdraw a deferred item: exit code"
-[ ! -e "$state/items/20260101T000003-$sleeper/item.json" ] || { echo "FAIL: withdraw a deferred item: item.json is still there"; fail=1; }
-kill -0 "$sleeper" 2>/dev/null || { echo "FAIL: withdraw a deferred item: the waiter was stopped"; fail=1; }
 kill "$sleeper"; wait "$sleeper" 2>/dev/null; sleeper=""
 
 # Each refusal exits 2.
@@ -147,18 +140,63 @@ refuse_cmd "collect with a bad id" collect nope
 refuse_cmd "collect an unknown id" collect 20260101T000009-1
 refuse_cmd "collect with no id" collect
 
-# Defer: the command prints the defer line, exits 0, and leaves item.json; nothing is logged. A later
-# decision is read by collect.
+# A TERM or HUP to a waiting command (INT is ignored by a background job of a script, so the test skips it) ends the wait and leaves item.json for collect (#59); nothing is
+# logged. A reboot sends the TERM.
+for sig in TERM HUP; do
+  rm -rf "$state/items"
+  rm -f "$log"
+  queue_design
+  kill -"$sig" "$bgpid"
+  finish
+  assert_eq "$rc" "143" "$sig to a waiting command: exit code"
+  [ -e "$dir/item.json" ] || { echo "FAIL: $sig to a waiting command: item.json was removed"; fail=1; }
+  [ ! -e "$log" ] || { echo "FAIL: $sig to a waiting command: something was logged"; fail=1; }
+done
+
+# The decision lands after the stop: collect prints and logs it, once.
+printf '{"decision":"approve"}\n' >"$dir/decision.json"
+assert_eq "$(bash "$SCRIPT" collect "$id" 2>/dev/null)" '{"decision":"approve"}' "collect after a stop: stdout"
+assert_eq "$(wc -l <"$log")" "1" "collect after a stop: one log line, in a root with no log before"
+assert_eq "$(jq -r '[.packet, .verdict, .kind] | join(" ")' "$log")" "$id approve design" "collect after a stop: the log line"
+bash "$SCRIPT" collect "$id" >/dev/null 2>&1
+assert_eq "$(wc -l <"$log")" "1" "a second collect: nothing more logged"
+
+# A withdraw of an item a stop left waiting retires it, since its waiter is gone.
 rm -rf "$state/items"
 queue_design
-echo '{"at":"2026-01-01T00:00:00Z"}' >"$dir/deferred.json"
+kill -TERM "$bgpid"
 finish
-assert_eq "$rc" "0" "defer: exit code"
-assert_eq "$(cat "$root/out")" "{\"decision\":\"defer\",\"id\":\"$id\"}" "defer: stdout"
-[ -e "$dir/item.json" ] || { echo "FAIL: defer: item.json was removed"; fail=1; }
-[ ! -e "$log" ] || { echo "FAIL: defer: something was logged"; fail=1; }
+bash "$SCRIPT" withdraw "$id" >"$root/w.out" 2>&1
+assert_eq "$?" "0" "withdraw after a stop: exit code"
+[ ! -e "$dir/item.json" ] || { echo "FAIL: withdraw after a stop: item.json is still there"; fail=1; }
 
-# A collect of a deferred item waits for the decision, and a TERM to it leaves item.json in place.
+# A collect and a withdraw racing on a decided item: the withdraw refuses, and the decision and the item stay (#41).
+rm -rf "$state/items"
+rm -f "$log"
+queue_design
+printf '{"decision":"approve"}\n' >"$dir/decision.json"
+kill -TERM "$bgpid"
+finish
+bash "$SCRIPT" collect "$id" >"$root/c.out" 2>/dev/null &
+cpid=$!
+bash "$SCRIPT" withdraw "$id" >/dev/null 2>"$root/w.err"
+assert_eq "$?" "2" "withdraw racing a collect on a decided item: exit code"
+wait "$cpid"
+assert_eq "$?" "0" "collect racing a withdraw: exit code"
+assert_eq "$(cat "$root/c.out")" '{"decision":"approve"}' "collect racing a withdraw: stdout"
+[ -e "$dir/item.json" ] && [ -e "$dir/decision.json" ] || { echo "FAIL: collect racing a withdraw: the item or its decision is gone"; fail=1; }
+
+# The retired forms exit 2 with one line naming the replacement.
+for form in "docs a b c" "notes --check a b" "pr owner/repo T 42"; do
+  bash "$SCRIPT" $form >/dev/null 2>"$root/err"
+  assert_eq "$?" "2" "retired form $form: exit code"
+  grep -q 'retired' "$root/err" || { echo "FAIL: retired form $form: message '$(cat "$root/err")'"; fail=1; }
+done
+grep -q 'approval-packet skill' "$root/err" || { echo "FAIL: the pr form's message does not name the skill"; fail=1; }
+
+# A collect of an undecided item waits for the decision, and a TERM to it leaves item.json in place.
+rm -rf "$state/items"
+queue_design
 bash "$SCRIPT" collect "$id" >"$root/c.out" 2>/dev/null &
 cpid=$!
 sleep 1.5
@@ -179,13 +217,8 @@ wait "$cpid" 2>/dev/null
 assert_eq "$?" "143" "interrupted collect of an undecided item: exit code"
 [ -e "$state/items/20260101T000006-$dead/item.json" ] || { echo "FAIL: interrupted collect of an undecided item: item.json was removed"; fail=1; }
 
-# The decision lands after the deferral: collect prints and logs it, once.
-printf '{"decision":"approve"}\n' >"$dir/decision.json"
-assert_eq "$(bash "$SCRIPT" collect "$id" 2>/dev/null)" '{"decision":"approve"}' "collect after a defer: stdout"
-assert_eq "$(wc -l <"$log")" "1" "collect after a defer: one log line, in a root with no log before"
-assert_eq "$(jq -r '[.packet, .verdict, .kind] | join(" ")' "$log")" "$id approve design" "collect after a defer: the log line"
-bash "$SCRIPT" collect "$id" >/dev/null 2>&1
-assert_eq "$(wc -l <"$log")" "1" "a second collect: nothing more logged"
+kill -TERM "$bgpid"
+finish
 
 # A collect racing the queuing command logs the decision once.
 rm -rf "$state/items"
@@ -222,12 +255,11 @@ collect_after_withdraw() {
   grep -q "$cid was withdrawn; nothing to collect" "$root/c.err" || { echo "FAIL: $label: message '$(cat "$root/c.err")'"; fail=1; }
 }
 
-# A collect on a deferred item ends when the item is withdrawn.
+# A collect on a waiting item ends when the item is withdrawn.
 rm -rf "$state/items"
 queue_design
-echo '{"at":"2026-01-01T00:00:00Z"}' >"$dir/deferred.json"
+collect_after_withdraw "collect on a withdrawn waiting item" "$id"
 finish
-collect_after_withdraw "collect on a withdrawn deferred item" "$id"
 
 # So does a collect on an undecided item whose recorded pid is dead.
 fake_item 20260101T000007-$dead "$dead" 1
@@ -243,7 +275,7 @@ finish
 [ -e "$dir/item.json" ] || { echo "FAIL: TERM after a decision: item.json was removed"; fail=1; }
 
 # pending lists a decided item whose waiter is dead and whose decision no log line holds, one tab-separated
-# line each, oldest id first. It skips a live waiter, a logged decision, a refusal, a triage item, a pidless
+# line each, oldest id first. It skips a live waiter, a logged decision, a triage item, a pidless
 # item, and an undecided item. After the collect, nothing is pending.
 rm -rf "$state/items"
 rm -f "$log"
@@ -261,8 +293,6 @@ decided_item 20260102T000001-$dead "$dead" 1
 decided_item 20260102T000003-$sleeper "$sleeper" "$(start_ticks "$sleeper")"
 decided_item 20260102T000004-$dead "$dead" 1
 jq -nc '{packet: "20260102T000004-'"$dead"'", verdict: "approve"}' >"$log"
-decided_item 20260102T000005-$dead "$dead" 1
-echo '{"at":"2026-01-02T00:00:00Z","reason":"x"}' >"$state/items/20260102T000005-$dead/refused.json"
 decided_item 20260102T000006-$dead "$dead" 1
 jq '.kind = "triage"' "$state/items/20260102T000006-$dead/item.json" >"$root/t.json"
 mv "$root/t.json" "$state/items/20260102T000006-$dead/item.json"

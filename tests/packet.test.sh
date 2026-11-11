@@ -277,18 +277,14 @@ reject_shape "unanswered ask" "$(jq -c 'del(.asks[1])' <<<"$GOOD")"
 reject_shape "verdict against the chosen tag" "$(jq -c '.asks[0].choice = "Hold"' <<<"$GOOD")"
 reject_shape "reject without a note" '{"decision":"reject"}'
 
-# The pr and design kinds log one line per decision with lane single.
+# The design kind logs one line per decision with lane single.
 before=$(log_lines)
-queue pr glw907/sample "A title" 42 && decide '{"decision":"approve"}'
-assert_eq "$(jq -c . "$root/out")" '{"decision":"approve","head":"bbb222"}' "pr kind: stdout"
-assert_queued_link "pr kind"
-assert_eq "$(tail -n 1 "$log" | jq -c '[.ref,.kind,.lane,.verdict,.head]')" '["glw907/sample#42","pr","single","approve","bbb222"]' "pr kind: log line"
 cp "$BRIEF" "$root/single-design.md"
 queue design glw907/sample "A title" "$root/single-design.md" && decide '{"decision":"hold"}'
 assert_queued_link "design kind"
 assert_eq "$(tail -n 1 "$log" | jq -c '[.ref,.kind,.lane,.verdict,.sha256]')" \
   "[\"glw907/sample:single-design.md\",\"design\",\"single\",\"hold\",\"$(sha256sum "$root/single-design.md" | cut -d' ' -f1)\"]" "design kind: log line"
-assert_eq "$(($(log_lines) - before))" "2" "single kinds: log line count"
+assert_eq "$(($(log_lines) - before))" "1" "design kind: log line count"
 
 # item.json names the packet kind, the initiative and its title, the lead repo, and every ref.
 queue packet sample "$PACKET"
@@ -400,22 +396,11 @@ firstpid=$bgpid
 timeout 20 bash "$SCRIPT" packet sample "$PACKET" >"$root/out2" 2>"$root/err2"
 assert_eq "$?" "2" "waiting item (packet): exit code"
 grep -q "glw907/sample#41.*$first" "$root/err2" || { echo "FAIL: waiting item (packet): message lacks the item: $(cat "$root/err2")"; fail=1; }
-timeout 20 bash "$SCRIPT" pr glw907/sample "A title" 42 >"$root/out2" 2>"$root/err2"
-assert_eq "$?" "2" "waiting item (pr kind): exit code"
-grep -q "glw907/sample#42.*$first" "$root/err2" || { echo "FAIL: waiting item (pr kind): message lacks the item: $(cat "$root/err2")"; fail=1; }
 assert_eq "$(ls "$state/items" | wc -l)" "1" "waiting item: no second item directory"
 decide "$GOOD"
 # Once decided, the PRs are free again.
 queue packet sample "$PACKET"
 decide "$GOOD"
-
-# A pr-kind item in the queue blocks a packet naming its PR.
-queue pr glw907/sample "A title" 42
-refuse_dir=$dir
-timeout 20 bash "$SCRIPT" packet sample "$PACKET" >"$root/out2" 2>"$root/err2"
-assert_eq "$?" "2" "waiting pr item: exit code"
-grep -q "glw907/sample#42.*$(basename "$refuse_dir")" "$root/err2" || { echo "FAIL: waiting pr item: message lacks the item: $(cat "$root/err2")"; fail=1; }
-decide '{"decision":"approve"}'
 
 # --check runs the checks and queues nothing: no item, no tab, no app start.
 rm -rf "$state/items" "$state/tab.seen" "$state/start.lock" "$root/open.record" "$root/curl.record"
