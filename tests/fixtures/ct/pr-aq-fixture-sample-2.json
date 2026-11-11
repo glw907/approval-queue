@@ -1,1 +1,16 @@
-{"number":2,"state":"OPEN","title":"Title of sample","body":"","url":"https://github.com/aq-fixture/sample/pull/2","headRefOid":"h2","statusCheckRollup":[]}
+{
+  "number": 2,
+  "state": "OPEN",
+  "title": "Title of sample",
+  "body": "",
+  "url": "https://github.com/aq-fixture/sample/pull/2",
+  "headRefOid": "h2",
+  "statusCheckRollup": [],
+  "files": [
+    {
+      "path": "docs/queue.md",
+      "additions": 1,
+      "deletions": 0
+    }
+  ]
+}

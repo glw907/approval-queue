@@ -1,1 +1,21 @@
-{"number":214,"state":"OPEN","title":"Title of cairn-cms","body":"","url":"https://github.com/glw907/cairn-cms/pull/214","headRefOid":"h1","statusCheckRollup":[]}
+{
+  "number": 214,
+  "state": "OPEN",
+  "title": "Title of cairn-cms",
+  "body": "",
+  "url": "https://github.com/glw907/cairn-cms/pull/214",
+  "headRefOid": "h1",
+  "statusCheckRollup": [],
+  "files": [
+    {
+      "path": ".github/workflows/publish.yml",
+      "additions": 15,
+      "deletions": 2
+    },
+    {
+      "path": ".github/workflows/tool.yml",
+      "additions": 4,
+      "deletions": 0
+    }
+  ]
+}
