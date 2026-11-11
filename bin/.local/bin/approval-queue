@@ -86,7 +86,7 @@ unanswered() {
   local replies='[]'
   [ ! -e "$2" ] || replies=$(cat "$2")
   jq -r --argjson r "$replies" '(if type == "array" then . else .notes // [] end) as $n
-    | [$n[] | .id | tostring] - [$r[] | .note | tostring] | length' "$1"
+    | [$n[] | select(((.text // "x") | gsub("[[:space:]]"; "")) != "") | .id | tostring] - [$r[] | .note | tostring] | length' "$1"
 }
 
 # pending: prints one line per decided item no command is left to log: `<id>\t<kind>\t<decision>\t<title>`,
@@ -159,7 +159,7 @@ has_before_merge() { grep -qiE '^##[[:space:]]+Before merge[[:space:]]*$' <<<"$1
 # rollup_failing <view json> and rollup_pending <view json>: succeed when a check in the view's statusCheckRollup
 # has failed, or is not finished. `land` and `packet` share them, and the figures below.
 rollup_failing() {
-  jq -e 'any(.statusCheckRollup[]?; ((.conclusion // "") | IN("FAILURE", "CANCELLED", "TIMED_OUT", "ACTION_REQUIRED")) or ((.state // "") | IN("FAILURE", "ERROR")))' <<<"$1" >/dev/null
+  jq -e 'any(.statusCheckRollup[]?; ((.conclusion // "") | . != "" and (IN("SUCCESS", "NEUTRAL", "SKIPPED") | not)) or ((.state // "") | IN("FAILURE", "ERROR")))' <<<"$1" >/dev/null
 }
 rollup_pending() {
   jq -e 'any(.statusCheckRollup[]?; (.status != null and .status != "COMPLETED") or .state == "PENDING")' <<<"$1" >/dev/null

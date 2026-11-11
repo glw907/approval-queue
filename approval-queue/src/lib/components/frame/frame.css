@@ -1110,12 +1110,12 @@ a {
 @media (max-width: 639.98px) {
 	.bar {
 		display: grid;
-		/* Send back keeps its one line; Defer takes what is left. */
+		/* Send back keeps its one line. */
 		grid-template-columns: max-content minmax(0, 1fr);
 		align-items: stretch;
 		padding: 12px 16px;
 	}
-	/* Approve takes a row of its own under the status; Send back and Defer share the row below. */
+	/* Approve takes a row of its own under the status; Send back takes the row below. */
 	.bar .btn-primary,
 	.bar > .btn:first-child:has(+ .state) {
 		grid-column: 1 / -1;

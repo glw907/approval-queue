@@ -60,6 +60,18 @@ describe('/digest note action', () => {
 		]);
 	});
 
+	it('never reuses the id of a note that has a reply, even after that note is cleared', async () => {
+		await post({ line: '1', text: 'First.' });
+		await post({ line: '3', text: 'Second.' });
+		await writeFile(join(state.root, 'digest-replies.json'), JSON.stringify([{ note: 'D2', outcome: 'answered', text: 'Done.' }]));
+		await post({ line: '3', text: '' });
+		await post({ line: '2', text: 'Third.' });
+		expect(await notesFile()).toEqual([
+			{ id: 'D1', line: 1, text: 'First.' },
+			{ id: 'D3', line: 2, text: 'Third.' }
+		]);
+	});
+
 	it('rewrites the note a line already has, keeping its id', async () => {
 		await post({ line: '1', text: 'First.' });
 		await post({ line: '1', text: 'Second.' });

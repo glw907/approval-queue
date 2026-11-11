@@ -47,6 +47,7 @@ async function readList<T>(path: string): Promise<T[]> {
 }
 
 export const readDigestNotes = (root: string) => readList<DigestNote>(join(root, 'digest-notes.json'));
+export const readDigestReplies = (root: string) => readList<Reply>(join(root, 'digest-replies.json'));
 
 /**
  * Reads `digest.jsonl` grouped by repo, repos in name order and each repo's lines newest first, each

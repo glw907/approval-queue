@@ -1,6 +1,6 @@
 import { APPROVAL_QUEUE_STATE } from '$app/env/private';
 import { fail } from '@sveltejs/kit';
-import { readDigest, readDigestNotes, writeDigestNotes, type DigestNote } from '#lib/server/digest.ts';
+import { readDigest, readDigestNotes, readDigestReplies, writeDigestNotes, type DigestNote } from '#lib/server/digest.ts';
 import type { Actions, PageServerLoad } from './$types';
 
 /** Loads the digest's lines grouped by repo, each with its notes and the session's replies. */
@@ -23,7 +23,10 @@ export const actions: Actions = {
 		let next: DigestNote[];
 		if (!text) next = others;
 		else {
-			const id = mine?.id ?? `D${Math.max(0, ...notes.map((n) => Number(n.id.slice(1)) || 0)) + 1}`;
+			// A cleared note's id may still head a reply, so the next id counts the replies' ids too.
+			const replies = await readDigestReplies(APPROVAL_QUEUE_STATE);
+			const used = [...notes.map((n) => n.id), ...replies.map((r) => r.note)].map((id) => Number(id.slice(1)) || 0);
+			const id = mine?.id ?? `D${Math.max(0, ...used) + 1}`;
 			next = [...others, { id, line, text }].sort((a, b) => a.line - b.line);
 		}
 		await writeDigestNotes(APPROVAL_QUEUE_STATE, next);

@@ -163,6 +163,10 @@ reset; pr 1 OPEN $HA "ok" '[{"status":"COMPLETED","conclusion":"FAILURE"}]'
 run land $A c; assert_eq "$rc" 2 "land failing check exit"
 reset; pr 1 OPEN $HA "ok" '[{"state":"ERROR"}]'
 run land $A c; assert_eq "$rc" 2 "land errored status exit"
+reset; pr 1 OPEN $HA "ok" '[{"status":"COMPLETED","conclusion":"STARTUP_FAILURE"}]'
+run land $A c; assert_eq "$rc" 2 "land startup failure exit"
+reset; pr 1 OPEN $HA "ok" '[{"status":"COMPLETED","conclusion":"STALE"}]'
+run land $A c; assert_eq "$rc" 2 "land stale check exit"
 assert_eq "$(merges)" 0 "land refusals make no call"
 [ ! -e "$state/digest.jsonl" ] || { echo "FAIL: a refusal logged a digest line"; fail=1; }
 

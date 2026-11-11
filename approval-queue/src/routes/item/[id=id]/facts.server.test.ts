@@ -192,6 +192,14 @@ describe('a new-shape packet', () => {
 		await missing('decision.json');
 	});
 
+	it('drops a blank note from the decision and from notes.json', async () => {
+		heads();
+		const blank = { ...NOTE, id: 'blank', text: '   ' };
+		await call('approve', post([NOTE, blank]));
+		expect(await read('notes.json')).toEqual([NOTE]);
+		expect((await read('decision.json')).notes).toEqual([NOTE]);
+	});
+
 	it('a second approve answers 409 and keeps the first decision and its notes', async () => {
 		heads();
 		await call('approve', post([NOTE]));

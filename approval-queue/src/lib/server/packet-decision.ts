@@ -60,5 +60,6 @@ export function buildPacketDecision(decision: 'approve' | 'reject', facts: Facts
 	const decidedForYou = parsePicks(form.get('decidedForYou') ?? '[]', facts.decidedForYou, exact);
 	if (!decidedForYou) return refusePacket('The decided-for-you entries do not match the packet; reload the page');
 	if (decision === 'reject' && !notes.some((n) => n.text.trim() !== '')) return refusePacket('Add a note before you send it back');
-	return { ok: true, decision: { decision, calls, decidedForYou, notes } };
+	// A "Say why" note nobody typed into is not a note: it would count as unanswered until a reply names it.
+	return { ok: true, decision: { decision, calls, decidedForYou, notes: notes.filter((n) => n.text.trim() !== '') } };
 }
