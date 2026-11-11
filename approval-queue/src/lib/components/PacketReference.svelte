@@ -86,7 +86,7 @@ last); a file's diff loads when its row is opened. The steps are a numbered list
 		{#snippet title()}If you approve{/snippet}
 		{#snippet sub()}{plural(facts.steps.length, 'step')}. {yours ? `The session runs ${facts.steps.length - yours} of them and you run ${yours}.` : 'The session runs all of them.'}{/snippet}
 		{#snippet children()}
-			<ol class="steps">
+			<ol class="step-list">
 				{#each facts.steps as step, i (i)}
 					<li><Prose text={step.text} />{#if step.who === 'you'} <b>You run this step.</b>{/if}</li>
 				{/each}

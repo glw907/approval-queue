@@ -202,10 +202,12 @@ The margin is T8's: this page owns its element, the notes store, and the notes a
 <div class="packet">
 	<main id="main" tabindex="-1" class="packet-main">
 		<div class="packet-body">
-			<p class="kicker"><b>{status.lead}</b> {status.rest}</p>
-			{#if facts.kind === 'stop' && facts.reason}
-				<p class="reason"><Prose text={facts.reason.text} /> <span class="src muted"><code>{facts.reason.source}</code></span></p>
-			{/if}
+			<p class="kicker">
+				<b>{status.lead}</b> {status.rest}
+				{#if facts.kind === 'stop' && facts.reason}
+					<span class="reason muted"><Prose text={facts.reason.text} /> <code>{facts.reason.source}</code></span>
+				{/if}
+			</p>
 			{#if stale && !decided}
 				<div role="note" class="alert alert-warning" id="stale">
 					<p>
