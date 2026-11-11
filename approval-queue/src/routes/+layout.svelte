@@ -193,6 +193,7 @@ pointer moves over it or while focus is on it. A held or posting item leaves the
 </script>
 
 <svelte:document onkeydown={onKeydown} />
+<svelte:window onpagehide={() => held.leave()} />
 
 <div class="shell">
 	<nav id="rail" class="rail" aria-label="Queue">

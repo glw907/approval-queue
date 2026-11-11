@@ -29,7 +29,8 @@ function setup(answer: ActionResult | (() => Promise<ActionResult>) = SUCCESS) {
 	const post = vi.fn(typeof answer === 'function' ? answer : async () => answer);
 	const refresh = vi.fn(async () => {});
 	const open = vi.fn(async () => {});
-	return { store: new Held({ post, refresh, open }), post, refresh, open };
+	const beacon = vi.fn(async (_href: string, _body: FormData) => {});
+	return { store: new Held({ post, refresh, open, beacon }), post, refresh, open, beacon };
 }
 
 describe('Held', () => {
@@ -299,5 +300,60 @@ describe('desk.flash', () => {
 		desk.releaseFlash();
 		vi.advanceTimersByTime(FLASH_UNDO_MS);
 		expect(desk.toast).toBeNull();
+	});
+
+	describe('leaving the page', () => {
+		it('sends the held decision once on pagehide, and the timer and a second pagehide send nothing more', async () => {
+			const { store, post, beacon } = setup();
+			const d = decision('a');
+			store.hold(d);
+			await vi.advanceTimersByTimeAsync(1000);
+			store.leave();
+			expect(beacon).toHaveBeenCalledTimes(1);
+			expect(beacon).toHaveBeenCalledWith(d.href, d.form);
+			expect(store.current).toBeNull();
+			await vi.advanceTimersByTimeAsync(HOLD_MS * 2);
+			store.leave();
+			expect(beacon).toHaveBeenCalledTimes(1);
+			expect(post).not.toHaveBeenCalled();
+		});
+
+		it('sends nothing when no decision is held, or after Undo', async () => {
+			const { store, beacon } = setup();
+			store.leave();
+			store.hold(decision('a'));
+			await store.undo();
+			store.leave();
+			expect(beacon).not.toHaveBeenCalled();
+		});
+
+		it('sends nothing for a decision whose timer already posted it', async () => {
+			const { store, beacon } = setup();
+			store.hold(decision('a'));
+			await vi.advanceTimersByTimeAsync(HOLD_MS);
+			store.leave();
+			expect(beacon).not.toHaveBeenCalled();
+		});
+
+		it('keeps the item out of the waiting list while the keepalive send is in flight, then frees it', async () => {
+			let done!: () => void;
+			const { store, beacon } = setup();
+			beacon.mockImplementationOnce(() => new Promise<void>((r) => (done = r)));
+			store.hold(decision('a'));
+			store.leave();
+			expect(store.ids).toEqual(new Set(['a']));
+			done();
+			await vi.advanceTimersByTimeAsync(0);
+			expect(store.ids.size).toBe(0);
+		});
+
+		it('says the tab may not close while a decision is held or posting', async () => {
+			const { store } = setup();
+			expect(store.canClose()).toBe(true);
+			store.hold(decision('a'));
+			expect(store.canClose()).toBe(false);
+			await vi.advanceTimersByTimeAsync(HOLD_MS);
+			expect(store.canClose()).toBe(true);
+		});
 	});
 });

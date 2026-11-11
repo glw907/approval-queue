@@ -36,6 +36,8 @@ export interface HeldDeps {
 	post: (href: string, body: FormData) => Promise<ActionResult>;
 	refresh: () => Promise<void>;
 	open: (url: string) => Promise<void>;
+	/** Sends the form as a page-exit request that outlives the tab (`fetch` with `keepalive`); it may reject. */
+	beacon: (href: string, body: FormData) => Promise<void>;
 }
 
 /** The panel state a held decision's form data carries, for the item Undo opens again. */
@@ -70,8 +72,9 @@ export function seedFrom(form: FormData, kind: HeldDecision['kind']): Seed {
 /**
  * The decision held for Undo, at the layout so it outlives the item panel that took it: the panel
  * hands the decision over and opens the next item at once, and the post goes after `HOLD_MS`.
- * Only one decision counts down at a time, so a second one posts the first at once. Closing or
- * reloading the tab sends nothing, because the timer dies with the page. A post that succeeds does
+ * Only one decision counts down at a time, so a second one posts the first at once. When the page
+ * goes away (`pagehide`), `leave` sends the held decision with a keepalive request, once, since the
+ * timer dies with the page. A post that succeeds does
  * what the panel's own success did; one that fails leaves the item waiting and shows `failure`.
  */
 export class Held {
@@ -110,6 +113,32 @@ export class Held {
 		this.#timer = startHold(HOLD_MS, { tick: () => {}, fire: () => void this.#send().catch(() => {}) });
 		if (this.#pausers.size) this.#timer.pause();
 		return true;
+	}
+
+	/** Whether the tab may close itself: false while any decision is held or posting, since a close would lose it. */
+	canClose(): boolean {
+		return this.ids.size === 0;
+	}
+
+	/**
+	 * Sends the decision counting down, at once, with a request that survives the page. The timer is
+	 * cancelled and the decision leaves `current`, so a later timer fire or a second `pagehide` posts
+	 * nothing more. A failed send is lost, as the page is already going; the item stays out of the
+	 * waiting list until the request settles, which matters only if the page returns from the
+	 * back/forward cache.
+	 */
+	leave() {
+		const decision = this.current;
+		if (!decision) return;
+		this.#timer?.cancel();
+		this.#timer = null;
+		this.ended = 'sent';
+		this.current = null;
+		this.sending = [...this.sending, decision];
+		const settle = () => {
+			this.sending = this.sending.filter((d) => d !== decision);
+		};
+		this.#deps.beacon(decision.href, decision.form).then(settle, settle);
 	}
 
 	/** Stops the clock while the pointer or focus is on the toast; `by` names which, so each resumes only its own. */
@@ -193,6 +222,9 @@ export const held = new Held({
 	post: async (href, body) => {
 		const res = await fetch(href, { method: 'POST', body, headers: { accept: 'application/json', 'x-sveltekit-action': 'true' } });
 		return deserialize(await res.text());
+	},
+	beacon: async (href, body) => {
+		await fetch(href, { method: 'POST', body, keepalive: true, headers: { accept: 'application/json', 'x-sveltekit-action': 'true' } });
 	},
 	refresh: () => invalidate('desk:queue'),
 	open: (url) => goto(url, { replace: true })
