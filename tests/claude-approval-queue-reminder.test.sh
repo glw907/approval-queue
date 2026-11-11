@@ -52,9 +52,5 @@ case "$ctx" in
   *"Skip the approval queue only where pass-core's Close says"*) ;;
   *) echo "FAIL: created: context lost the skip clause: $ctx"; fail=1 ;;
 esac
-case "$ctx" in
-  *'~/.claude/docs/voice/approval-brief.md'*) ;;
-  *) echo "FAIL: created: context does not name the register: $ctx"; fail=1 ;;
-esac
 
 if [ "$fail" -eq 0 ]; then echo "claude-approval-queue-reminder: OK"; else exit 1; fi

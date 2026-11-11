@@ -1,13 +1,12 @@
 #!/usr/bin/env bash
-# packet.test.sh: prove the packet half of the approval-queue command against this worktree's own
-# copy, with curl, xdg-open, setsid, and gh stubbed on PATH. The decision handling is the merge
-# authorization path, so most of this file pins what the command prints and logs for a decision.
-# Never starts the app, opens a browser, or touches the live queue state.
+# packet.test.sh: prove the snapshot, packet, reply, and pending forms of the approval-queue command against this
+# worktree's own copy, with curl, xdg-open, setsid, and gh stubbed on PATH. The fixtures are the repo's own
+# fact files, texts, and patches (they name the nonexistent owner aq-fixture). The poll figures run at one second.
+# Never starts the app, opens a browser, calls the real gh, or touches the live queue state.
 set -uo pipefail
 cd "$(dirname "$0")/.."
 SCRIPT="$(pwd)/bin/.local/bin/approval-queue"
-PACKET="$(pwd)/tests/fixtures/e2e-packet.md"
-BRIEF="$(pwd)/tests/fixtures/e2e-brief.md"
+FIX="$(pwd)/approval-queue/src/lib/fixtures"
 fail=0
 root="$(mktemp -d)"
 bgpid=""
@@ -18,8 +17,7 @@ assert_eq() {
 }
 
 # No item id this test queued or logged may appear in the live log: queue() records each id in $root/ids,
-# so a write to the live log alone, with nothing in the temp log, still fails by name. Other sessions' lines
-# in the live log do not matter.
+# so a write to the live log alone, with nothing in the temp log, still fails by name.
 live_log="$HOME/.local/state/approval-queue/decisions.jsonl"
 live_leak() {
   local pid
@@ -46,64 +44,75 @@ cat >"$stubs/setsid" <<'STUB'
 [ "$1" = "-f" ] && shift
 exec "$@"
 STUB
-# gh answers by PR number from $STUB_DIR/pr-<n>.json. A pr-<n>.moving file makes every view report
-# a head that differs from the last, so the command sees the head move on each fetch.
-# A pr-<n>.toolarge file makes `gh pr diff` refuse as GitHub does past 300 files, and `gh api` then
-# answers from pr-<n>.files.json.
-# A compare call answers from compare-<old>.json (the status; no file answers HTTP 404, as GitHub does for
-# an unknown commit) and, for the diff media type, compare-<old>.diff, or HTTP 406 when compare-<old>.toolarge
-# exists.
+# gh serves PR <n> of <owner>/<repo> from $STUB_DIR/pr-<owner>-<repo>-<n>.json (the `pr view` object) and .patch
+# (the diff), and logs every call to gh.log. Flags, as files beside the PR: .escape (the diff is refused until
+# --allow-escape-sequences), .toolarge (the diff is refused as past 300 files, and `gh api` answers from
+# .apifiles), .moving (every view reports another head), .pend <count> (the next <count> views that ask for
+# statusCheckRollup see a check in progress).
 cat >"$stubs/gh" <<'STUB'
 #!/usr/bin/env bash
-if [ "$1" = api ]; then
-  echo "gh $*" >>"$STUB_DIR/gh.record"
+printf '%s\n' "gh $*" >>"$STUB_DIR/gh.log"
+sub=$1 verb=${2:-}
+repo="" fields="" escape=0 n=""
+args=("$@")
+for ((i = 2; i < ${#args[@]}; i++)); do
+  a=${args[i]}
+  case $a in
+    -R | --repo) repo=${args[i + 1]}; i=$((i + 1)) ;;
+    --json) fields=${args[i + 1]}; i=$((i + 1)) ;;
+    --allow-escape-sequences) escape=1 ;;
+    -*) ;;
+    *) [ -z "$n" ] && n=$a ;;
+  esac
+done
+if [ "$sub" = api ]; then
   for a in "$@"; do
-    case $a in repos/*/compare/*) old=${a#*/compare/}; old=${old%%...*} ;; esac
+    case $a in repos/*/pulls/*/files*) p=${a#repos/}; r=${p%%/pulls/*}; p=${p#*/pulls/}; cat "$STUB_DIR/pr-${r//\//-}-${p%%/*}.apifiles"; exit 0 ;; esac
   done
-  if [ -n "${old:-}" ]; then
-    case "$*" in
-      *vnd.github.diff*)
-        if [ -e "$STUB_DIR/compare-$old.toolarge" ]; then echo "gh: Sorry, the diff exceeded the maximum number of files (HTTP 406)" >&2; exit 1; fi
-        cat "$STUB_DIR/compare-$old.diff"; exit 0 ;;
-    esac
-    if [ ! -e "$STUB_DIR/compare-$old.json" ]; then
-      echo '{"message":"Not Found","status":"404"}'; echo "gh: Not Found (HTTP 404)" >&2; exit 1
-    fi
-    jq -r .status "$STUB_DIR/compare-$old.json"; exit 0
-  fi
-  n=${3#*/pulls/}; n=${n%%/*}
-  cat "$STUB_DIR/pr-$n.files.json"; exit 0
+  echo "stub: unsupported gh api call" >&2; exit 1
 fi
-n=$3
-f="$STUB_DIR/pr-$n.json"
-[ -e "$f" ] || { echo "no pull request $n" >&2; exit 1; }
-echo "gh $*" >>"$STUB_DIR/gh.record"
-case "$2" in
+base="$STUB_DIR/pr-${repo//\//-}-$n"
+[ -e "$base.json" ] || { echo "no pull requests found for $repo#$n" >&2; exit 1; }
+case $verb in
   view)
-    if [ -e "$STUB_DIR/pr-$n.moving" ]; then
-      c=$(($(cat "$STUB_DIR/pr-$n.calls" 2>/dev/null || echo 0) + 1)); echo "$c" >"$STUB_DIR/pr-$n.calls"
-      jq -c --arg h "moved$c" '.headRefOid = $h' "$f"
-    else jq -c . "$f"; fi ;;
+    json=$(jq -c . "$base.json")
+    if [ -e "$base.moving" ]; then
+      c=$(($(cat "$base.calls" 2>/dev/null || echo 0) + 1)); echo "$c" >"$base.calls"
+      json=$(jq -c --arg h "moved$c" '.headRefOid = $h' <<<"$json")
+    fi
+    if [ -e "$base.pend" ] && [[ $fields == *statusCheckRollup* ]] && [ "$(cat "$base.pend")" -gt 0 ]; then
+      echo $(($(cat "$base.pend") - 1)) >"$base.pend"
+      json=$(jq -c '.statusCheckRollup = [{"name":"gate","workflowName":"ci","status":"IN_PROGRESS","conclusion":""}]' <<<"$json")
+    fi
+    jq -c --arg f "$fields" '. as $o | ($f | split(",")) | map({key: ., value: $o[.]}) | from_entries' <<<"$json" ;;
   diff)
-    if [ -e "$STUB_DIR/pr-$n.toolarge" ]; then
+    if [ -e "$base.escape" ] && [ "$escape" = 0 ]; then
+      echo "the diff contains terminal escape sequences; pass --allow-escape-sequences to output it anyway" >&2; exit 1
+    fi
+    if [ -e "$base.toolarge" ]; then
       echo "could not find pull request diff: HTTP 406: Sorry, the diff exceeded the maximum number of files (300)." >&2
       echo "PullRequest.diff too_large" >&2; exit 1
     fi
-    echo "diff --git a/pr$n b/pr$n" ;;
+    cat "$base.patch" ;;
+  *) echo "stub: unsupported gh pr verb: $verb" >&2; exit 1 ;;
 esac
 STUB
 chmod +x "$stubs"/*
 
 export STUB_DIR="$root" XDG_STATE_HOME="$root/state" APPROVAL_QUEUE_PROJECTS="$root/projects" PATH="$stubs:$PATH"
+export APPROVAL_QUEUE_POLL_S=1 APPROVAL_QUEUE_POLL_MAX_S=3
 state="$XDG_STATE_HOME/approval-queue"
 log="$state/decisions.jsonl"
 source tests/collect-check.sh
 mkdir -p "$APPROVAL_QUEUE_PROJECTS/initiatives/sample" "$APPROVAL_QUEUE_PROJECTS/sample/docs/specs"
 printf 'title: Sample release notes\nstatus: active\n' >"$APPROVAL_QUEUE_PROJECTS/initiatives/sample/initiative.yaml"
-design="$APPROVAL_QUEUE_PROJECTS/sample/docs/specs/x-design.md"
-printf '# A design\n\nOriginal text.\n' >"$design"
+designfile="$APPROVAL_QUEUE_PROJECTS/sample/docs/specs/2026-11-10-sample-design.md"
+printf '# A design\n\nOriginal text.\n' >"$designfile"
 
-# mkpr <n> <head> <state> <checks>: writes the gh stub's answer for PR n.
+A=aq-fixture/sample#1 B=aq-fixture/sample#2
+HA=aaaa111 HB=bbbb222
+
+# mkpr <n> <head> <state> <checks: pass|fail|pending|none>: writes the gh stub's answer for fixture PR n.
 mkpr() {
   local checks='[]'
   case "$4" in
@@ -111,33 +120,52 @@ mkpr() {
     fail) checks='[{"name":"lint","workflowName":"ci","status":"COMPLETED","conclusion":"FAILURE"}]' ;;
     pending) checks='[{"name":"gate","workflowName":"ci","status":"IN_PROGRESS","conclusion":""}]' ;;
   esac
-  jq -n --rawfile body "$BRIEF" --arg h "$2" --arg s "$3" --argjson n "$1" --argjson c "$checks" \
-    '{body: $body, headRefOid: $h, number: $n, url: "https://github.com/glw907/sample/pull/\($n)",
-      headRefName: "feat-\($n)", baseRefName: "main", state: $s, statusCheckRollup: $c}' >"$root/pr-$1.json"
+  local files='[{"path":"lib/queue.test.ts","additions":3,"deletions":0},{"path":"lib/queue.ts","additions":2,"deletions":1}]'
+  [ "$1" != 2 ] || files='[{"path":"docs/queue.md","additions":1,"deletions":0}]'
+  jq -n --arg h "$2" --arg s "$3" --argjson n "$1" --argjson c "$checks" --argjson f "$files" \
+    '{state: $s, headRefOid: $h, title: "PR \($n)", body: "Body of \($n).", statusCheckRollup: $c, files: $f}' >"$root/pr-aq-fixture-sample-$1.json"
+  cp "$FIX/snapshot/aq-fixture-sample-$1.patch" "$root/pr-aq-fixture-sample-$1.patch"
 }
-mkpr 41 aaa111 OPEN fail
-mkpr 42 bbb222 OPEN pass
-mkpr 43 ccc333 OPEN pass
+mkpr 1 $HA OPEN pass
+mkpr 2 $HB OPEN pass
 
-# wait_for <glob>: up to 5 seconds; on a timeout, fails the test and kills the background job.
+# The working directory holds the close packet's fact file and text; w2 holds the design packet's.
+work="$root/work" w2="$root/w2"
+mkdir -p "$work" "$w2"
+cp "$FIX/close-facts.json" "$work/facts.json"
+cp "$FIX/close-text.md" "$work/text.md"
+cp "$FIX/design-facts.json" "$w2/facts.json"
+cp "$FIX/design-text.md" "$w2/text.md"
+
+# wait_for <glob>: up to 10 seconds; on a timeout, fails the test and kills the background job.
 wait_for() {
   local i
-  for i in $(seq 50); do compgen -G "$1" >/dev/null && return 0; sleep 0.1; done
+  for i in $(seq 100); do compgen -G "$1" >/dev/null && return 0; sleep 0.1; done
   echo "FAIL: timed out waiting for $1"; fail=1
   kill "$bgpid" 2>/dev/null; wait "$bgpid" 2>/dev/null; bgpid=""
   return 1
 }
 
-# queue <command args>: starts the command in the background and sets dir to its item directory.
+# queue <command args>: starts the command in the background, keeps the items already on disk, and sets dir to the
+# waiting item's directory.
 dir=""
 queue() {
-  rm -rf "$state/items" "$root/open.record"
+  local i f
+  rm -f "$root/open.record"
   bash "$SCRIPT" "$@" >"$root/out" 2>"$root/err" &
   bgpid=$!
   dir=""
-  wait_for "$state/items/*/item.json" || return 1
-  dir=$(dirname "$(ls "$state"/items/*/item.json | head -1)")
-  basename "$dir" >>"$root/ids"
+  for i in $(seq 100); do
+    for f in "$state"/items/*/item.json; do
+      [ -e "$f" ] && [ ! -e "$(dirname "$f")/decision.json" ] && dir=$(dirname "$f")
+    done
+    [ -n "$dir" ] && { basename "$dir" >>"$root/ids"; return 0; }
+    kill -0 "$bgpid" 2>/dev/null || break
+    sleep 0.1
+  done
+  echo "FAIL: timed out waiting for a queued item: $(cat "$root/err")"; fail=1
+  kill "$bgpid" 2>/dev/null; wait "$bgpid" 2>/dev/null; bgpid=""
+  return 1
 }
 
 # decide <json>: hands the decision to the queued command and sets rc to its exit code.
@@ -146,7 +174,7 @@ decide() {
   local i
   printf '%s\n' "$1" >"$dir/decision.json.tmp"
   mv "$dir/decision.json.tmp" "$dir/decision.json"
-  for i in $(seq 60); do kill -0 "$bgpid" 2>/dev/null || break; sleep 0.1; done
+  for i in $(seq 100); do kill -0 "$bgpid" 2>/dev/null || break; sleep 0.1; done
   if kill -0 "$bgpid" 2>/dev/null; then
     echo "FAIL: did not exit after the decision"; fail=1
     kill "$bgpid"; wait "$bgpid" 2>/dev/null; bgpid=""; rc=hung; return
@@ -154,426 +182,335 @@ decide() {
   wait "$bgpid"; rc=$?; bgpid=""
 }
 
-# assert_queued_link <label>: after a decision, stderr holds the queued link once and stdout only the decision JSON.
-assert_queued_link() {
-  local id
-  id=$(basename "$dir")
-  assert_eq "$(grep -c 'queued' "$root/err")" "1" "$1: one queued line on stderr"
-  grep -Fxq "approval-queue: queued $id at http://127.0.0.1:7907/item/$id" "$root/err" \
-    || { echo "FAIL: $1: the queued link is not on stderr: $(cat "$root/err")"; fail=1; }
-  assert_eq "$(jq -e . "$root/out" >/dev/null; echo $?)" "0" "$1: stdout is JSON"
-  assert_eq "$(wc -l <"$root/out")" "1" "$1: stdout is one line"
-}
-
 log_lines() { if [ -e "$log" ]; then wc -l <"$log"; else echo 0; fi; }
+item_count() { ls "$state/items" 2>/dev/null | wc -l; }
 
-# The decision the page would post for the end-to-end packet: #42 held, everything else as tagged.
-GOOD='{"decision":"approve","parts":[{"ref":"glw907/sample#41","verdict":"approve"},{"ref":"glw907/sample#42","verdict":"hold"},{"ref":"glw907/sample#43","verdict":"approve"},{"ref":"step:1","verdict":"session"}],"asks":[{"index":1,"choice":"Merge anyway"},{"index":2,"choice":"Beta"}]}'
-
-# End-to-end check 3, command half: each part comes back with its own head.
-queue packet sample "$PACKET" && decide "$GOOD"
-assert_eq "$rc" "0" "approve: exit code"
-want='{"decision":"approve","parts":[
- {"ref":"glw907/sample#41","kind":"pr","lane":"ask","verdict":"approve","head":"aaa111"},
- {"ref":"glw907/sample#42","kind":"pr","lane":"routine","verdict":"hold","head":"bbb222"},
- {"ref":"glw907/sample#43","kind":"pr","lane":"routine","verdict":"approve","head":"ccc333"},
- {"ref":"step:1","kind":"step","lane":"routine","verdict":"session"}],
- "asks":[
- {"index":1,"part":"glw907/sample#41","rule":"gate-failed","choice":"Merge anyway","followed":false},
- {"index":2,"part":null,"rule":"owner-call","choice":"Beta","followed":true}]}'
-assert_eq "$(jq -cS . "$root/out")" "$(jq -cS . <<<"$want")" "approve: stdout"
-assert_eq "$(wc -l <"$root/out")" "1" "approve: stdout is one line"
-
-# End-to-end check 4: one log line per part, plus one for the part-less ask.
-assert_eq "$(log_lines)" "5" "approve: log line count"
-assert_eq "$(jq -c '[.ref,.lane,.rule,.verdict]' "$log" | paste -sd' ')" \
-  '["glw907/sample#41","ask","gate-failed","approve"] ["glw907/sample#42","routine",null,"hold"] ["glw907/sample#43","routine",null,"approve"] ["step:1","routine",null,"session"] ["ask:2","ask","owner-call",null]' \
-  "approve: log refs, lanes, rules, verdicts"
-assert_eq "$(sed -n 1p "$log" | jq -c '[.head,.recommended,.chosen,.overridden]')" '["aaa111","Hold","Merge anyway",true]' "approve: ask-bound line"
-assert_eq "$(sed -n 2p "$log" | jq -c '[.head,.recommended,.chosen,.overridden]')" '["bbb222","approve","hold",true]' "approve: overridden routine line"
-assert_eq "$(sed -n 3p "$log" | jq -c '[.head,.recommended,.chosen,.overridden]')" '["ccc333","approve","approve",false]' "approve: followed routine line"
-assert_eq "$(sed -n 5p "$log" | jq -c '[.recommended,.chosen,.overridden]')" '["Beta","Beta",false]' "approve: part-less ask line"
-assert_eq "$(jq -r '.initiative' "$log" | sort -u)" "sample" "approve: log initiative"
-assert_eq "$(jq -r '.packet' "$log" | sort -u)" "$(basename "$dir")" "approve: log packet id"
-assert_eq "$(jq -r '.time' "$log" | grep -Ec '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$')" "5" "approve: log times"
-assert_eq "$(jq -r '[(.pid | type), (.pidStart | type), (.pid as $p | .id | endswith("-\($p)"))] | join(" ")' "$dir/item.json")" "number number true" "queue: pid and pidStart"
-collect_check packet "$dir"
-
-# A reject prints the note, no parts, and logs each part as rejected.
-before=$(log_lines)
-queue packet sample "$PACKET" && decide '{"decision":"reject","note":"Split this packet."}'
-assert_eq "$rc" "0" "reject: exit code"
-assert_eq "$(jq -cS . "$root/out")" '{"calls":[],"decision":"reject","note":"Split this packet."}' "reject: stdout (a stored reject without calls prints none)"
-assert_eq "$(($(log_lines) - before))" "4" "reject: log line count"
-assert_eq "$(tail -n 4 "$log" | jq -r .verdict | sort -u)" "reject" "reject: every line rejected"
-
-# A reject that carries calls prints them beside the note; the log lines do not change. A rejected packet's
-# parts are sent back, so each case below starts from an empty log, or its resend would need a section.
-: >"$log"
-CALLS='[{"ref":"glw907/sample#41","verdict":"hold"},{"ref":"glw907/sample#42","verdict":"send-back"},{"ref":"glw907/sample#43","verdict":null},{"ref":"step:1","verdict":"session"},{"ask":1,"question":"Merge the sample PR whose lint check failed?","choice":"Hold"},{"ask":2,"question":"Which name?","choice":null}]'
-before=$(log_lines)
-queue packet sample "$PACKET" && decide "{\"decision\":\"reject\",\"note\":\"Split.\",\"calls\":$CALLS}"
-assert_eq "$rc" "0" "reject with calls: exit code"
-assert_eq "$(jq -cS . "$root/out")" "$(jq -cS --argjson c "$CALLS" -n '{decision: "reject", note: "Split.", calls: $c}')" "reject with calls: stdout"
-assert_eq "$(($(log_lines) - before))" "4" "reject with calls: log line count"
-assert_eq "$(tail -n 4 "$log" | jq -r '[.verdict, has("calls")] | @csv' | sort -u)" '"reject",false' "reject with calls: lines carry no calls"
-
-# A calls of the wrong shape is refused like any shape error: exit 1, nothing printed, nothing logged.
-reject_calls() {
-  local label=$1 calls=$2 before
-  : >"$log"
-  before=$(log_lines)
-  queue packet sample "$PACKET" && decide "{\"decision\":\"reject\",\"note\":\"n\",\"calls\":$calls}"
-  assert_eq "$rc" "1" "$label: exit code"
-  assert_eq "$(wc -c <"$root/out")" "0" "$label: stdout"
-  assert_eq "$(log_lines)" "$before" "$label: log lines"
+# run <command args>: runs the command to its end, with a 30 second guard, and sets rc; stdout is $root/out.
+run() {
+  timeout 30 bash "$SCRIPT" "$@" >"$root/out" 2>"$root/err"
+  rc=$?
 }
-reject_calls "calls not an array" '"hold"'
-reject_calls "calls entry not an object" '["hold"]'
-reject_calls "calls entry with a stray key" '[{"ref":"glw907/sample#41","verdict":"hold","extra":1}]'
-reject_calls "calls entry with a numeric verdict" '[{"ref":"glw907/sample#41","verdict":1}]'
-reject_calls "calls ask with no question" '[{"ask":1,"choice":"Hold"}]'
-reject_calls "calls a document-style entry" '[{"id":"Q1","choice":"Keep it"}]'
 
-# A rejected packet's parts are sent back, so a later packet naming them is a revision. Start the rest of the
-# file from a log with no sent-back parts.
-: >"$log"
-
-# A design part whose file changed since queueing comes back hold, changed, with the sha256 read.
-{ cat "$PACKET"; echo '| glw907/sample:docs/specs/x-design.md | approve | The design is unchanged. | Nothing in it needs a call. |'; } >"$root/with-design.md"
-GOOD_DESIGN=$(jq -c '.parts += [{"ref":"glw907/sample:docs/specs/x-design.md","verdict":"approve"}]' <<<"$GOOD")
-read_sha=$(sha256sum "$design" | cut -d' ' -f1)
-queue packet sample "$root/with-design.md" && decide "$GOOD_DESIGN"
-assert_eq "$rc" "0" "design unchanged: exit code"
-assert_eq "$(jq -c '.parts[4]' "$root/out")" \
-  "{\"ref\":\"glw907/sample:docs/specs/x-design.md\",\"kind\":\"design\",\"lane\":\"routine\",\"verdict\":\"approve\",\"sha256\":\"$read_sha\"}" "design unchanged: part"
-queue packet sample "$root/with-design.md"
-printf 'Edited after queueing.\n' >>"$design"
-decide "$GOOD_DESIGN"
-assert_eq "$rc" "0" "design changed: exit code"
-assert_eq "$(jq -c '.parts[4]' "$root/out")" \
-  "{\"ref\":\"glw907/sample:docs/specs/x-design.md\",\"kind\":\"design\",\"lane\":\"routine\",\"verdict\":\"hold\",\"sha256\":\"$read_sha\",\"changed\":true}" "design changed: part"
-assert_eq "$(grep -F 'x-design.md' "$log" | tail -n 1 | jq -c '[.verdict,.sha256]')" "[\"hold\",\"$read_sha\"]" "design changed: log line"
-
-# A decision outside the server's shape exits 1, prints nothing, and logs nothing.
-reject_shape() {
-  local label=$1 json=$2 before
-  before=$(log_lines)
-  queue packet sample "$PACKET" && decide "$json"
-  assert_eq "$rc" "1" "$label: exit code"
-  assert_eq "$(wc -c <"$root/out")" "0" "$label: stdout"
-  assert_eq "$(log_lines)" "$before" "$label: log lines"
-}
-reject_shape "empty decision" ''
-reject_shape "two decisions" "$GOOD $GOOD"
-reject_shape "submit" '{"decision":"submit"}'
-reject_shape "unknown ref" "$(jq -c '.parts[0].ref = "glw907/sample#99"' <<<"$GOOD")"
-reject_shape "missing part" "$(jq -c 'del(.parts[3])' <<<"$GOOD")"
-reject_shape "repeated part" "$(jq -c '.parts += [.parts[0]]' <<<"$GOOD")"
-reject_shape "step approved" "$(jq -c '.parts[3].verdict = "approve"' <<<"$GOOD")"
-reject_shape "pr given a step verdict" "$(jq -c '.parts[1].verdict = "session"' <<<"$GOOD")"
-reject_shape "unknown choice" "$(jq -c '.asks[1].choice = "Gamma"' <<<"$GOOD")"
-reject_shape "unanswered ask" "$(jq -c 'del(.asks[1])' <<<"$GOOD")"
-reject_shape "verdict against the chosen tag" "$(jq -c '.asks[0].choice = "Hold"' <<<"$GOOD")"
-reject_shape "reject without a note" '{"decision":"reject"}'
-
-# The design kind logs one line per decision with lane single.
-before=$(log_lines)
-cp "$BRIEF" "$root/single-design.md"
-queue design glw907/sample "A title" "$root/single-design.md" && decide '{"decision":"hold"}'
-assert_queued_link "design kind"
-assert_eq "$(tail -n 1 "$log" | jq -c '[.ref,.kind,.lane,.verdict,.sha256]')" \
-  "[\"glw907/sample:single-design.md\",\"design\",\"single\",\"hold\",\"$(sha256sum "$root/single-design.md" | cut -d' ' -f1)\"]" "design kind: log line"
-assert_eq "$(($(log_lines) - before))" "1" "design kind: log line count"
-
-# item.json names the packet kind, the initiative and its title, the lead repo, and every ref.
-queue packet sample "$PACKET"
-assert_eq "$(jq -c '[.kind,.initiative,.initiativeTitle,.repo,.refs]' "$dir/item.json")" \
-  '["packet","sample","Sample release notes","glw907/sample",["glw907/sample#41","glw907/sample#42","glw907/sample#43","step:1"]]' "item.json fields"
-assert_eq "$(jq -r .headline "$dir/item.json")" "$(head -1 "$PACKET" | sed 's/^# //')" "item.json headline"
-assert_eq "$(jq -r .head "$dir/parts/1/pr.json")" "bbb222" "item: part 1 head"
-assert_eq "$(cat "$dir/parts/1/diff.patch")" "diff --git a/pr42 b/pr42" "item: part 1 diff"
-[ -s "$dir/parts/1/body.md" ] && cmp -s "$PACKET" "$dir/packet.md" || { echo "FAIL: item: body or packet.md missing"; fail=1; }
-assert_eq "$(jq -r .headline "$dir/packet.json")" "$(jq -r .headline "$dir/item.json")" "item: packet.json parse"
-decide "$GOOD"
-assert_queued_link "packet"
-
-# A PR too large for `gh pr diff` gets its diff from the file list: a rename with no patch keeps
-# its header and rename lines, and a changed file carries its patch.
-touch "$root/pr-42.toolarge"
-printf '%s\n' '[{"filename":"docs/plans/a.md","previous_filename":"docs/old/a.md","status":"renamed"}]' \
-  '[{"filename":"b.md","status":"modified","patch":"@@ -1 +1 @@\n-x\n+y"}]' >"$root/pr-42.files.json"
-queue packet sample "$PACKET"
-assert_eq "$(cat "$dir/parts/1/diff.patch")" "$(printf '%s\n' 'diff --git a/docs/old/a.md b/docs/plans/a.md' \
-  'rename from docs/old/a.md' 'rename to docs/plans/a.md' 'diff --git a/b.md b/b.md' '--- a/b.md' '+++ b/b.md' \
-  '@@ -1 +1 @@' '-x' '+y')" "too-large diff: built from the file list"
-decide "$GOOD"
-rm "$root/pr-42.toolarge"
-
-# A packet with initiative none queues with no initiative title.
-queue packet none "$PACKET"
-assert_eq "$(jq -c '[.initiative,.initiativeTitle]' "$dir/item.json")" '["none",""]' "initiative none"
-decide "$GOOD"
-
-# refuse <label> <want> <command args>: the command exits 2 naming the defect, queues nothing,
-# and logs {time, initiative, defect} to refusals.jsonl.
-refuse() {
-  local label=$1 want=$2 initiative=$3 got
-  shift 3
-  rm -rf "$state/items" "$root/open.record" "$state/refusals.jsonl"
-  timeout 20 bash "$SCRIPT" packet "$@" >"$root/out" 2>"$root/err"
-  assert_eq "$?" "2" "$label: exit code"
+# refused <label> <want> <command args>: the command exits 2 naming the defect, with stdout empty, and queues
+# nothing.
+refused() {
+  local label=$1 want=$2 before
+  shift 2
+  before=$(item_count)
+  run "$@"
+  assert_eq "$rc" "2" "$label: exit code"
   grep -qF -- "$want" "$root/err" || { echo "FAIL: $label: message lacks '$want': $(cat "$root/err")"; fail=1; }
   assert_eq "$(wc -c <"$root/out")" "0" "$label: stdout"
-  ! compgen -G "$state/items/*" >/dev/null || { echo "FAIL: $label: left an item directory"; fail=1; }
-  got=$(tail -n 1 "$state/refusals.jsonl" 2>/dev/null)
-  assert_eq "$(jq -r .initiative <<<"$got")" "$initiative" "$label: refusals.jsonl initiative"
-  jq -e --arg w "$want" '.defect | contains($w)' <<<"$got" >/dev/null 2>&1 || { echo "FAIL: $label: refusals.jsonl defect lacks '$want': $got"; fail=1; }
-  jq -e '.time | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T")' <<<"$got" >/dev/null 2>&1 || { echo "FAIL: $label: refusals.jsonl time"; fail=1; }
-}
-# usage_refusal <label> <command args>: a malformed command line exits 2 before anything else.
-usage_refusal() {
-  local label=$1
-  shift
-  timeout 20 bash "$SCRIPT" "$@" >"$root/out" 2>"$root/err"
-  assert_eq "$?" "2" "$label: exit code"
+  assert_eq "$(item_count)" "$before" "$label: no item directory"
 }
 
-# The initiative is none or names a directory holding initiative.yaml.
-refuse "initiative with a capital" "initiative" Sample Sample "$PACKET"
-refuse "initiative with a path" "initiative" ../sample ../sample "$PACKET"
-refuse "initiative with no record" "initiative" nosuch nosuch "$PACKET"
+NOTES='[{"id":"n1","text":"Why this?","anchor":null},{"id":"n2","text":"And this?","anchor":{"section":"opening","quote":"q","prefix":"","suffix":"","from":0,"to":1}}]'
+APPROVE='{"decision":"approve","calls":[{"call":1,"choice":"Skip it","changed":false},{"call":2,"choice":"Merge it with the code","changed":false}],"decidedForYou":[{"call":1,"choice":"lib/queue.test.ts","changed":false}],"notes":'"$NOTES"'}'
+REJECT='{"decision":"reject","calls":[],"decidedForYou":[],"notes":'"$NOTES"'}'
+
+# ---- snapshot ----
+run snapshot "$work/facts.json"
+assert_eq "$rc" "0" "snapshot: exit code"
+assert_eq "$(jq -c . "$work/snapshot/heads.json")" "[{\"ref\":\"$A\",\"head\":\"$HA\"},{\"ref\":\"$B\",\"head\":\"$HB\"}]" "snapshot: heads.json"
+assert_eq "$(cmp -s "$work/snapshot/aq-fixture-sample-1.patch" "$FIX/snapshot/aq-fixture-sample-1.patch"; echo $?)" "0" "snapshot: patch of #1"
+assert_eq "$(ls -A "$work" | paste -sd' ')" "facts.json snapshot text.md" "snapshot: leaves nothing else beside the fact file"
+
+# #61: a diff refused for terminal escape sequences is retried with the flag, and the stored patch holds no byte
+# below 0x20 except tab and newline.
+{ cat "$FIX/snapshot/aq-fixture-sample-1.patch"; printf '+x\033[31m\a\tend\r\n'; } >"$root/pr-aq-fixture-sample-1.patch"
+touch "$root/pr-aq-fixture-sample-1.escape"
+: >"$root/gh.log"
+run snapshot "$work/facts.json"
+assert_eq "$rc" "0" "escape sequences: exit code"
+grep -q 'pr diff 1 -R aq-fixture/sample --allow-escape-sequences' "$root/gh.log" || { echo "FAIL: escape sequences: no retry with the flag"; fail=1; }
+assert_eq "$(LC_ALL=C tr -d '\011\012\040-\377' <"$work/snapshot/aq-fixture-sample-1.patch" | wc -c)" "0" "escape sequences: the stored patch holds no other control byte"
+grep -q "$(printf 'x\\[31m\tend')" "$work/snapshot/aq-fixture-sample-1.patch" || { echo "FAIL: escape sequences: the text around the bytes was lost"; fail=1; }
+rm "$root/pr-aq-fixture-sample-1.escape"
+cp "$FIX/snapshot/aq-fixture-sample-1.patch" "$root/pr-aq-fixture-sample-1.patch"
+
+# A PR too large for `gh pr diff` gets its diff from the file list.
+touch "$root/pr-aq-fixture-sample-2.toolarge"
+printf '%s\n' '[{"filename":"docs/new.md","previous_filename":"docs/old.md","status":"renamed"}]' \
+  '[{"filename":"b.md","status":"modified","patch":"@@ -1 +1 @@\n-x\n+y"}]' >"$root/pr-aq-fixture-sample-2.apifiles"
+run snapshot "$work/facts.json"
+assert_eq "$(cat "$work/snapshot/aq-fixture-sample-2.patch")" "$(printf '%s\n' 'diff --git a/docs/old.md b/docs/new.md' \
+  'rename from docs/old.md' 'rename to docs/new.md' 'diff --git a/b.md b/b.md' '--- a/b.md' '+++ b/b.md' '@@ -1 +1 @@' '-x' '+y')" "too-large diff: built from the file list"
+rm "$root/pr-aq-fixture-sample-2.toolarge"
+run snapshot "$work/facts.json"
+
+# A head that moves on every fetch exits 1 after three tries and keeps the earlier snapshot; a gh failure exits 1
+# with gh's message.
+touch "$root/pr-aq-fixture-sample-1.moving"
+: >"$root/gh.log"
+run snapshot "$work/facts.json"
+assert_eq "$rc" "1" "moving head: exit code"
+assert_eq "$(grep -c 'pr view' "$root/gh.log")" "6" "moving head: two views per try, three tries"
+assert_eq "$(jq -r '.[0].head' "$work/snapshot/heads.json")" "$HA" "moving head: the earlier snapshot stands"
+rm -f "$root/pr-aq-fixture-sample-1.moving" "$root/pr-aq-fixture-sample-1.calls"
+mv "$root/pr-aq-fixture-sample-2.json" "$root/hold-2.json"
+run snapshot "$work/facts.json"
+assert_eq "$rc" "1" "gh failure: exit code"
+grep -q 'no pull requests found for aq-fixture/sample#2' "$root/err" || { echo "FAIL: gh failure: gh's error not printed: $(cat "$root/err")"; fail=1; }
+mv "$root/hold-2.json" "$root/pr-aq-fixture-sample-2.json"
+run snapshot "$work/facts.json"
+usage_rc() { run "$@"; assert_eq "$rc" "2" "usage: $*"; }
+usage_rc snapshot
+usage_rc snapshot "$work/text.md"
+
+# ---- a close packet: the item directory, the decision print, and the log line ----
+queue packet sample "$work/facts.json" "$work/text.md"
+assert_eq "$(jq -c '[.kind, .title, .initiative, (.pid | type), (.pidStart | type), has("revises")]' "$dir/item.json")" \
+  '["packet","Skip a decided item in the queue order","sample","number","number",false]' "close: item.json"
+assert_eq "$(cmp -s "$work/facts.json" "$dir/facts.json"; echo $?)" "0" "close: facts.json copied"
+assert_eq "$(cmp -s "$work/text.md" "$dir/text.md"; echo $?)" "0" "close: text.md copied"
+assert_eq "$(cmp -s "$work/snapshot/aq-fixture-sample-2.patch" "$dir/snapshot/aq-fixture-sample-2.patch"; echo $?)" "0" "close: snapshot copied"
+assert_eq "$(jq -c . "$dir/heads.json")" "[{\"ref\":\"$A\",\"head\":\"$HA\"},{\"ref\":\"$B\",\"head\":\"$HB\"}]" "close: heads.json"
+assert_eq "$(jq -c '[.ref, .title, .body, .checks, (.files | map([.path, .rank]))]' "$dir/prs/0.json")" \
+  "[\"$A\",\"PR 1\",\"Body of 1.\",[{\"name\":\"ci / gate\",\"bucket\":\"pass\"}],[[\"lib/queue.ts\",3],[\"lib/queue.test.ts\",4]]]" "close: prs/0.json (a test file sorts after source)"
+assert_eq "$(jq -c '.files' "$dir/prs/1.json")" '[{"path":"docs/queue.md","additions":1,"deletions":0,"rank":0}]' "close: prs/1.json (a held path ranks first)"
+[ ! -e "$dir/design.md" ] && [ ! -e "$dir/design.json" ] || { echo "FAIL: close: design files written"; fail=1; }
+close_id=$(basename "$dir")
+decide "$APPROVE"
+assert_eq "$rc" "0" "close approve: exit code"
+assert_eq "$(jq -c . "$root/out")" "$(jq -c --argjson h "$(cat "$dir/heads.json")" '. + {parts: $h}' <<<"$APPROVE")" "close approve: stdout carries the parts with heads"
+assert_eq "$(wc -l <"$root/out")" "1" "close approve: stdout is one line"
+assert_eq "$(log_lines)" "1" "close approve: one log line"
+assert_eq "$(jq -c '[.packet, .initiative, .kind, .decision, (.calls | length), (.decidedForYou | length), .notes, (.parts | length)]' "$log")" \
+  "[\"$close_id\",\"sample\",\"close\",\"approve\",2,1,2,2]" "close approve: log line"
+assert_eq "$(jq -r '.time' "$log" | grep -Ec '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$')" "1" "close approve: log time"
+grep -q "queued $close_id at http://127.0.0.1:7907/item/$close_id" "$root/err" || { echo "FAIL: close: the queued link is not on stderr"; fail=1; }
+collect_check packet "$dir"
+
+# ---- pending: a decided packet whose notes have no reply ----
+pending_out() { bash "$SCRIPT" pending 2>/dev/null; }
+assert_eq "$(pending_out)" "$(printf '%s\tnotes\t2\t%s' "$close_id" 'Skip a decided item in the queue order')" "pending: a decided packet's unanswered notes"
+
+# ---- reply: shape refusals, then a good reply ----
+printf '%s\n' '[{"note":"n1","outcome":"fixed","text":"Done.","ref":"abc1234"}]' >"$root/r-good.json"
+reply_refused() {
+  local label=$1 json=$2 id=${3:-$close_id}
+  printf '%s\n' "$json" >"$root/r.json"
+  run reply "$id" "$root/r.json"
+  assert_eq "$rc" "2" "reply $label: exit code"
+  [ ! -e "$state/items/$close_id/replies.json" ] || { echo "FAIL: reply $label: stored replies"; fail=1; }
+}
+reply_refused "not an array" '{"note":"n1"}'
+reply_refused "an unknown outcome" '[{"note":"n1","outcome":"done","text":"x"}]'
+reply_refused "fixed without a ref" '[{"note":"n1","outcome":"fixed","text":"x"}]'
+reply_refused "filed without a ref" '[{"note":"n1","outcome":"filed","text":"x"}]'
+reply_refused "a note the item does not have" '[{"note":"n9","outcome":"answered","text":"x"}]'
+reply_refused "no text" '[{"note":"n1","outcome":"answered","text":" "}]'
+reply_refused "a stray key" '[{"note":"n1","outcome":"answered","text":"x","extra":1}]'
+reply_refused "an item that is not decided" '[{"note":"n1","outcome":"answered","text":"x"}]' 20200101T000000-1
+run reply notanid "$root/r-good.json"; assert_eq "$rc" "2" "reply: not an item id"
+run reply "$close_id"; assert_eq "$rc" "2" "reply: no file"
+run reply "$close_id" "$root/r-good.json"
+assert_eq "$rc" "0" "reply: good reply exit code"
+assert_eq "$(jq -c '[.[].note]' "$state/items/$close_id/replies.json")" '["n1"]' "reply: stored"
+assert_eq "$(pending_out)" "$(printf '%s\tnotes\t1\t%s' "$close_id" 'Skip a decided item in the queue order')" "pending: one note left"
+printf '%s\n' '[{"note":"n2","outcome":"answered","text":"Because.","ref":"https://example.test/x"}]' >"$root/r2.json"
+run reply "$close_id" "$root/r2.json"
+assert_eq "$(jq -c '[.[].note]' "$state/items/$close_id/replies.json")" '["n1","n2"]' "reply: a second call adds to the first"
+assert_eq "$(pending_out)" "" "pending: every note answered"
+
+# The digest's notes: ids D<n>, answered by `reply digest`.
+printf '%s\n' '[{"id":"D1","text":"a"},{"id":"D2","text":"b"}]' >"$state/digest-notes.json"
+assert_eq "$(pending_out)" "$(printf 'digest\tdigest-notes\t2\t-')" "pending: digest notes"
+printf '%s\n' '[{"note":"D1","outcome":"answered","text":"Yes."}]' >"$root/rd.json"
+run reply digest "$root/rd.json"
+assert_eq "$rc" "0" "reply digest: exit code"
+assert_eq "$(pending_out)" "$(printf 'digest\tdigest-notes\t1\t-')" "pending: one digest note left"
+printf '%s\n' '[{"note":"D2","outcome":"filed","text":"Logged.","ref":"backlog 12"}]' >"$root/rd.json"
+run reply digest "$root/rd.json"
+assert_eq "$(pending_out)" "" "pending: digest answered"
+printf '%s\n' '[{"note":"D3","outcome":"answered","text":"x"}]' >"$root/rd.json"
+run reply digest "$root/rd.json"
+assert_eq "$rc" "2" "reply digest: an unknown note"
+
+# ---- the packet refuses ----
+# A claim citing line 40 of a short hunk is refused, naming the claim; nothing is queued.
+sed 's|lib/queue.ts:10-14|lib/queue.ts:40-40|' "$work/text.md" >"$root/text-range.md"
+refused "claim range" 'claim "The queue order now skips an item that has a decision."' packet sample "$work/facts.json" "$root/text-range.md"
+grep -q 'lib/queue.ts:40-40' "$root/err" || { echo "FAIL: claim range: the cited lines are not named"; fail=1; }
+# A defect in the text alone is the grammar's refusal, logged to refusals.jsonl.
+grep -v '^## Your calls' "$work/text.md" >"$root/text-nocalls.md"
+rm -f "$state/refusals.jsonl"
+refused "text without calls" 'Your calls' packet sample "$work/facts.json" "$root/text-nocalls.md"
+assert_eq "$(jq -r '.initiative' "$state/refusals.jsonl")" "sample" "refusals.jsonl: initiative"
+# A head that moved after the snapshot is refused.
+mkpr 1 moved999 OPEN pass
+refused "moved head" "$A moved" packet sample "$work/facts.json" "$work/text.md"
+grep -q 'snapshot' "$root/err" || { echo "FAIL: moved head: the snapshot is not named"; fail=1; }
+mkpr 1 $HA OPEN pass
+# A merged or closed PR is refused.
+mkpr 2 $HB MERGED pass
+refused "merged PR" "$B is MERGED" packet sample "$work/facts.json" "$work/text.md"
+mkpr 2 $HB OPEN pass
+# A failing check refuses at once, and names the forced call that would carry it.
+mkpr 1 $HA OPEN fail
+: >"$root/gh.log"
+refused "failing check" "forced call with the rule gate-failed" packet sample "$work/facts.json" "$work/text.md"
+assert_eq "$(grep -c 'pr view 1 ' "$root/gh.log")" "1" "failing check: no waiting"
+# A Before merge section needs a forced call; the fixture has one, so only the missing-call case refuses.
+mkpr 1 $HA OPEN pass
+jq '.body = "Body.\n\n## Before merge\n\nRun the migration.\n"' "$root/pr-aq-fixture-sample-1.json" >"$root/x.json" && mv "$root/x.json" "$root/pr-aq-fixture-sample-1.json"
+run packet --check sample "$work/facts.json" "$work/text.md"
+assert_eq "$rc" "0" "Before merge with a forced call: accepted"
+mkpr 1 $HA OPEN pass
+# Pending checks: --check reports them and does not wait.
+mkpr 1 $HA OPEN pending
+: >"$root/gh.log"
+refused "--check with pending checks" "has checks still pending" packet --check sample "$work/facts.json" "$work/text.md"
+assert_eq "$(grep -c 'pr view 1 ' "$root/gh.log")" "1" "--check with pending checks: no waiting"
+# A check that stays pending refuses at the cap.
+refused "pending past the cap" "still has checks pending after 3s" packet sample "$work/facts.json" "$work/text.md"
+mkpr 1 $HA OPEN pass
+# A resend of a retired one-file packet, and an old-grammar file, exit 2 naming the replacement.
+refused "one-file form" "the approval-packet skill" packet sample "$work/text.md"
+printf '# Old\n\n## Brief\n\nx\n' >"$root/old-packet.md"
+refused "old-grammar packet file" "the approval-packet skill" packet sample "$root/old-packet.md" "$work/text.md"
+refused "initiative with a capital" "initiative" packet Sample "$work/facts.json" "$work/text.md"
+refused "initiative with no record" "initiative" packet nosuch "$work/facts.json" "$work/text.md"
 mkdir -p "$APPROVAL_QUEUE_PROJECTS/initiatives/norecord"
-refuse "initiative directory with no initiative.yaml" "initiative" norecord norecord "$PACKET"
-usage_refusal "packet without a file" packet sample
-usage_refusal "packet --check without a file" packet --check sample
-
-# A defect in the file alone is a parser refusal with the register path.
-sed '1s/.*/# A title that ends in a period./' "$PACKET" >"$root/bad-title.md"
-refuse "parser refusal" "drop its closing punctuation" sample sample "$root/bad-title.md"
-grep -q 'approval-brief.md' "$root/err" || { echo "FAIL: parser refusal: no register path"; fail=1; }
-
-# End-to-end check 5: once the stub reports #43 MERGED, handing it over again exits 2 naming the state.
-mkpr 43 ccc333 MERGED pass
-refuse "merged PR" "glw907/sample#43 is MERGED" sample sample "$PACKET"
-mkpr 43 ccc333 CLOSED pass
-refuse "closed PR" "glw907/sample#43 is CLOSED" sample sample "$PACKET"
-mkpr 43 ccc333 OPEN pass
-
-# The second states table: pending checks, failing gates, Before merge, and no checks at all.
-mkpr 42 bbb222 OPEN pending
-refuse "pending check" "wait for the checks to finish" sample sample "$PACKET"
-mkpr 42 bbb222 OPEN fail
-refuse "failing check with no ask" "a failing gate is an ask" sample sample "$PACKET"
-mkpr 42 bbb222 OPEN pass
-jq '.body += "\n## Review\n\nThe review verdict is `fix`.\n"' "$root/pr-42.json" >"$root/pr-42.tmp" && mv "$root/pr-42.tmp" "$root/pr-42.json"
-refuse "review verdict fix with no ask" "a failing gate is an ask" sample sample "$PACKET"
-jq '.body = (.body | sub("`fix`"; "`escalate`"))' "$root/pr-42.json" >"$root/pr-42.tmp" && mv "$root/pr-42.tmp" "$root/pr-42.json"
-refuse "review verdict escalate with no ask" "a failing gate is an ask" sample sample "$PACKET"
-mkpr 42 bbb222 OPEN pass
-jq '.body += "\n## Before merge\n\n1. Run the migration.\n"' "$root/pr-42.json" >"$root/pr-42.tmp" && mv "$root/pr-42.tmp" "$root/pr-42.json"
-refuse "Before merge with no ask" "a Before merge step is an ask" sample sample "$PACKET"
-mkpr 42 bbb222 OPEN none
-queue packet sample "$PACKET"
-assert_eq "$(jq -c '.statusCheckRollup' "$dir/parts/1/pr.json")" "[]" "no checks: accepted"
-decide "$GOOD"
-mkpr 42 bbb222 OPEN pass
-
-# A PR whose head moves on every fetch exits 1 after three tries, prints nothing, and queues nothing.
-touch "$root/pr-42.moving"; rm -f "$root/pr-42.calls"
-rm -rf "$state/items"
-timeout 20 bash "$SCRIPT" packet sample "$PACKET" >"$root/out" 2>"$root/err"
-assert_eq "$?" "1" "moving head: exit code"
-assert_eq "$(wc -c <"$root/out")" "0" "moving head: stdout"
-assert_eq "$(cat "$root/pr-42.calls")" "6" "moving head: two views per try, three tries"
-! compgen -G "$state/items/*" >/dev/null || { echo "FAIL: moving head: left an item directory"; fail=1; }
-rm -f "$root/pr-42.moving"
-
-# A PR already in another waiting item is refused, whichever kind queues it.
-queue packet sample "$PACKET"
-first=$(basename "$dir")
-firstpid=$bgpid
-timeout 20 bash "$SCRIPT" packet sample "$PACKET" >"$root/out2" 2>"$root/err2"
-assert_eq "$?" "2" "waiting item (packet): exit code"
-grep -q "glw907/sample#41.*$first" "$root/err2" || { echo "FAIL: waiting item (packet): message lacks the item: $(cat "$root/err2")"; fail=1; }
-assert_eq "$(ls "$state/items" | wc -l)" "1" "waiting item: no second item directory"
-decide "$GOOD"
-# Once decided, the PRs are free again.
-queue packet sample "$PACKET"
-decide "$GOOD"
+refused "initiative directory with no initiative.yaml" "initiative" packet norecord "$work/facts.json" "$work/text.md"
+usage_rc packet sample
+usage_rc packet --check sample
+usage_rc packet --replies
+# A snapshot of other pull requests than the fact file's is refused.
+mkdir -p "$root/w3"
+cp "$work/facts.json" "$root/w3/facts.json"
+cp -r "$work/snapshot" "$root/w3/snapshot"
+jq '.[0].ref = "aq-fixture/sample#9"' "$root/w3/snapshot/heads.json" >"$root/x.json" && mv "$root/x.json" "$root/w3/snapshot/heads.json"
+refused "snapshot of other pull requests" "snapshot holds other pull requests" packet sample "$root/w3/facts.json" "$work/text.md"
+rm -rf "$root/w3/snapshot"
+refused "no snapshot beside the fact file" "run approval-queue snapshot" packet sample "$root/w3/facts.json" "$work/text.md"
+# gh failing is a tool failure: exit 1 with gh's error.
+mv "$root/pr-aq-fixture-sample-2.json" "$root/hold-2.json"
+run packet sample "$work/facts.json" "$work/text.md"
+assert_eq "$rc" "1" "gh failure: exit code"
+grep -q 'no pull requests found' "$root/err" || { echo "FAIL: gh failure: gh's error is not printed"; fail=1; }
+mv "$root/hold-2.json" "$root/pr-aq-fixture-sample-2.json"
 
 # --check runs the checks and queues nothing: no item, no tab, no app start.
-rm -rf "$state/items" "$state/tab.seen" "$state/start.lock" "$root/open.record" "$root/curl.record"
-timeout 20 bash "$SCRIPT" packet --check sample "$PACKET" >"$root/out" 2>"$root/err"
-assert_eq "$?" "0" "--check: exit code"
+before=$(item_count)
+rm -f "$root/open.record" "$root/curl.record" "$state/tab.seen" "$state/start.lock"
+run packet --check sample "$work/facts.json" "$work/text.md"
+assert_eq "$rc" "0" "--check: exit code"
 assert_eq "$(wc -c <"$root/out")" "0" "--check: stdout"
-! compgen -G "$state/items/*" >/dev/null || { echo "FAIL: --check: left an item directory"; fail=1; }
-[ ! -e "$root/open.record" ] && [ ! -e "$state/tab.seen" ] || { echo "FAIL: --check: opened a tab"; fail=1; }
-[ ! -e "$root/curl.record" ] || { echo "FAIL: --check: reached for the app"; fail=1; }
-[ ! -e "$state/start.lock" ] || { echo "FAIL: --check: took the app start lock"; fail=1; }
-mkpr 43 ccc333 MERGED pass
-timeout 20 bash "$SCRIPT" packet --check sample "$PACKET" >"$root/out" 2>"$root/err"
-assert_eq "$?" "2" "--check on a refused packet: exit code"
-mkpr 43 ccc333 OPEN pass
+assert_eq "$(item_count)" "$before" "--check: no item directory"
+[ ! -e "$root/open.record" ] && [ ! -e "$state/tab.seen" ] && [ ! -e "$root/curl.record" ] && [ ! -e "$state/start.lock" ] \
+  || { echo "FAIL: --check: opened a tab or reached for the app"; fail=1; }
 
-# ---- Revisions: a packet that resends a part Geoff sent back ----
-# requeue <command args>: like queue, but keeps the items already on disk, and sets dir to the waiting one.
-requeue() {
-  local i f
-  rm -f "$root/open.record"
-  bash "$SCRIPT" "$@" >"$root/out" 2>"$root/err" &
-  bgpid=$!
-  dir=""
-  for i in $(seq 50); do
-    for f in "$state"/items/*/item.json; do
-      [ -e "$f" ] && [ ! -e "$(dirname "$f")/decision.json" ] && dir=$(dirname "$f")
-    done
-    [ -n "$dir" ] && { basename "$dir" >>"$root/ids"; return 0; }
-    sleep 0.1
-  done
-  echo "FAIL: timed out waiting for a requeued item: $(cat "$root/err")"; fail=1
-  kill "$bgpid" 2>/dev/null; wait "$bgpid" 2>/dev/null; bgpid=""
-  return 1
-}
-REVISED="$root/revised.md"
-sed 's/^## If you approve/## What changed\n- Split the template change out of PR 41.\n\n## If you approve/' "$PACKET" >"$REVISED"
-grep -q '^## What changed' "$REVISED" || { echo "FAIL: revisions: the revised packet lost its section"; fail=1; }
-mkpr 41 aaa111 OPEN fail
-mkpr 42 bbb222 OPEN pass
-mkpr 43 ccc333 OPEN pass
-rm -f "$log"
-rm -rf "$state/items"
+# ---- a stub that answers pending twice, then passing, makes packet queue ----
+echo 2 >"$root/pr-aq-fixture-sample-1.pend"
+: >"$root/gh.log"
+queue packet sample "$work/facts.json" "$work/text.md"
+assert_eq "$(cat "$root/pr-aq-fixture-sample-1.pend")" "0" "pending twice: both pending answers were read"
+assert_eq "$(grep -c 'pr view 1 .*statusCheckRollup' "$root/gh.log")" "3" "pending twice: three reads of #1"
+assert_eq "$(jq -c '.checks' "$dir/prs/0.json")" '[{"name":"ci / gate","bucket":"pass"}]' "pending twice: the stored checks are the passing read"
+rm "$root/pr-aq-fixture-sample-1.pend"
 
-# A state root with no decisions.jsonl reads as no revision, and a packet with the section then is refused.
-refuse "section on a first packet" "no part of this packet was sent back" sample sample "$REVISED"
-queue packet sample "$PACKET"
-assert_eq "$(jq -c 'has("revises")' "$dir/item.json")" "false" "revision: no log, no revises"
-first_id=$(basename "$dir")
-decide '{"decision":"reject","note":"Split this packet."}'
+# ---- a head that moves while the item waits writes stale.json ----
+[ ! -e "$dir/stale.json" ] || { echo "FAIL: stale: stale.json before any move"; fail=1; }
+mkpr 1 moved222 OPEN pass
+wait_for "$dir/stale.json"
+assert_eq "$(jq -c . "$dir/stale.json" 2>/dev/null)" "{\"ref\":\"$A\",\"queued\":\"$HA\",\"now\":\"moved222\"}" "stale: stale.json"
+mkpr 1 $HA OPEN pass
+# A packet that holds a PR already in a waiting item is refused.
+refused "waiting item" "$A is already in the waiting item $(basename "$dir")" packet sample "$work/facts.json" "$work/text.md"
+# A decision shape the command does not accept exits 1, prints nothing, and logs nothing.
+before=$(log_lines)
+decide '{"decision":"submit"}'
+assert_eq "$rc" "1" "bad decision: exit code"
+assert_eq "$(wc -c <"$root/out")" "0" "bad decision: stdout"
+assert_eq "$(log_lines)" "$before" "bad decision: log lines"
 
-# A resend without the section exits 2, names the earlier item and the refs, and leaves no item directory.
-refuse "resend without the section" "$first_id" sample sample "$PACKET"
-grep -q 'glw907/sample#41, glw907/sample#42, glw907/sample#43' "$root/err" || { echo "FAIL: resend without the section: refs missing: $(cat "$root/err")"; fail=1; }
-grep -q 'What changed' "$root/err" || { echo "FAIL: resend without the section: the section is not named"; fail=1; }
+# ---- a send-back, and a resend that answers each note ----
+queue packet sample "$work/facts.json" "$work/text.md"
+first=$(basename "$dir")
+decide "$REJECT"
+assert_eq "$rc" "0" "send-back: exit code"
+assert_eq "$(jq -c '[.decision, (.notes | length), (.parts | map(.head))]' "$root/out")" '["reject",2,["aaaa111","bbbb222"]]' "send-back: stdout"
+assert_eq "$(jq -c '[.kind, .notes, .decision]' "$log" | tail -n 1)" '["close",2,"reject"]' "send-back: log line"
+before=$(item_count)
+refused "resend with no replies" "n1, n2 unanswered" packet sample "$work/facts.json" "$work/text.md"
+grep -q "$first" "$root/err" || { echo "FAIL: resend with no replies: the sent-back item is not named"; fail=1; }
+printf '%s\n' '[{"note":"n1","outcome":"fixed","text":"Done.","ref":"abc1234"}]' >"$root/replies-one.json"
+refused "resend missing a reply" "n2 unanswered" packet --replies "$root/replies-one.json" sample "$work/facts.json" "$work/text.md"
+[ ! -e "$state/items/$first/replies.json" ] || { echo "FAIL: resend missing a reply: stored replies"; fail=1; }
+printf '%s\n' '[{"note":"n9","outcome":"answered","text":"x"}]' >"$root/replies-bad.json"
+refused "resend with a reply to no note" "answers a note this item does not have" packet --replies "$root/replies-bad.json" sample "$work/facts.json" "$work/text.md"
+printf '%s\n' '[{"note":"n1","outcome":"fixed","text":"Done.","ref":"abc1234"},{"note":"n2","outcome":"answered","text":"Because."}]' >"$root/replies-both.json"
+run packet --check --replies "$root/replies-both.json" sample "$work/facts.json" "$work/text.md"
+assert_eq "$rc" "0" "resend --check: exit code"
+[ ! -e "$state/items/$first/replies.json" ] || { echo "FAIL: resend --check: stored replies"; fail=1; }
+queue packet --replies "$root/replies-both.json" sample "$work/facts.json" "$work/text.md"
+second=$(basename "$dir")
+assert_eq "$(jq -c '.revises' "$dir/item.json")" "{\"item\":\"$first\",\"revision\":2}" "resend: item.json revises"
+assert_eq "$(jq -c '[.[].note]' "$state/items/$first/replies.json")" '["n1","n2"]' "resend: replies stored on the sent-back item"
+decide "$REJECT"
+# The revision counts on: a third round names the second item.
+printf '%s\n' '[{"note":"n1","outcome":"answered","text":"a"},{"note":"n2","outcome":"answered","text":"b"}]' >"$root/replies-3.json"
+queue packet --replies "$root/replies-3.json" sample "$work/facts.json" "$work/text.md"
+assert_eq "$(jq -c '.revises' "$dir/item.json")" "{\"item\":\"$second\",\"revision\":3}" "third round: item.json revises"
+# --replies on a packet that resends nothing is refused.
+decide "$APPROVE"
+refused "replies with nothing sent back" "no item holding these pull requests was" packet --replies "$root/replies-3.json" sample "$work/facts.json" "$work/text.md"
+queue packet sample "$work/facts.json" "$work/text.md"
+assert_eq "$(jq -c 'has("revises")' "$dir/item.json")" "false" "after an approve: no revises"
+decide "$APPROVE"
 
-# PR 41's head moved ahead, 42 diverged, 43's old head is gone: the since diff, the gone marker, and the marker.
-mkpr 41 aaa222 OPEN fail
-mkpr 42 bbb999 OPEN pass
-mkpr 43 ccc999 OPEN pass
-printf '{"status":"ahead"}\n' >"$root/compare-aaa111.json"
-printf 'diff --git a/n.md b/n.md\n+since\n' >"$root/compare-aaa111.diff"
-printf '{"status":"diverged"}\n' >"$root/compare-bbb222.json"
-requeue packet sample "$REVISED"
-assert_eq "$(jq -c '.revises' "$dir/item.json")" \
-  "{\"item\":\"$first_id\",\"revision\":2,\"parts\":[{\"ref\":\"glw907/sample#41\",\"head\":\"aaa111\"},{\"ref\":\"glw907/sample#42\",\"head\":\"bbb222\"},{\"ref\":\"glw907/sample#43\",\"head\":\"ccc333\"}]}" \
-  "revision 2: item.json revises"
-assert_eq "$(jq -c '.whatChanged' "$dir/packet.json")" '["Split the template change out of PR 41."]' "revision 2: packet.json whatChanged"
-assert_eq "$(cat "$dir/parts/0/since.patch")" "$(printf 'diff --git a/n.md b/n.md\n+since')" "since: an ahead head writes since.patch"
-[ ! -e "$dir/parts/0/since.json" ] || { echo "FAIL: since: an ahead head wrote since.json"; fail=1; }
-assert_eq "$(jq -c . "$dir/parts/1/since.json")" '{"gone":true}' "since: a diverged answer writes since.json"
-[ ! -e "$dir/parts/1/since.patch" ] || { echo "FAIL: since: a diverged answer wrote since.patch"; fail=1; }
-assert_eq "$(jq -c . "$dir/parts/2/since.json")" '{"gone":true}' "since: a 404 writes since.json"
-[ ! -e "$dir/parts/3/since.patch" ] && [ ! -e "$dir/parts/3/since.json" ] || { echo "FAIL: since: a step got a since file"; fail=1; }
-second_id=$(basename "$dir")
-decide '{"decision":"reject","note":"Still not."}'
-assert_eq "$rc" "0" "revision 2: decision exit code"
+# ---- a design packet ----
+queue packet sample "$w2/facts.json" "$w2/text.md"
+dsha=$(sha256sum "$designfile" | cut -d' ' -f1)
+assert_eq "$(jq -c '[.kind, .title]' "$dir/item.json")" '["packet","Sample queue redesign"]' "design: item.json"
+assert_eq "$(cmp -s "$designfile" "$dir/design.md"; echo $?)" "0" "design: design.md copied"
+assert_eq "$(jq -c . "$dir/design.json")" "{\"sha256\":\"$dsha\"}" "design: design.json"
+[ ! -e "$dir/heads.json" ] && [ ! -d "$dir/prs" ] || { echo "FAIL: design: pull request files written"; fail=1; }
+design_id=$(basename "$dir")
+dref="sample:docs/specs/2026-11-10-sample-design.md"
+# The design's hash moving while the item waits writes stale.json.
+printf 'Edited later.\n' >>"$designfile"
+wait_for "$dir/stale.json"
+assert_eq "$(jq -r '[.ref, .queued] | join(" ")' "$dir/stale.json" 2>/dev/null)" "$dref $dsha" "design: stale.json"
+printf '# A design\n\nOriginal text.\n' >"$designfile"
+DESIGN_REJECT='{"decision":"reject","calls":[],"decidedForYou":[],"notes":[{"id":"n1","text":"Why?","anchor":null}]}'
+decide "$DESIGN_REJECT"
+assert_eq "$(jq -c '.parts' "$root/out")" "[{\"ref\":\"$dref\",\"sha256\":\"$dsha\"}]" "design: parts carry the file hash"
+assert_eq "$(jq -c '[.kind, .decision, .notes]' "$log" | tail -n 1)" '["design","reject",1]' "design: log line"
+# The resend of a sent-back design is found by its repo and path.
+refused "design resend with no replies" "n1 unanswered" packet sample "$w2/facts.json" "$w2/text.md"
+printf '%s\n' '[{"note":"n1","outcome":"answered","text":"Because."}]' >"$root/replies-d.json"
+queue packet --replies "$root/replies-d.json" sample "$w2/facts.json" "$w2/text.md"
+assert_eq "$(jq -c '.revises' "$dir/item.json")" "{\"item\":\"$design_id\",\"revision\":2}" "design resend: item.json revises"
+decide '{"decision":"approve","calls":[{"call":1,"choice":"Drop it","changed":false}],"decidedForYou":[],"notes":[]}'
+assert_eq "$rc" "0" "design approve: exit code"
+run merge "$(basename "$dir")"
+assert_eq "$rc" "2" "design packet: merge has nothing to merge"
 
-# A diff too large to serve (406) writes neither file, and an unmoved head gets none; neither refuses the packet.
-# --check applies the section rule and fetches no compare.
-mkpr 41 aaa333 OPEN fail
-printf '{"status":"ahead"}\n' >"$root/compare-aaa222.json"
-: >"$root/compare-aaa222.toolarge"
-: >"$root/gh.record"
-timeout 20 bash "$SCRIPT" packet --check sample "$PACKET" >"$root/out" 2>"$root/err"
-assert_eq "$?" "2" "--check on a revision without the section: exit code"
-timeout 20 bash "$SCRIPT" packet --check sample "$REVISED" >"$root/out" 2>"$root/err"
-assert_eq "$?" "0" "--check on a revision with the section: exit code"
-grep -q compare "$root/gh.record" && { echo "FAIL: --check fetched a compare"; fail=1; }
-requeue packet sample "$REVISED"
-assert_eq "$(jq -c '[.revises.item, .revises.revision]' "$dir/item.json")" "[\"$second_id\",3]" "revision 3: item.json revises"
-for k in 0 1 2; do
-  [ ! -e "$dir/parts/$k/since.patch" ] && [ ! -e "$dir/parts/$k/since.json" ] || { echo "FAIL: since: part $k got a since file"; fail=1; }
-done
-decide '{"decision":"reject","note":"Third time."}'
-assert_eq "$rc" "0" "revision 3: decision exit code"
+# ---- the design and triage kinds keep their behavior ----
+before=$(log_lines)
+cat >"$root/single-design.md" <<'BRIEF'
+# design
 
-# An approve, a hold, or a send-back inside an approve is not sent back, and the rounds before an approve do
-# not count toward a later revision number.
-requeue packet sample "$REVISED"
-decide "$(jq -c '.parts[2].verdict = "send-back"' <<<"$GOOD")"
-assert_eq "$(tail -n 5 "$log" | head -n 4 | jq -r '.verdict' | paste -sd' ')" "approve hold send-back session" "approve round: verdicts logged"
-queue packet sample "$PACKET"
-assert_eq "$(jq -c 'has("revises")' "$dir/item.json")" "false" "revision: nothing is sent back after an approve"
-decide "$(jq -c '.parts[1].verdict = "approve"' <<<"$GOOD")"
-queue packet sample "$PACKET"
-decide '{"decision":"reject","note":"Again."}'
-requeue packet sample "$REVISED"
-assert_eq "$(jq -c '.revises.revision' "$dir/item.json")" "2" "revision: earlier rounds do not count after an approve"
-decide '{"decision":"reject","note":""}'
+## Brief
 
-# ---- Only the parts Geoff sent back make a resend a revision ----
-# SOLO is the packet with PR 42 alone, so it holds a part Geoff marked approve in a rejected packet and no part he sent back.
-awk '/^## Ask:/{skip=1} /^## Routine/{skip=0} !skip && !/sample#43 \|/' "$PACKET" >"$root/solo.md"
-sed 's/^## If you approve/## What changed\n- Split the template change out of PR 41.\n\n## If you approve/' "$root/solo.md" >"$root/solo-revised.md"
-mkpr 41 aaa111 OPEN fail
-mkpr 42 bbb222 OPEN pass
-mkpr 43 ccc333 OPEN pass
-MIXED='{"decision":"reject","note":"Fix 41.","calls":[{"ref":"glw907/sample#41","verdict":"send-back"},{"ref":"glw907/sample#42","verdict":"approve"},{"ref":"glw907/sample#43","verdict":"approve"},{"ref":"step:1","verdict":"session"}]}'
-rm -f "$log"
-queue packet sample "$PACKET"
-mixed_id=$(basename "$dir")
-decide "$MIXED"
-assert_eq "$(jq -c '[.ref,.sentBack]' "$log" | paste -sd' ')" \
-  '["glw907/sample#41",true] ["glw907/sample#42",false] ["glw907/sample#43",false] ["step:1",false]' "sentBack: one part sent back, the rest marked approve"
+The queue now refuses an item with no brief.
 
-# Both heads move on, so an early return on an unmoved head cannot pass this alone: only the sent-back part is
-# a revision part and gets a since diff.
-mkpr 41 aaa222 OPEN fail
-mkpr 42 bbb888 OPEN pass
-printf '{"status":"ahead"}\n' >"$root/compare-aaa111.json"
-printf '{"status":"ahead"}\n' >"$root/compare-bbb222.json"
-printf 'diff --git a/n.md b/n.md\n+since\n' >"$root/compare-bbb222.diff"
-requeue packet sample "$REVISED"
-assert_eq "$(jq -c '.revises' "$dir/item.json")" "{\"item\":\"$mixed_id\",\"revision\":2,\"parts\":[{\"ref\":\"glw907/sample#41\",\"head\":\"aaa111\"}]}" "sentBack: revises names only the sent-back part"
-[ -e "$dir/parts/0/since.patch" ] || { echo "FAIL: sentBack: the sent-back part has no since.patch"; fail=1; }
-[ ! -e "$dir/parts/1/since.patch" ] && [ ! -e "$dir/parts/1/since.json" ] || { echo "FAIL: sentBack: the approve-marked part got a since file"; fail=1; }
-assert_eq "$(jq -r '.head' "$dir/parts/1/pr.json")" "bbb888" "sentBack: the approve-marked part's head moved"
-assert_eq "$(jq -r 'select(.ref == "glw907/sample#42") | .head' "$log")" "bbb222" "sentBack: the approve-marked part's recorded head differs"
-decide '{"decision":"reject","note":""}'
+A session that skips the brief gets a message naming the fix, so every item arrives readable.
 
-# A resend of only the approve-marked part is a fresh packet: it takes no section and has no revises.
-mkpr 42 bbb222 OPEN pass
-rm -f "$log"
-queue packet sample "$PACKET"
-decide "$MIXED"
-refuse "section on a resend of an approve-marked part" "a part you marked approve inside a rejected packet" sample sample "$root/solo-revised.md"
-requeue packet sample "$root/solo.md"
-assert_eq "$(jq -c 'has("revises")' "$dir/item.json")" "false" "sentBack: a resend of only the approve-marked part is a fresh packet"
-decide '{"decision":"reject","note":""}'
+### What changes
 
-# A note-only send-back sets no part to send back, so its resend is a revision naming every part.
-rm -f "$log"
-queue packet sample "$PACKET"
-decide '{"decision":"reject","note":"All of it."}'
-assert_eq "$(jq -sc '[.[].sentBack] | unique' "$log")" "[false]" "sentBack: a note-only send-back flags no part"
-requeue packet sample "$REVISED"
-assert_eq "$(jq -c '[.revises.parts[].ref]' "$dir/item.json")" '["glw907/sample#41","glw907/sample#42","glw907/sample#43"]' "sentBack: a note-only send-back's resend names every part"
-decide '{"decision":"reject","note":""}'
+- The command checks the brief before it queues anything.
 
-# The revision number counts the rounds in which the part was sent back, and skips one where it was marked
-# approve. A log written before the field reads as today: every reject counts.
-printf '%s\n' \
-  '{"packet":"aqtest-r1","ref":"glw907/sample#42","kind":"pr","verdict":"reject","head":"bbb222"}' \
-  '{"packet":"aqtest-r2","ref":"glw907/sample#41","kind":"pr","verdict":"reject","sentBack":true,"head":"aaa111"}' \
-  '{"packet":"aqtest-r2","ref":"glw907/sample#42","kind":"pr","verdict":"reject","sentBack":false,"head":"bbb222"}' \
-  '{"packet":"aqtest-r3","ref":"glw907/sample#42","kind":"pr","verdict":"reject","sentBack":true,"head":"bbb222"}' >"$log"
-requeue packet sample "$root/solo-revised.md"
-assert_eq "$(jq -c '[.revises.item, .revises.revision]' "$dir/item.json")" '["aqtest-r3",3]' "sentBack: the revision number skips a round marked approve"
-decide '{"decision":"reject","note":""}'
-printf '%s\n' '{"packet":"aqtest-r1","ref":"glw907/sample#42","kind":"pr","verdict":"reject","head":"bbb222"}' >"$log"
-requeue packet sample "$root/solo-revised.md"
-assert_eq "$(jq -c '[.revises.item, .revises.revision]' "$dir/item.json")" '["aqtest-r1",2]' "sentBack: a log with no sentBack field counts every reject"
-decide '{"decision":"reject","note":""}'
+### If you approve
+
+1. The PR merges.
+BRIEF
+queue design glw907/sample "A title" "$root/single-design.md"
+decide '{"decision":"hold"}'
+assert_eq "$(tail -n 1 "$log" | jq -c '[.ref,.kind,.lane,.verdict]')" '["glw907/sample:single-design.md","design","single","hold"]' "design kind: log line"
+assert_eq "$(($(log_lines) - before))" "1" "design kind: log line count"
 
 live_leak
 

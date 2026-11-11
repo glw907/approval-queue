@@ -1,28 +1,26 @@
 /**
  * Entry point for `approval-queue design|triage|packet`: checks the item's brief, or its fact file and
- * text, before it is queued. The kinds it checks are `design`, `triage`, `packet`, and `facts`.
+ * text, before it is queued. The kinds it checks are `design`, `triage`, and `facts`.
  *
- * Run as `node check-brief.ts <design|triage|packet> <file>`, or as
+ * Run as `node check-brief.ts <design|triage> <file>`, or as
  * `node check-brief.ts facts <facts.json> <text.md> [snapshot-dir]` for a fact file and its text. With a
  * snapshot directory, each claim's line range is checked against the patches in it. It exits 0 and
- * prints `{"headline": ...}` on a valid brief, the whole parse as JSON on a valid packet, and
- * `{"facts": ..., "text": ...}` on a valid pair. It exits 2 with the check's messages on stderr for a
- * defect, and 1 for a tool failure such as an unreadable file. It imports only `brief.ts`, `facts.ts`,
- * and `packet.ts`, so it runs under plain `node` with no `node_modules`.
+ * prints `{"headline": ...}` on a valid brief and `{"facts": ..., "text": ...}` on a valid pair. It exits 2
+ * with the check's messages on stderr for a defect, and 1 for a tool failure such as an unreadable file. It
+ * imports only `brief.ts` and `facts.ts`, so it runs under plain `node` with no `node_modules`.
  */
 import { readFileSync } from 'node:fs';
 import { parseBrief, validateTriage } from '#lib/brief.ts';
 import { checkClaimRanges, parseFacts, parseText } from '#lib/facts.ts';
-import { parsePacket } from '#lib/packet.ts';
 
 const [kind, file, textFile, snapshot] = process.argv.slice(2);
 if (
-	(kind !== 'design' && kind !== 'triage' && kind !== 'packet' && kind !== 'facts') ||
+	(kind !== 'design' && kind !== 'triage' && kind !== 'facts') ||
 	!file ||
 	(kind === 'facts') !== (textFile !== undefined) ||
 	(snapshot !== undefined && kind !== 'facts')
 ) {
-	console.error('usage: check-brief.ts <design|triage|packet> <file> | check-brief.ts facts <facts.json> <text.md> [snapshot-dir]');
+	console.error('usage: check-brief.ts <design|triage> <file> | check-brief.ts facts <facts.json> <text.md> [snapshot-dir]');
 	process.exit(1);
 }
 
@@ -56,16 +54,6 @@ if (kind === 'facts') {
 		}
 	}
 	console.log(JSON.stringify({ facts: facts.value, text: parsed.value }));
-	process.exit(0);
-}
-
-if (kind === 'packet') {
-	const parsed = parsePacket(text);
-	if (!parsed.ok) {
-		console.error(parsed.messages.join('\n'));
-		process.exit(2);
-	}
-	console.log(JSON.stringify(parsed.packet));
 	process.exit(0);
 }
 

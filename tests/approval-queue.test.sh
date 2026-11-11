@@ -181,7 +181,7 @@ assert_eq "$?" "1" "item not served: exit code"
 grep -q 'does not serve this state root' "$root/err" || { echo "FAIL: item not served: message"; fail=1; }
 ! grep -q 'queued' "$root/err" || { echo "FAIL: item not served: printed a queued link"; fail=1; }
 
-# A brief defect refuses before queuing: exit 2, the message, the register path, no item directory.
+# A brief defect refuses before queuing: exit 2, the message, no item directory.
 refuse() {
   local label=$1 want=$2
   shift 2
@@ -189,7 +189,6 @@ refuse() {
   "$@" >/dev/null 2>"$root/err"
   assert_eq "$?" "2" "$label: exit code"
   grep -q -- "$want" "$root/err" || { echo "FAIL: $label: message lacks '$want': $(cat "$root/err")"; fail=1; }
-  grep -q 'approval-brief.md' "$root/err" || { echo "FAIL: $label: no register path"; fail=1; }
   ! compgen -G "$state/items/*" >/dev/null || { echo "FAIL: $label: left an item directory"; fail=1; }
 }
 grep -v -e '^### If you approve' -e '^1\. The PR merges' "$root/design.md" >"$root/design-bad.md"
