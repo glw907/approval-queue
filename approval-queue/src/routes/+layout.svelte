@@ -1,13 +1,13 @@
 <!-- @component
 The page skeleton: the queue rail pinned left and the open screen beside it, then the shortcut
-sheet, the live region, and the toast. Below 1024px the rail is a modal drawer opened from the
-app bar. One `keydown` listener on the document turns every key into a `keyAction`; the rail, the
-drawers, the sheet, and Undo act on it here, and the open screen acts on the rest through
-`desk.handlers`.
+sheet, the live region, and the toast. The rail lists what waits for the reader (each waiting
+packet, design, and triage list), then the digest and history, which need no decision; it shows no
+badge or count, and below 1180px it is hidden. One `keydown` listener on the document turns every
+key into a `keyAction`; the rail, the drawers, the sheet, and Undo act on it here, and the open
+screen acts on the rest through `desk.handlers`.
 
 The toast shows the decision `held` is counting down, with Undo, and its clock stops once the
-pointer moves over it or while focus is on it. A held or posting item leaves the waiting list and shows under "Decided
-this session" until the queue reload lists it there itself.
+pointer moves over it or while focus is on it. A held or posting item leaves the waiting list at once.
 -->
 <script lang="ts">
 	import '../app.css';
@@ -15,68 +15,18 @@ this session" until the queue reload lists it there itself.
 	import { page } from '$app/state';
 	import { onMount } from 'svelte';
 	import { fade } from 'svelte/transition';
-	import { age, SINGLES } from '#lib/board.ts';
-	import { closeDrawers, setDrawer } from '#lib/components/frame/drawers.ts';
+	import { digestLine, railLine } from '#lib/board.ts';
+	import { closeDrawers } from '#lib/components/frame/drawers.ts';
 	import { desk } from '#lib/desk.svelte.ts';
 	import { held } from '#lib/held.svelte.ts';
 	import { keyAction } from '#lib/keys.ts';
 
 	let { children, data } = $props();
 
-	const KINDS = { design: 'Design', triage: 'Triage', packet: 'Packet' };
-	const OUTCOMES = { approve: 'Approved', reject: 'Sent back', submit: 'Submitted' };
-	const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
-
 	let sheet: HTMLDialogElement;
-	let railButton = $state<HTMLButtonElement>();
 	const currentId = $derived(page.params.id);
 	const waiting = $derived(data.queue.filter((item) => !held.ids.has(item.id)));
-	/** This session's decisions, newest first: the held and posting ones, then what the server lists. */
-	const decided = $derived.by(() => {
-		const mine = [...(held.current ? [held.current] : []), ...held.sending.toReversed()].map((d) => ({
-			id: d.id,
-			title: d.title,
-			outcome: OUTCOMES[d.outcome],
-			refused: undefined as string | undefined
-		}));
-		const listed = data.decided
-			.filter(({ meta }) => !mine.some((d) => d.id === meta.id))
-			.map(({ meta, decision, refused }) => ({
-				id: meta.id,
-				title: meta.headline ?? meta.title,
-				outcome: refused !== undefined ? 'Refused' : OUTCOMES[decision],
-				refused
-			}));
-		return [...mine, ...listed];
-	});
-
-	/** The queue by initiative, then "Single items", the order the board uses. */
-	const sidebar = $derived.by(() => {
-		const initiativeOf = (item: (typeof data.queue)[number]) =>
-			item.kind !== 'packet'
-				? SINGLES
-				: item.initiativeTitle || (item.initiative && item.initiative !== 'none' ? item.initiative : 'No initiative');
-		const rank = (title: string) => (title === SINGLES ? 1 : 0);
-		const groups = new Map<string, typeof waiting>();
-		for (const item of waiting) groups.set(initiativeOf(item), [...(groups.get(initiativeOf(item)) ?? []), item]);
-		return [...groups]
-			.map(([title, items]) => {
-				// Within a group the repo names its own list, as the prototype's rail does.
-				const repos = new Map<string, typeof waiting>();
-				for (const item of items) {
-					const repo = item.repo.split('/').pop() ?? item.repo;
-					repos.set(repo, [...(repos.get(repo) ?? []), item]);
-				}
-				return { title, repos: [...repos].map(([repo, list]) => ({ repo, items: list })) };
-			})
-			.sort((a, b) => rank(a.title) - rank(b.title));
-	});
-
-	/** The line under a rail entry's title: a packet's asks and whether it cannot be undone, else its kind. */
-	function railMeta(item: (typeof data.queue)[number]) {
-		if (item.kind !== 'packet') return KINDS[item.kind];
-		return [item.asks ? plural(item.asks, 'ask') : 'Routine only', item.irreversible && 'irreversible'].filter(Boolean).join(' · ');
-	}
+	const onPath = (path: string) => page.url.pathname === path || page.url.pathname.startsWith(`${path}/`);
 
 	type SheetRow = { keys: string[]; text: string; single?: boolean };
 	const CTRL_ENTER = ['Ctrl', 'Enter'];
@@ -132,12 +82,12 @@ this session" until the queue reload lists it there itself.
 			// The page works without storage; the switch just stays on.
 		}
 		// A drawer left open across a resize would leave the page behind it inert for no reason: the
-		// pane stops being a drawer at 1260px and the rail at 1024px.
-		const wide = [matchMedia('(min-width: 1260px)'), matchMedia('(min-width: 1024px)')];
-		for (const m of wide) m.addEventListener('change', closeDrawers);
+		// pane stops being a drawer at 1260px.
+		const wide = matchMedia('(min-width: 1260px)');
+		wide.addEventListener('change', closeDrawers);
 		return () => {
 			clearInterval(poll);
-			for (const m of wide) m.removeEventListener('change', closeDrawers);
+			wide.removeEventListener('change', closeDrawers);
 		};
 	});
 
@@ -202,7 +152,7 @@ this session" until the queue reload lists it there itself.
 		if (document.querySelector('dialog[open]:not(#keys)')) return;
 		// Escape closes the open sheet natively; the drawer under it stays for the next Escape.
 		if (e.key === 'Escape' && desk.sheetOpen) return;
-		if (e.key === 'Escape' && (desk.railOpen || desk.paneOpen)) {
+		if (e.key === 'Escape' && desk.paneOpen) {
 			closeDrawers();
 			return;
 		}
@@ -245,93 +195,44 @@ this session" until the queue reload lists it there itself.
 <svelte:document onkeydown={onKeydown} />
 
 <div class="shell">
-	<nav
-		id="rail"
-		class={['rail', desk.railOpen && 'open']}
-		aria-label="Queue"
-		role={desk.railOpen ? 'dialog' : undefined}
-		aria-modal={desk.railOpen ? 'true' : undefined}
-	>
-		<button type="button" class="drawer-x btn btn-ghost btn-sm btn-square" aria-label="Close the queue" onclick={closeDrawers}>
-			<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
-		</button>
-		<div class="title"><a href="/" data-sveltekit-replacestate>Approval Queue</a></div>
-		<div class="sub" aria-live="polite">{waiting.length} waiting</div>
-		<a
-			href="/"
-			class={['btn btn-sm btn-ghost board-btn justify-start gap-2', page.url.pathname === '/' && 'btn-active']}
-			aria-current={page.url.pathname === '/' ? 'page' : undefined}
-			aria-keyshortcuts={desk.singleKeys ? 'b' : undefined}
-			data-sveltekit-replacestate
-		>
-			<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h10" /></svg>Board
-			<kbd class="desk-sk" aria-hidden="true">b</kbd>
-		</a>
-		{#each sidebar as group, g (group.title)}
-			<section class="init-region" aria-labelledby="nav-{g}">
-				<h2 class="group" id="nav-{g}">{group.title}</h2>
-				{#each group.repos as repo (repo.repo)}
-					{#if repo.repo}<h3 class="repo-title">{repo.repo}</h3>{/if}
-					<ul class="rail-list" aria-label={repo.repo ? `${repo.repo} in ${group.title}` : group.title}>
-						{#each repo.items as item (item.id)}
-							<li>
-								<a
-									href="/item/{item.id}"
-									data-q
-									class={['q', item.id === currentId && 'on']}
-									aria-current={item.id === currentId ? 'page' : undefined}
-								>
-									<span>{item.headline ?? item.title}</span>
-									<span class="meta">
-										<span>{railMeta(item)}</span>
-										<time class="tabular-nums" datetime={item.created}>{age(item.created)}</time>
-									</span>
-									{#if item.orphaned}<span class="orphan">No session is waiting for this.</span>{/if}
-								</a>
-							</li>
-						{/each}
-					</ul>
-				{/each}
-			</section>
-		{:else}
-			<p class="dq">Nothing waiting.</p>
-		{/each}
-		{#if decided.length}
-			<h2 class="group">Decided this session</h2>
-			<ul class="rail-list">
-				{#each decided as row (row.id)}
-					<li class={['dq', row.refused !== undefined && 'refused']}>
-						<span>{row.title}</span>
-						<span>{row.outcome}</span>
-						{#if row.refused}<span class="why"><span class="sr-only">: </span>{row.refused}</span>{/if}
-					</li>
-				{/each}
-			</ul>
-		{/if}
-		{#if desk.page === 'triage'}
-			<p class="dq desk-sk">j k next and previous</p>
-		{/if}
+	<nav id="rail" class="rail" aria-label="Queue">
+		<div class="wordmark"><i class="benchmark"></i>Approval Queue</div>
+		<ul class="menu w-full">
+			<li class="menu-title">Waiting for you</li>
+			{#each waiting as item (item.id)}
+				<li>
+					<a
+						href="/item/{item.id}"
+						data-q
+						class={[item.id === currentId && 'menu-active']}
+						aria-current={item.id === currentId ? 'page' : undefined}
+					>
+						{item.headline ?? item.title}
+						<small>{railLine(item)}</small>
+						{#if item.orphaned}<small class="orphan">No session is waiting for this.</small>{/if}
+					</a>
+				</li>
+			{:else}
+				<li class="menu-disabled"><span>Nothing waiting</span></li>
+			{/each}
+			<li class="menu-title">No decision needed</li>
+			<li>
+				<a href="/digest" class={[onPath('/digest') && 'menu-active']} aria-current={onPath('/digest') ? 'page' : undefined}>
+					Merged without you<small>{digestLine(data.digest)}</small>
+				</a>
+			</li>
+			<li>
+				<a href="/history" class={[onPath('/history') && 'menu-active']} aria-current={onPath('/history') ? 'page' : undefined}>
+					History<small>Decided packets, with search</small>
+				</a>
+			</li>
+		</ul>
 		<button type="button" class="rail-keys btn btn-ghost btn-sm" id="open-keys" aria-keyshortcuts={desk.singleKeys ? '?' : undefined} onclick={toggleSheet}>
 			Keyboard shortcuts <kbd class="desk-sk" aria-hidden="true">?</kbd>
 		</button>
 	</nav>
 
 	<div class="content">
-		<div class="appbar">
-			<button
-				type="button"
-				class="appbtn btn btn-sm"
-				id="queue-open"
-				bind:this={railButton}
-				aria-controls="rail"
-				aria-expanded={desk.railOpen}
-				onclick={() => setDrawer('rail', true, railButton)}
-			>
-				<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16" /></svg>
-				<span>Queue</span><span class="count">{waiting.length}</span>
-			</button>
-			<span class="appname">Approval Queue</span>
-		</div>
 		{@render children()}
 	</div>
 </div>

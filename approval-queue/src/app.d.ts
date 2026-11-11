@@ -5,8 +5,8 @@ declare global {
 	const __QUEUE_PORT__: number;
 
 	namespace App {
-		/** What every page's `data` carries: the layout load's queue and this session's decisions. */
-		interface PageData extends Pick<LayoutData, 'queue' | 'decided'> {}
+		/** What every page's `data` carries: the layout load's queue and the digest's newest day. */
+		interface PageData extends Pick<LayoutData, 'queue' | 'digest'> {}
 	}
 }
 
