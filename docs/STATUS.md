@@ -5,29 +5,25 @@ Geoff and return his decision as JSON. `README.md` holds the interfaces and the 
 
 ## Current state
 
-- `main` still serves the old packet, design, triage, docs, and single-`pr` kinds. Pass 2a is open
-  as draft PR glw907/approval-queue#14 on the branch `worktree-pass-2a`.
-- Pass 2a of the `workstation-refinement` initiative rebuilds this repo. Its plan is local, on the
-  unpushed branch `workstation-refinement` in
-  `/var/home/glw907/Projects/initiatives/.claude/worktrees/workstation-refinement`.
-  - The command gains `snapshot`, `merge`, `land`, `digest`, and `reply`, and `packet` reads a fact
-    file and a text file.
-  - The app shows a one-column packet page with anchored notes, a digest page, and a history page.
-  - The docs kind, the single-`pr` kind, Defer, per-part verdicts, and the contents rail are gone.
-- Pass 2a is PR-ready: tasks T0 to T11 are committed, the end-to-end check ran (steps 1 to 7 and 9
-  pass; step 8, Orca, heard no focus events and fell back to the accessibility tree), and the
-  whole-branch review's three blocking findings are folded. The PR body holds the results.
-- Pass 2b changes the merge guard, the allow rule, the `approval-packet` skill, and the register in
-  `glw907/workstation`, and in `glw907/survey` under Geoff's ruling.
-- `conductor-approval-queue` owns both passes and sends one close packet for their PRs.
+- `main` serves the rebuilt queue (Pass 2a of the `workstation-refinement` initiative, merged as
+  PR #14, `1d2cbee`, on 2026-11-11). A packet is a fact file the session writes and a text file a
+  writer writes, and the page is one reading column with a notes margin.
+- The command has `snapshot`, `packet`, `merge`, `land`, `digest`, `reply`, `withdraw`, `pending`,
+  `collect`, `design`, and `triage`. The docs and single-`pr` kinds, Defer, per-part verdicts, and
+  the contents rail are gone.
+- A tab closed inside the 5-second approve hold now sends the held decision on `pagehide`.
+- pavilion runs the new build: the cutover ran on 2026-11-11 with `glw907/workstation#227` and
+  Survey 1.6.0.
 
 ## Next action
 
-The conductor hands the close packet over, then runs the cutover with pass 2b once Geoff approves.
-The executor `approval-queue-pass-2a` has ended.
+thinkpad-x1 has not taken the cutover. Its first session there runs, before any hand-over:
 
-## Cutover
+1. `approval-queue pending` (empty, or collect what it lists with the old build first).
+2. `npm ci --prefix ~/Projects/approval-queue/approval-queue`, then `npm run build --prefix
+   ~/Projects/approval-queue/approval-queue`, then `pkill -f 'approval-queue/[b]uild'`.
+3. `systemctl --user disable --now decision-review.timer`.
+4. Check that `approval-queue merge` with no id exits 2.
 
-The new build refuses the old packet format, so it goes live only with an empty queue, in the same
-attended sitting as the workstation PR. The PR body's `## Before merge` section gives the order.
-Pass 2b's plan, "Cutover" and "Hosts", gives the step thinkpad-x1's first session runs afterward.
+`workstation-sync` never rebuilds the app, so this step stays here until it is done. Open items are
+in `BACKLOG.md`.

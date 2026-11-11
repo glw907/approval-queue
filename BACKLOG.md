@@ -16,17 +16,21 @@
   `gh pr diff` now refuses a diff with terminal escape sequences unless passed `--allow-escape-sequences`, so `approval-queue packet` and `--check` exit 1 on such a PR. glw907/cairn-cms#180 hit this by deleting 30 `.ansi` reference frames, with no added line carrying an escape. The session wrote the packet to its state dir and merged under the hand-over's queue-down rule. The queue should render the neutralized diff, or fall back to `git diff`, since passing raw escapes to a browser page needs its own thought.
   Done in pass 2a (PR #14): `snapshot` retries `gh pr diff` with `--allow-escape-sequences` and stores the patch with the C0 control bytes other than tab and newline removed.
 
-- [ ] **#60** Two approved packets kept no decision.json `#bug` `#approval-queue` *(2026-11-01)*
+- [x] **#60** Two approved packets kept no decision.json `#bug` `#approval-queue` *(2026-11-01)*
   Geoff approved packets 20261101T090321-3628943 and 20261101T131042-271886 on 2026-11-01, and neither left a `decision.json`, so both were withdrawn and his chat word stood in for the approval. Design items saved fine that day, and both losses were packets. The cause is unexplained, so read the save path for a packet first. A record packet does not wait on its decision, so nothing stalled, but a lost approve on a waiting packet would hold a run.
+  Closed as a duplicate of #59: both packet directories held `retire_item`'s leavings (no `item.json`, no `decision.json`). Fixed in PR #14.
 - [x] **#59** An orderly reboot retires an undecided item, so `collect` can't recover it `#bug` `#approval-queue` *(2026-10-31)*
   Shutdown sends TERM to the waiting `approval-queue packet`, and the `trap 'exit 143' TERM HUP INT` line runs the EXIT trap's `retire_item`, the same path `withdraw` uses. `item.json` is gone, and `collect` answers "no item is queued". #16's recovery covers only a KILL or a crash, so a session that tells Geoff a reboot is safe loses the packet without notice. Seen on phonebook packet 20261031T151942-2819338 (retired 15:35:26 at shutdown, resent unchanged). Have `withdraw` leave a marker for the waiter to check, so a plain TERM leaves `item.json` for `collect`.
   Done in pass 2a (PR #14): a TERM, HUP, or INT leaves `item.json`, and only `withdraw` retires an item, through a `withdrawn` marker the exit trap checks. #60 shows the same leavings.
-- [ ] **#58** A docs review's page controls: F8 order, a new page's diff button, and the added-text underline `#improvement` `#approval-queue` `#initiative:docs-system` *(2026-10-26)*
+- [x] **#58** A docs review's page controls: F8 order, a new page's diff button, and the added-text underline `#improvement` `#approval-queue` `#initiative:docs-system` *(2026-10-26)*
   F8 ("next call") always starts at the page after the last one used, so with two open calls on page 1 and one on page 2 it goes page 1, page 2, page 1. A new page (`base` empty) still offers "Show all unchanged lines" with nothing to unfold. Added text takes a solid underline like a link, so a whole new paragraph can read as a link. Found in the svelte and accessibility reviews of the docs cutover (PR #12).
-- [ ] **#57** A docs review's comment and send-back edges `#improvement` `#approval-queue` `#initiative:docs-system` *(2026-10-26)*
+  Closed: the docs kind was removed in PR #14.
+- [x] **#57** A docs review's comment and send-back edges `#improvement` `#approval-queue` `#initiative:docs-system` *(2026-10-26)*
   A new comment takes its range before the flush that precedes the post, so text that moves during the flush leaves it stale. The send-back post names `blob:<path>` fields the reject action never reads. The `p.bg.bg-flat` callouts in `DocsView.svelte` are home-grown beside the stock `alert` the missing-page notice uses. Browser localStorage keys `desk.calls.*` are never cleaned up. Found in the reviews of the docs cutover (PR #12).
-- [ ] **#56** `readReplies` duplicates the `replies.json` read in `readDocs` `#improvement` `#approval-queue` `#initiative:docs-system` *(2026-10-26)*
+  Closed: the docs kind was removed in PR #14.
+- [x] **#56** `readReplies` duplicates the `replies.json` read in `readDocs` `#improvement` `#approval-queue` `#initiative:docs-system` *(2026-10-26)*
   `readDocs` has only the item directory, so it cannot call `readReplies(root, id)`; merge the two so one reader serves the route and the comment store.
+  Closed: the docs kind was removed in PR #14.
 - [x] **#55** Normalize the docs command's tool-failure exit codes `#improvement` `#approval-queue` `#initiative:docs-system` *(2026-10-26)*
   `fetch_pr` exits with `gh`'s own status (4 for auth, 127 for a missing `gh`) where the contract's refusals table says 1, and the notes and replies checks run after the `gh` fetch, so a malformed notes file exits 1 instead of 2 while `gh` is down. A docs item's `pr.json` also carries `ref`, `head`, and `state`, which the `pr` kind's does not.
   Done in pass 2a (PR #14): the docs half went with the docs kind, and `snapshot`, `packet`, `merge`, and `land` exit 1 and print the `gh` error on a tool failure.
@@ -39,14 +43,16 @@
 - [x] **#52** Check a change review's notes before queuing `#improvement` `#approval-queue` `#initiative:docs-system` *(2026-10-25)*
   `approval-queue notes --check <file> <notes.json>` validates the page and blueprint shape only, so a change review's notes, which carry a `file` beside an index anchor, fail it with "unknown field file", and `kind: "change"` fails as an unknown kind. The only check left was queuing the change itself (cairn batch 5, glw907/cairn-cms#142). Accept a change notes file in `--check`, or add `notes --check --change <owner/repo#n>`, and document the change note's shape, which the blueprint skill describes only in one sentence.
   Dropped: the docs-as-code cutover (PR #12) removed the kind.
-- [ ] **#51** Say when a refusal appears on the rail, and keep a bad `refused.json` from hiding its row `#improvement` `#approval-queue` `#initiative:docs-system` *(2026-10-25)*
+- [x] **#51** Say when a refusal appears on the rail, and keep a bad `refused.json` from hiding its row `#improvement` `#approval-queue` `#initiative:docs-system` *(2026-10-25)*
   A refusal shows as "Refused" on the 2-second poll after the toast has said the decision went through, and nothing announces it to a screen reader. A `refused.json` that does not parse throws a `SyntaxError` in `listDecided`, which drops the decided row altogether (svelte review of the batch 4 friction pass).
+  Closed: only the docs path wrote `refused.json`, and the rail was replaced in PR #14. The new history lists a row even when a sidecar is damaged.
 
-- [ ] **#50** A `collect` of an approve that is already logged can write `refused.json` beside it `#bug` `#approval-queue` `#initiative:docs-system` *(2026-10-25)*
+- [x] **#50** A `collect` of an approve that is already logged can write `refused.json` beside it `#bug` `#approval-queue` `#initiative:docs-system` *(2026-10-25)*
   `collect` runs the page or head check before `append_log` looks for an existing line. If the page changed after the first command logged the approve, the second writes `refused.json` and exits 1, and the rail shows "Refused" for a decision that was recorded. Skip the check, or the file, when the log already holds the item's id (task-scope review of the batch 4 friction pass).
+  Closed: docs-only. `approval-queue merge` is idempotent on a rerun (PR #14).
 
-- [ ] **#49** A refusal the command makes as a tool failure leaves the item in `pending`, and `withdraw` refuses a decided item `#improvement` `#approval-queue` `#initiative:docs-system` *(2026-10-25)*
-  A page whose worktree was removed, a packet decision that does not match its packet, and a `gh` that cannot answer write no `refused.json`, so each stays in `pending` until a session collects it or the item is cleared by hand. `withdraw` exits 2 on a decided item, so a decided item no session wants has no command to clear it.
+- [ ] **#49** `withdraw` refuses a decided item, and a malformed packet decision stays in `pending` `#improvement` `#approval-queue` `#initiative:docs-system` *(2026-10-25)*
+  `withdraw` refuses a decided item (`approval-queue:56`), and a packet decision the command rejects as malformed stays in `pending` with nothing to clear it. Reworded 2026-11-11 after the Pass 2a sweep; the docs-kind causes went with PR #14.
 
 - [x] **#48** Keep one PR's page approvals from voiding each other `#bug` `#approval-queue` `#initiative:docs-system` *(2026-10-25)*
   Three `page` items queued on glw907/cairn-cms#140 were all approved around 08:30, and all three were refused with "moved ... while it waited, so the approval does not cover it". The first two moved because the later pages' commits rode the same PR. The third moved because `pr_head` read GitHub about five seconds after a push, before the head updated. An approval cost three re-reviews. For a `page` item, check that the page's blob is unchanged instead of the PR head, or check the head against the local commit given at queue time, and show the refusal on the screen, not only on stderr.
@@ -144,8 +150,9 @@
   The route test covers the reject action only; approve takes the same `form.has('fingerprint')` path (whole-branch review of the polish pass).
   Done in pass 2a (PR #14): `facts.server.test.ts` covers an approve posted after the item is withdrawn between the read and the write, which answers 410 and leaves no `decision.json`.
 
-- [ ] **#42** Small cues the polish pass found and left `#improvement` `#approval-queue` `#initiative:approval-queue` *(2026-10-25)*
+- [x] **#42** Small cues the polish pass found and left `#improvement` `#approval-queue` `#initiative:approval-queue` *(2026-10-25)*
   "Sent back" in "Decided this session" takes the green success ink; the decision bar's Defer is hidden while the send-back note is open; `PacketAsks`' comment does not name the digit keys, and the digit caps show on a decided packet; each rail initiative is a `section` landmark; the `packet-facts` cache only drops a key when its file goes; `.linkbtn`, `.reopen`, and the pane toggle are about 20px tall and unmeasured against 2.5.8.
+  Closed: the rail, Defer, and per-part controls went in PR #14, and target size is in its acceptance.
 
 - [ ] **#41** A `collect` can read a decision that the app is about to back off `#improvement` `#approval-queue` `#initiative:approval-queue` *(2026-10-25)*
   With a `collect` beside a `withdraw` and Geoff's post in the same microsecond window, the collect can print a `decision.json` the app then unlinks, while his page says nothing was recorded. The reverse ordering is covered by `withdraw`'s "run collect". A fix is a design call, for example `collect` checking `item.json` again after reading the decision (task-scope review of the polish pass).
@@ -163,8 +170,9 @@
 - [ ] **#38** The Undo toasts have no key and no length setting for someone who turns single-key shortcuts off `#improvement` `#approval-queue` `#initiative:approval-queue` *(2026-10-25)*
   `z` reaches the held decision's Undo only with single-key shortcuts on, and the 10-second flash Undo has no key. A speech-input user must Tab to a toast at the end of the page in time. Options: a chord that ignores single-key mode, "Press Z to undo" in the announcement, or a hold length next to the shortcuts setting (daisyui-a11y review of the polish pass, WCAG 2.2.1).
 
-- [ ] **#37** Read the inline notes with NVDA on a Windows machine `#improvement` `#approval-queue` `#initiative:docs-system` *(2026-10-25)*
+- [x] **#37** Read the inline notes with NVDA on a Windows machine `#improvement` `#approval-queue` `#initiative:docs-system` *(2026-10-25)*
   The Orca half of #10 passed on 2026-10-25 (each note choice is announced as a button). NVDA and JAWS in focus mode may still read CodeMirror's `role="textbox"` content as plain text; this needs a Windows machine.
+  Closed: the editor went in PR #14. CT step 8 re-ran Orca on the new margin and fell back to the accessibility tree.
 
 - [x] **#36** An old-spelling note anchor can resolve into the wrong section when two headings share an old slug `#bug` `#approval-queue` `#initiative:approval-queue` *(2026-10-24)*
   The alias in `notes.ts` maps a key the first section lacks (for example `setup.p3`) into the second section's block, where the old rule resolved it to nothing. Only old-spelling notes on documents with repeated headings are affected (docs friction whole-branch review).
