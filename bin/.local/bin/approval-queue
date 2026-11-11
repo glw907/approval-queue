@@ -7,7 +7,10 @@ usage="usage: approval-queue <design|triage> <repo> <title> <source>
        approval-queue packet [--check] <initiative> <file>
        approval-queue withdraw <id>
        approval-queue pending
-       approval-queue collect <id>"
+       approval-queue collect <id>
+       approval-queue merge [--skip <owner/repo#n>]... [--premerge-done <owner/repo#n>]... <id>
+       approval-queue land <owner/repo#n> <claim>
+       approval-queue digest <owner/repo#n> <claim>"
 root="${XDG_STATE_HOME:-$HOME/.local/state}/approval-queue"
 id_pattern='^[0-9]{8}T[0-9]{6}-[0-9]+$'
 
@@ -98,6 +101,140 @@ if [ "${1:-}" = pending ]; then
     ! grep -qxF -- "$pitem" <<<"$logged" || continue
     printf '%s\t%s\t%s\t%s\n' "$pitem" "$pkind" "$(jq -r '.decision // empty' "$pdir/decision.json")" "$ptitle"
   done
+  exit 0
+fi
+
+# refuse <message>: one line on stderr, exit 2.
+refuse() {
+  echo "approval-queue: $1" >&2
+  exit 2
+}
+
+ref_pattern='^[^/#[:space:]]+/[^/#[:space:]]+#[0-9]+$'
+
+# view_pr <ref> <fields>: prints the PR's `gh pr view` JSON for the fields; a gh failure prints gh's error and exits 1.
+view_pr() {
+  local errf out rc=0
+  errf=$(mktemp)
+  out=$(gh pr view "${1##*#}" --repo "${1%#*}" --json "$2" 2>"$errf" </dev/null) || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    cat "$errf" >&2
+    rm -f "$errf"
+    exit 1
+  fi
+  rm -f "$errf"
+  printf '%s\n' "$out"
+}
+
+# merge_pr <ref> <head>: merges at the head; a gh failure prints gh's error and returns 1.
+merge_pr() {
+  gh pr merge "${1##*#}" --repo "${1%#*}" --merge --match-head-commit "$2" </dev/null
+}
+
+has_before_merge() { grep -qiE '^##[[:space:]]+Before merge[[:space:]]*$' <<<"$1"; }
+
+# merge <id>: merges each PR of a decided approve, in heads.json order, and records each success in merged.json.
+if [ "${1:-}" = merge ]; then
+  shift
+  skips=() dones=()
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --skip | --premerge-done)
+        [ $# -ge 2 ] && [[ $2 =~ $ref_pattern ]] || { echo "$usage" >&2; exit 2; }
+        if [ "$1" = --skip ]; then skips+=("$2"); else dones+=("$2"); fi
+        shift 2 ;;
+      *) break ;;
+    esac
+  done
+  if [ $# -ne 1 ]; then echo "$usage" >&2; exit 2; fi
+  [[ $1 =~ $id_pattern ]] || refuse "$1 is not an item id"
+  mdir="$root/items/$1"
+  [ -e "$mdir/item.json" ] || refuse "no item $1 is queued"
+  if [ -e "$mdir/design.json" ] || [ ! -e "$mdir/heads.json" ]; then refuse "$1 has no pull requests to merge"; fi
+  [ -e "$mdir/decision.json" ] || refuse "$1 is not decided yet"
+  [ "$(jq -r '.decision' "$mdir/decision.json")" = approve ] || refuse "$1 was not approved"
+  [ ! -e "$mdir/stale.json" ] || refuse "$1 is out of date: a head moved since it was queued"
+  [ -e "$mdir/merged.json" ] || echo '[]' >"$mdir/merged.json"
+  merged=() failed=() skipped=() notreached=()
+  mapfile -t mrefs < <(jq -r '.[].ref' "$mdir/heads.json")
+  # merge_report: prints the one-line summary.
+  merge_report() {
+    jq -nc --argjson m "$(jq -nc '$ARGS.positional' --args "${merged[@]}")" --argjson f "$(jq -nc '$ARGS.positional' --args "${failed[@]}")" \
+      --argjson s "$(jq -nc '$ARGS.positional' --args "${skipped[@]}")" --argjson n "$(jq -nc '$ARGS.positional' --args "${notreached[@]}")" \
+      '{merged: $m, failed: $f, skipped: $s, notReached: $n}'
+  }
+  stopped_at=""
+  for mref in "${mrefs[@]}"; do
+    if printf '%s\n' "${skips[@]}" | grep -qxF -- "$mref"; then skipped+=("$mref"); continue; fi
+    if [ -n "$stopped_at" ]; then notreached+=("$mref"); continue; fi
+    mhead=$(jq -r --arg r "$mref" '.[] | select(.ref == $r) | .head' "$mdir/heads.json")
+    mview=$(view_pr "$mref" state,headRefOid,body) || { failed+=("$mref"); stopped_at=$mref; continue; }
+    if [ "$(jq -r '.state' <<<"$mview")" = MERGED ] && [ "$(jq -r '.headRefOid' <<<"$mview")" = "$mhead" ]; then
+      :
+    else
+      mbody=$(jq -r '.body // ""' <<<"$mview")
+      if has_before_merge "$mbody" && ! printf '%s\n' "${dones[@]}" | grep -qxF -- "$mref"; then
+        echo "approval-queue: $mref has a Before merge section; do it, then pass --premerge-done $mref" >&2
+        awk 'tolower($0) ~ /^##[ \t]+before merge/ {on = 1; print; next} /^##[ \t]/ {on = 0} on' <<<"$mbody"
+        exit 2
+      fi
+      merge_pr "$mref" "$mhead" || { failed+=("$mref"); stopped_at=$mref; continue; }
+    fi
+    if ! jq -e --arg r "$mref" 'any(.[]; .ref == $r)' "$mdir/merged.json" >/dev/null; then
+      jq --arg r "$mref" --arg h "$mhead" --arg t "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '. + [{ref: $r, head: $h, at: $t}]' "$mdir/merged.json" >"$mdir/merged.json.tmp"
+      mv "$mdir/merged.json.tmp" "$mdir/merged.json"
+    fi
+    merged+=("$mref")
+  done
+  merge_report
+  [ -z "$stopped_at" ] || exit 1
+  exit 0
+fi
+
+# digest_line <ref> <head> <claim> <lane>: appends one line to digest.jsonl.
+digest_line() {
+  mkdir -p "$root"
+  jq -nc --arg t "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg r "$1" --arg h "$2" --arg c "$3" --arg l "$4" \
+    '{time: $t, ref: $r, head: $h, claim: $c, lane: $l}' >>"$root/digest.jsonl"
+}
+
+# land <ref> <claim>: merges a small PR the session judged, once its checks are not failing, at the head it read.
+if [ "${1:-}" = land ]; then
+  shift
+  if [ $# -ne 2 ] || [[ ! $1 =~ $ref_pattern ]]; then echo "$usage" >&2; exit 2; fi
+  lref=$1 lclaim=$2
+  for lf in "$root"/items/*/item.json; do
+    [ -e "$lf" ] && [ ! -e "$(dirname "$lf")/decision.json" ] || continue
+    if jq -e --arg r "$lref" '(.refs // []) | index($r)' "$lf" >/dev/null 2>&1 \
+      || { [ -e "$(dirname "$lf")/heads.json" ] && jq -e --arg r "$lref" 'any(.[]; .ref == $r)' "$(dirname "$lf")/heads.json" >/dev/null 2>&1; }; then
+      refuse "$lref is in the waiting item $(basename "$(dirname "$lf")"); decide it first"
+    fi
+  done
+  poll=${APPROVAL_QUEUE_POLL_S:-30} cap=${APPROVAL_QUEUE_POLL_MAX_S:-900} waited=0
+  while :; do
+    lview=$(view_pr "$lref" state,headRefOid,body,statusCheckRollup)
+    [ "$(jq -r '.state' <<<"$lview")" = OPEN ] || refuse "$lref is $(jq -r '.state' <<<"$lview"), not open"
+    has_before_merge "$(jq -r '.body // ""' <<<"$lview")" && refuse "$lref has a Before merge section; send it in a packet"
+    jq -e 'any(.statusCheckRollup[]?; ((.conclusion // "") | IN("FAILURE", "CANCELLED", "TIMED_OUT", "ACTION_REQUIRED")) or ((.state // "") | IN("FAILURE", "ERROR")))' <<<"$lview" >/dev/null \
+      && refuse "$lref has a failing check"
+    jq -e 'any(.statusCheckRollup[]?; (.status != null and .status != "COMPLETED") or .state == "PENDING")' <<<"$lview" >/dev/null || break
+    [ "$waited" -lt "$cap" ] || refuse "$lref still has checks pending after ${cap}s"
+    sleep "$poll"
+    waited=$((waited + poll))
+  done
+  lhead=$(jq -r '.headRefOid' <<<"$lview")
+  merge_pr "$lref" "$lhead" || exit 1
+  digest_line "$lref" "$lhead" "$lclaim" land
+  exit 0
+fi
+
+# digest <ref> <claim>: records a PR already merged or closed by hand.
+if [ "${1:-}" = digest ]; then
+  shift
+  if [ $# -ne 2 ] || [[ ! $1 =~ $ref_pattern ]]; then echo "$usage" >&2; exit 2; fi
+  dview=$(view_pr "$1" state,headRefOid)
+  [ "$(jq -r '.state' <<<"$dview")" != OPEN ] || refuse "$1 is still open; land it or send it in a packet"
+  digest_line "$1" "$(jq -r '.headRefOid' <<<"$dview")" "$2" record
   exit 0
 fi
 
