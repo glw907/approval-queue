@@ -23,34 +23,37 @@ run 'gh pr create --repo glw907/workstation --title "T" --body "B"' \
 assert_eq "$rc" "0" "created: exit 0"
 assert_eq "$(jq -r .hookSpecificOutput.hookEventName <<<"$out")" "PostToolUse" "created: event name"
 ctx=$(jq -r .hookSpecificOutput.additionalContext <<<"$out")
+assert_eq "$(printf '%s' "$ctx" | wc -l)" "0" "created: one line"
+[ "$(printf '%s' "$ctx" | wc -c)" -lt 200 ] || { echo "FAIL: created: the line runs $(printf '%s' "$ctx" | wc -c) bytes: $ctx"; fail=1; }
 case "$ctx" in
-  *'`approval-packet` skill'*'`glw907/workstation#38`'*'approval-queue packet <initiative> <file>'*) ;;
-  *) echo "FAIL: created: context lacks the packet hand-over: $ctx"; fail=1 ;;
-esac
-case "$ctx" in
-  *'gh pr merge <number> --repo <repo> --merge --match-head-commit <head>'*) ;;
-  *) echo "FAIL: created: context lacks the merge command: $ctx"; fail=1 ;;
+  *'#38 in glw907/workstation'*"close packet"*'`approval-queue land`'*'no call'*'auth-data'*'## Before merge'*) ;;
+  *) echo "FAIL: created: the line lacks the close packet or the land route: $ctx"; fail=1 ;;
 esac
 
 run 'git push -u origin x && gh pr create --fill' 'https://github.com/glw907/cairn-cms/pull/7'
 assert_eq "$(jq -r .hookSpecificOutput.additionalContext <<<"$out" | grep -c 'glw907/cairn-cms')" "1" \
   "compound command: repo from the URL"
 
+run 'cd x; GH_TOKEN=t gh pr create --fill' 'https://github.com/glw907/cairn-cms/pull/8'
+assert_eq "$(jq -r .hookSpecificOutput.additionalContext <<<"$out" | grep -c '#8 in glw907/cairn-cms')" "1" \
+  "an environment assignment before the command: still a stage"
+
 run 'gh pr view 38' 'https://github.com/glw907/workstation/pull/38'
-assert_eq "$out" "" "a different gh command: silent"
+assert_eq "$out" "" "gh pr view: silent"
+
+run 'gh pr merge 38 --repo glw907/workstation --merge' 'https://github.com/glw907/workstation/pull/38'
+assert_eq "$out" "" "gh pr merge: silent"
+
+run 'echo "gh pr create --fill"' 'https://github.com/glw907/workstation/pull/38'
+assert_eq "$out" "" "a quoted gh pr create inside an echo: silent"
+
+run 'git commit -m "Document gh pr create"' 'https://github.com/glw907/workstation/pull/38'
+assert_eq "$out" "" "a commit message that names gh pr create: silent"
 
 run 'gh pr create --fill' 'a pull request for branch "x" already exists'
 assert_eq "$out" "" "no PR URL: silent"; assert_eq "$rc" "0" "no PR URL: exit 0"
 
 out=$(printf 'not json' | "$SCRIPT"); rc=$?
 assert_eq "$out" "" "bad input: silent"; assert_eq "$rc" "0" "bad input: exit 0"
-
-case "$ctx" in
-  *'approval-queue pr '*) echo "FAIL: created: context still names the single-PR command: $ctx"; fail=1 ;;
-esac
-case "$ctx" in
-  *"Skip the approval queue only where pass-core's Close says"*) ;;
-  *) echo "FAIL: created: context lost the skip clause: $ctx"; fail=1 ;;
-esac
 
 if [ "$fail" -eq 0 ]; then echo "claude-approval-queue-reminder: OK"; else exit 1; fi
