@@ -1,0 +1,7 @@
+diff --git a/agents/plan-reviewer.md b/agents/plan-reviewer.md
+--- a/agents/plan-reviewer.md
++++ b/agents/plan-reviewer.md
+@@ -30,2 +30,3 @@
+ - Every task names its class.
++- A task that publishes never cuts a release candidate for a test.
+ - Every stop has a standing answer.

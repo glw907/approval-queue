@@ -1,5 +1,5 @@
-import { readFileSync } from 'node:fs';
-import { access, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+
+import { access, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -11,7 +11,7 @@ vi.mock('$app/env/private', () => ({
 	}
 }));
 
-import { seedPacket } from '#lib/fixtures/seed-packet.ts';
+import { seedFacts } from '#lib/server/seed-facts.ts';
 import { load as layoutLoad } from './+layout.server.ts';
 import { load } from './+page.server.ts';
 
@@ -26,7 +26,13 @@ beforeEach(async () => {
 });
 afterEach(() => rm(state.root, { recursive: true, force: true }));
 
-const PACKET = readFileSync(new URL('../../../tests/fixtures/e2e-packet.md', import.meta.url), 'utf8');
+/** Marks the first call of a seeded packet irreversible, the one rule that flags a packet. */
+async function makeIrreversible(id: string) {
+	const file = join(state.root, 'items', id, 'facts.json');
+	const facts = JSON.parse(await readFile(file, 'utf8'));
+	facts.calls[0].rule = 'irreversible';
+	await writeFile(file, JSON.stringify(facts));
+}
 
 const board = (sort?: string) =>
 	load({ depends() {}, cookies: { get: () => sort } } as never) as Promise<{
@@ -37,19 +43,16 @@ const board = (sort?: string) =>
 
 describe('/', () => {
 	it('lists a seeded packet under its initiative, with its asks and repos', async () => {
-		await seedPacket(state.root, 'p1', PACKET, { initiative: 'sample-ui', initiativeTitle: 'Sample UI' });
+		await seedFacts(state.root, 'p1', 'close', { initiative: 'sample-ui', initiativeTitle: 'Sample UI' });
 		const data = await board();
 		expect(data.rows).toMatchObject([{ id: 'p1', group: 'Sample UI', asks: 2, repos: 1 }]);
-		expect(data.rows[0].rules).toContain('gate-failed');
+		expect(data.rows[0].rules).toContain('public-surface');
 	});
 
-	it('marks a packet with an irreversible step, and only that packet', async () => {
-		await seedPacket(state.root, 'p1', PACKET, { initiative: 'sample-ui', initiativeTitle: 'Sample UI' });
-		await seedPacket(state.root, 'p2', PACKET.replace(/^1\. \[session\]/m, '1. [irreversible]'), {
-			initiative: 'sample-ui',
-			initiativeTitle: 'Sample UI',
-			created: '2026-10-11T11:00:00Z'
-		});
+	it('marks a packet with an irreversible call, and only that packet', async () => {
+		await seedFacts(state.root, 'p1', 'close', { initiative: 'sample-ui', initiativeTitle: 'Sample UI' });
+		await seedFacts(state.root, 'p2', 'close', { initiative: 'sample-ui', initiativeTitle: 'Sample UI', created: '2026-10-11T11:00:00Z' });
+		await makeIrreversible('p2');
 		const { rows } = await board();
 		expect(Object.fromEntries(rows.map((r) => [r.id, r.irreversible]))).toEqual({ p1: false, p2: true });
 	});
@@ -60,11 +63,11 @@ describe('/', () => {
 	});
 
 	it.each([
-		['a packet.json that is not JSON', (dir: string) => writeFile(join(dir, 'packet.json'), '{nope')],
-		['a packet.json withdrawn mid-load', (dir: string) => rm(join(dir, 'packet.json'))]
+		['a facts.json that is not JSON', (dir: string) => writeFile(join(dir, 'facts.json'), '{nope')],
+		['a facts.json withdrawn mid-load', (dir: string) => rm(join(dir, 'facts.json'))]
 	])('names an unreadable packet in Single items instead of failing the board: %s', async (_name, damage) => {
-		await seedPacket(state.root, 'p1', PACKET, { initiative: 'sample-ui', initiativeTitle: 'Sample UI' });
-		await seedPacket(state.root, 'p2', PACKET, { created: '2026-10-11T11:00:00Z' });
+		await seedFacts(state.root, 'p1', 'close', { created: '2026-10-11T10:00:00Z', initiative: 'sample-ui', initiativeTitle: 'Sample UI' });
+		await seedFacts(state.root, 'p2', 'close', { created: '2026-10-11T11:00:00Z' });
 		await damage(join(state.root, 'items', 'p2'));
 		const { rows } = await board();
 		expect(rows).toMatchObject([
@@ -108,8 +111,9 @@ describe('layout', () => {
 
 	it('gives each packet its ask count and irreversible flag, and every other kind none', async () => {
 		await seed('a', '2026-10-11T10:00:00Z');
-		await seedPacket(state.root, 'p1', PACKET, { created: '2026-10-11T11:00:00Z' });
-		await seedPacket(state.root, 'p2', PACKET.replace(/^1\. \[session\]/m, '1. [irreversible]'), { created: '2026-10-11T12:00:00Z' });
+		await seedFacts(state.root, 'p1', 'close', { created: '2026-10-11T11:00:00Z' });
+		await seedFacts(state.root, 'p2', 'close', { created: '2026-10-11T12:00:00Z' });
+		await makeIrreversible('p2');
 		const { queue } = (await layoutLoad({ depends() {}, isDataRequest: false } as never)) as unknown as {
 			queue: Array<{ id: string; asks: number; irreversible: boolean }>;
 		};

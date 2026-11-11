@@ -1,4 +1,3 @@
-import { readFileSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -24,7 +23,6 @@ vi.mock('#lib/server/items.ts', async (importOriginal) => {
 	};
 });
 
-import { seedPacket } from '#lib/fixtures/seed-packet.ts';
 import { setHeadReader } from '#lib/server/heads.ts';
 import { headOf, seedFacts } from '#lib/server/seed-facts.ts';
 import { actions, load } from './+page.server.ts';
@@ -75,41 +73,53 @@ describe('a new-shape packet', () => {
 		await seedFacts(state.root, ID, 'close');
 	});
 
-	it('load returns the new packet beside the old fields', async () => {
+	it('load returns the packet', async () => {
 		await writeFile(join(dir(), 'notes.json'), JSON.stringify([NOTE]));
 		await writeFile(join(dir(), 'replies.json'), JSON.stringify([{ note: 'n1', outcome: 'answered', text: 'Done' }]));
 		await writeFile(join(dir(), 'stale.json'), JSON.stringify({ ref: 'aq-fixture/sample#1', queued: 'h1', now: 'h9' }));
 		const data = await loaded();
-		expect(data).toMatchObject({ kind: 'packet', decided: false, headline: 'Skip a decided item in the queue order', parts: [], asks: [] });
-		expect(data.packet2.facts.kind).toBe('close');
-		expect(data.packet2.text.headline).toBeTruthy();
-		expect(Object.keys(data.packet2.patches)).toEqual(['aq-fixture/sample#1', 'aq-fixture/sample#2']);
-		expect(data.packet2.prs.map((p: any) => p.ref)).toEqual(['aq-fixture/sample#1', 'aq-fixture/sample#2']);
-		expect(data.packet2.heads).toEqual([
+		expect(data).toMatchObject({ kind: 'packet', decided: false });
+		expect(data.packet.facts.kind).toBe('close');
+		expect(data.packet.text.headline).toBeTruthy();
+		expect(Object.keys(data.packet.patches)).toEqual(['aq-fixture/sample#1', 'aq-fixture/sample#2']);
+		expect(data.packet.prs.map((p: any) => p.ref)).toEqual(['aq-fixture/sample#1', 'aq-fixture/sample#2']);
+		expect(data.packet.heads).toEqual([
 			{ ref: 'aq-fixture/sample#1', head: 'h1' },
 			{ ref: 'aq-fixture/sample#2', head: 'h2' }
 		]);
-		expect(data.packet2.notes).toEqual([NOTE]);
-		expect(data.packet2.replies).toHaveLength(1);
-		expect(data.packet2.stale).toEqual({ ref: 'aq-fixture/sample#1', queued: 'h1', now: 'h9' });
+		expect(data.packet.notes).toEqual([NOTE]);
+		expect(data.packet.replies).toHaveLength(1);
+		expect(data.packet.stale).toEqual({ ref: 'aq-fixture/sample#1', queued: 'h1', now: 'h9' });
 	});
 
-	it('load leaves packet2 null on an old-grammar packet', async () => {
+	it('load returns an old-shape packet as its stored text, read-only', async () => {
 		await rm(dir(), { recursive: true });
-		await seedPacket(state.root, ID, readFileSync(new URL('../../../../../tests/fixtures/e2e-packet.md', import.meta.url), 'utf8'));
-		expect((await loaded()).packet2).toBeNull();
+		await mkdir(dir(), { recursive: true });
+		await writeFile(join(dir(), 'packet.md'), '# Old packet\n');
+		await writeFile(join(dir(), 'item.json'), JSON.stringify({ id: ID, kind: 'packet', title: 'Old', created: '2026-10-11T10:00:00Z' }));
+		expect(await loaded()).toMatchObject({ kind: 'legacy', decided: false, text: '# Old packet\n' });
+	});
+
+	it('load renders a design packet’s document with demoted headings and a styled table', async () => {
+		await rm(dir(), { recursive: true });
+		await seedFacts(state.root, ID, 'design');
+		await writeFile(join(dir(), 'design.md'), '# The design\n\n## Part\n\n| a | b |\n| - | - |\n| 1 | 2 |\n');
+		const { designHtml } = await loaded();
+		expect(designHtml).toContain('<h3>The design</h3>');
+		expect(designHtml).toContain('<h4>Part</h4>');
+		expect(designHtml).toContain('<table class="table');
 	});
 
 	it('load reads a damaged notes.json and replies.json as empty lists', async () => {
 		await writeFile(join(dir(), 'notes.json'), '{nope');
 		await writeFile(join(dir(), 'replies.json'), '{nope');
 		const data = await loaded();
-		expect([data.packet2.notes, data.packet2.replies]).toEqual([[], []]);
+		expect([data.packet.notes, data.packet.replies]).toEqual([[], []]);
 	});
 
 	it('saves notes as typed: a note saved comes back on reload', async () => {
 		expect(await call('notes', [['notes', JSON.stringify([NOTE])]])).toEqual({ saved: true });
-		expect((await loaded()).packet2.notes).toEqual([NOTE]);
+		expect((await loaded()).packet.notes).toEqual([NOTE]);
 		await call('notes', [['notes', JSON.stringify([NOTE, { id: 'n2', text: 'Whole', anchor: null }])]]);
 		expect((await read('notes.json')).map((n: any) => n.id)).toEqual(['n1', 'n2']);
 	});
@@ -174,7 +184,7 @@ describe('a new-shape packet', () => {
 		await call('approve', post([NOTE]));
 		const data = await loaded();
 		expect(data).toMatchObject({ decided: true, decision: { decision: 'approve' } });
-		expect(data.packet2.notes).toEqual([NOTE]);
+		expect(data.packet.notes).toEqual([NOTE]);
 	});
 
 	it('refuses a reject with no note, or only a blank one, and writes nothing', async () => {

@@ -4,17 +4,16 @@ import { APPROVAL_QUEUE_STATE } from '$app/env/private';
 import { error, fail } from '@sveltejs/kit';
 import { parseBrief, type Brief } from '#lib/brief.ts';
 import { decideCards, fingerprint, readChoices, type Card } from '#lib/cards.ts';
-import { fileGroups } from '#lib/diff.ts';
-import { render, renderInline, renderLabel } from '#lib/markdown.ts';
-import { checksSummary, reviewVerdict, withoutBrief } from '#lib/pr-summary.ts';
+import { render, renderDesign, renderInline, renderLabel } from '#lib/markdown.ts';
+import { withoutBrief } from '#lib/pr-summary.ts';
+import { deepDiveBody } from '#lib/packet-view.ts';
 import { nextItem } from '#lib/queue.ts';
 import { appendFold } from '#lib/server/folds.ts';
 import { checkCurrent } from '#lib/server/heads.ts';
-import { buildApprove, buildPacketDecision, buildSentBackCalls, isIrreversible, packetFingerprint, parseNotes } from '#lib/server/packet-decision.ts';
+import { buildPacketDecision, parseNotes } from '#lib/server/packet-decision.ts';
 import {
 	listWaiting,
 	readItem,
-	readSentBack,
 	writeDecision,
 	writeDecisionOnce,
 	writeNotes,
@@ -53,28 +52,16 @@ function withdrawn(packet: boolean) {
 }
 
 /**
- * Answers a post whose item has gone. A post from a packet page carries its fingerprint or its notes, so that
+ * Answers a post whose item has gone. A post from a packet page carries its calls or its notes, so that
  * page learns its session withdrew the item and is offered the board; any other post is a 404.
  */
 async function gone(request: Request) {
 	const form = await request.formData().catch(() => null);
-	return withdrawn(form?.has('fingerprint') === true || form?.has('notes') === true);
+	return withdrawn(form?.has('calls') === true || form?.has('notes') === true);
 }
 
 /**
- * Writes a decision with `link`, so a second post answers 409 instead of replacing the first. `packet`
- * is whether the post came from a packet page, which the withdrawn answer depends on.
- */
-async function decideOnce(id: string, decision: Decision, packet = false) {
-	const next = nextItem(await listWaiting(APPROVAL_QUEUE_STATE), id);
-	const written = await writeDecisionOnce(APPROVAL_QUEUE_STATE, id, decision);
-	if (written === 'exists') return fail(409, ALREADY_DECIDED);
-	if (written === 'gone') return withdrawn(packet);
-	return { next: next ? `/item/${next.id}` : null };
-}
-
-/**
- * Records a new-shape packet's decision: refuses what the post or the pinned heads rule out, then writes
+ * Records a packet's decision: refuses what the post or the pinned heads rule out, then writes
  * `notes.json` and `decision.json` with the same notes, so a note typed just before Ctrl+Enter is kept.
  */
 async function decideFacts(id: string, packet: FactPacket, kind: 'approve' | 'reject', form: FormData) {
@@ -99,7 +86,7 @@ async function decideFacts(id: string, packet: FactPacket, kind: 'approve' | 're
 	return { next: next ? `/item/${next.id}` : null };
 }
 
-/** Answers an approve or a send-back on a new-shape packet. */
+/** Answers an approve or a send-back on a packet. */
 async function answer(id: string, decided: boolean, packet: FactPacket, request: Request, kind: 'approve' | 'reject') {
 	if (decided) return fail(409, ALREADY_DECIDED);
 	const form = await request.formData().catch(() => null);
@@ -145,74 +132,18 @@ export const load: PageServerLoad = async ({ params }) => {
 	}
 	if (content.kind === 'facts') {
 		const { packet } = content;
-		// The old fields stay, empty, until the packet page reads `packet2` alone.
 		return {
 			meta,
 			decided,
 			kind: 'packet' as const,
-			headline: packet.facts.title,
-			background: '',
-			summary: [] as string[],
-			steps: [],
-			notChecked: '',
-			asks: [],
-			routine: [],
-			parts: [],
-			fingerprint: '',
-			irreversible: false,
-			irreversibleSteps: [] as number[],
 			decision,
-			packet2: packet
+			packet,
+			deepDiveHtml: render(deepDiveBody(packet.textMd)),
+			designHtml: packet.design ? renderDesign(packet.design.md) : null
 		};
 	}
-	if (content.kind === 'packet') {
-		const { packet, parts } = content;
-		const sentBack = meta.revises && (await readSentBack(APPROVAL_QUEUE_STATE, meta.revises.item));
-		return {
-			meta,
-			decided,
-			kind: 'packet' as const,
-			headline: packet.headline,
-			background: packet.background,
-			summary: packet.summary,
-			...(packet.whatChanged && { whatChanged: packet.whatChanged }),
-			...(meta.revises && { revision: meta.revises.revision }),
-			...(sentBack && { sentBack }),
-			steps: packet.steps,
-			notChecked: packet.notChecked,
-			asks: packet.asks.map((ask, i) => ({ index: i + 1, ...ask, part: ask.part?.ref ?? null })),
-			routine: packet.routine.map((row) => ({ ref: row.part.ref, kind: row.part.kind, verdict: row.verdict, fact: row.fact, why: row.why })),
-			parts: parts.map((part) => {
-				const groups = part.kind === 'pr' ? fileGroups(part.diff ?? '') : [];
-				const files = groups.flatMap((g) => g.files);
-				return {
-					ref: part.ref,
-					kind: part.kind,
-					lane: part.lane,
-					verdict: part.verdict,
-					head: part.head,
-					sha256: part.sha256,
-					...(part.kind === 'pr' && {
-						checks: checksSummary(part.pr?.statusCheckRollup),
-						review: reviewVerdict(part.body ?? ''),
-						groups,
-						totals: {
-							files: files.length,
-							adds: files.reduce((n, f) => n + f.adds, 0),
-							dels: files.reduce((n, f) => n + f.dels, 0)
-						},
-						link: part.pr ? { url: part.pr.url, head: part.pr.headRefName, base: part.pr.baseRefName } : null,
-						...(part.since && { since: 'patch' in part.since ? { groups: fileGroups(part.since.patch) } : part.since })
-					}),
-					...(part.kind === 'design' && { docHtml: render(withoutBrief(part.doc ?? '')) })
-				};
-			}),
-			fingerprint: packetFingerprint(parts, packet.asks),
-			irreversible: isIrreversible(packet),
-			irreversibleSteps: packet.steps.filter((s) => s.tag === 'irreversible').map((s) => s.n),
-			decision,
-			packet2: null
-		};
+	if (content.kind === 'legacy') {
+		return { meta, decided, kind: 'legacy' as const, decision, text: content.text };
 	}
 	// A decided triage shows the calls that were sent, matched by action so a reordered file never
 	// pairs a call with the wrong row.
@@ -241,14 +172,6 @@ export const actions: Actions = {
 		const found = await readItem(APPROVAL_QUEUE_STATE, params.id);
 		if (!found) return gone(request);
 		if (found.content.kind === 'facts') return answer(params.id, found.decided, found.content.packet, request, 'approve');
-		if (found.content.kind === 'packet') {
-			if (found.decided) return fail(409, ALREADY_DECIDED);
-			const form = await request.formData().catch(() => null);
-			if (!form) return fail(400, { message: 'Not a form post' });
-			// The server rebuilt the parts and asks from the item's files; the post only answers them.
-			const built = buildApprove(found.content, form);
-			return built.ok ? decideOnce(params.id, built.decision, form.has('fingerprint')) : fail(400, { message: built.message });
-		}
 		const item = await readWaiting(params.id);
 		const { content } = item;
 		if (content.kind !== 'design') return fail(400, { message: 'Nothing to approve' });
@@ -267,29 +190,14 @@ export const actions: Actions = {
 		const found = await readItem(APPROVAL_QUEUE_STATE, params.id);
 		if (!found) return gone(request);
 		if (found.content.kind === 'facts') return answer(params.id, found.decided, found.content.packet, request, 'reject');
-		if (found.content.kind === 'packet') {
-			if (found.decided) return fail(409, ALREADY_DECIDED);
-			const form = await request.formData().catch(() => null);
-			if (!form) return fail(400, { message: 'Not a form post' });
-			const note = form.get('note');
-			return decideOnce(
-				params.id,
-				{
-					decision: 'reject',
-					note: typeof note === 'string' ? note : '',
-					calls: buildSentBackCalls(found.content, form)
-				},
-				form.has('fingerprint')
-			);
-		}
 		const item = await readWaiting(params.id);
-		if (item.content.kind === 'triage') return fail(400, { message: 'Nothing to reject' });
+		if (item.content.kind !== 'design') return fail(400, { message: 'Nothing to reject' });
 		const form = await request.formData().catch(() => null);
 		if (!form) return fail(400, { message: 'Not a form post' });
 		const note = form.get('note');
 		return decide(params.id, { decision: 'reject', note: typeof note === 'string' ? note : '' });
 	},
-	/** Saves a new-shape packet's notes as typed: the post is the whole list. */
+	/** Saves a packet's notes as typed: the post is the whole list. */
 	notes: async ({ params, request }) => {
 		const found = await readItem(APPROVAL_QUEUE_STATE, params.id);
 		if (!found) return gone(request);
