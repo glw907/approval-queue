@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { link, open, readFile, readdir, rename, stat, unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Proposed, Triage } from '#lib/brief.ts';
+import { parseFacts, parseText, patchName, type Facts, type Text } from '#lib/facts.ts';
 import type { Packet } from '#lib/packet.ts';
 
 export type Disposition = Proposed;
@@ -77,8 +78,87 @@ export interface PacketPart {
 /** A stored patch the item compares against: the diff itself, or a marker that its commit is no longer an ancestor. */
 export type StoredPatch = { patch: string } | { gone: true };
 
+/** A note's anchor in the packet's prose: a section's `textContent` with LF endings, end exclusive. */
+export interface ProseAnchor {
+	section: string;
+	quote: string;
+	prefix: string;
+	suffix: string;
+	from: number;
+	to: number;
+}
+
+/** A note's anchor on a diff line at the pinned head. */
+export interface DiffAnchor {
+	pr: string;
+	file: string;
+	side: string;
+	line: number;
+	text: string;
+}
+
+/** A note: `anchor` is null for a note on the whole packet. */
+export interface Note {
+	id: string;
+	text: string;
+	anchor: ProseAnchor | DiffAnchor | null;
+}
+
+/** One call's answer in a packet decision, `call` counting from 1 in fact-file order. */
+export interface CallPick {
+	call: number;
+	choice: string;
+	changed: boolean;
+}
+
+/** A reply the command stored beside a note of a decided item. */
+export interface Reply {
+	note: string;
+	outcome: 'fixed' | 'filed' | 'answered';
+	text: string;
+	ref?: string;
+}
+
+/** `prs/<k>.json`: what the command fetched of one PR. */
+export interface PrData {
+	ref: string;
+	title: string;
+	body: string;
+	checks: Array<{ name: string; bucket: string }>;
+	files: Array<{ path: string; additions: number; deletions: number; rank: number }>;
+}
+
+/** A pinned head, from `heads.json`. */
+export interface Head {
+	ref: string;
+	head: string;
+}
+
+/** `stale.json`: the command saw a head move while the item waited. */
+export interface Stale {
+	ref: string;
+	queued: string;
+	now: string;
+}
+
+/** A new-shape packet as the server rebuilds it from the item directory. */
+export interface FactPacket {
+	facts: Facts;
+	text: Text;
+	/** The snapshot's patch for each PR, keyed by `owner/repo#n`. */
+	patches: Record<string, string>;
+	prs: PrData[];
+	heads: Head[];
+	notes: Note[];
+	replies: Reply[];
+	stale?: Stale;
+	/** A design packet's copied design and the hash the command pinned. */
+	design?: { md: string; sha256: string };
+}
+
 export type ItemContent =
 	| { kind: 'design'; doc: string }
+	| { kind: 'facts'; packet: FactPacket }
 	| { kind: 'packet'; packet: Packet; parts: PacketPart[] }
 	| ({ kind: 'triage' } & Triage);
 
@@ -101,7 +181,12 @@ export type Decision =
 			/** A packet's parts' verdicts and its asks' picks as the screen held them. */
 			calls?: PacketCall[];
 	  }
-	| { decision: 'submit'; rows: SubmittedRow[] };
+	| { decision: 'submit'; rows: SubmittedRow[] }
+	/**
+	 * A new-shape packet's decision: the calls as answered and the notes the post carried. `asks` is the
+	 * old shape's field, absent here, so the old page's reads still type until it is dropped.
+	 */
+	| { decision: 'approve' | 'reject'; calls: CallPick[]; decidedForYou: CallPick[]; notes: Note[]; asks?: undefined };
 
 export interface Item {
 	meta: ItemMeta;
@@ -212,7 +297,7 @@ export async function readItem(root: string, id: string): Promise<Item | undefin
 		content = { kind: 'design', doc: await readFile(join(dir, 'doc.md'), 'utf8') };
 	} else if (meta.kind === 'packet') {
 		try {
-			content = await readPacket(dir);
+			content = (await exists(join(dir, 'facts.json'))) ? await readFactPacket(dir) : await readPacket(dir);
 		} catch (err) {
 			if (err instanceof SyntaxError) return undefined;
 			throw err;
@@ -223,6 +308,52 @@ export async function readItem(root: string, id: string): Promise<Item | undefin
 		content = { kind: 'triage', headline: '', lede: '', rows: [], ...(triage && !Array.isArray(triage) && triage) };
 	}
 	return { meta, content, decided: decision !== undefined, ...(decision && { decision }) };
+}
+
+const exists = (path: string) => stat(path).then(() => true, () => false);
+
+/** A sidecar the page and the history can live without: a missing or damaged list reads as empty. */
+async function readList<T>(path: string): Promise<T[]> {
+	try {
+		const value = await readJson<unknown>(path);
+		return Array.isArray(value) ? (value as T[]) : [];
+	} catch (err) {
+		if (err instanceof SyntaxError) return [];
+		throw err;
+	}
+}
+
+/** Reads a new-shape packet's item directory. A fact or text file that no longer checks is a `SyntaxError`, as a damaged `packet.json` is. */
+async function readFactPacket(dir: string): Promise<ItemContent> {
+	const facts = parseFacts(await readFile(join(dir, 'facts.json'), 'utf8'));
+	if (!facts.ok) throw new SyntaxError(facts.messages.join('; '));
+	const text = parseText(await readFile(join(dir, 'text.md'), 'utf8'), facts.value);
+	if (!text.ok) throw new SyntaxError(text.messages.join('; '));
+	const patches: Record<string, string> = {};
+	const prs: PrData[] = [];
+	for (const [k, ref] of facts.value.prs.entries()) {
+		const patch = await readFile(join(dir, 'snapshot', patchName(ref)), 'utf8').catch(() => undefined);
+		if (patch !== undefined) patches[ref] = patch;
+		const pr = await readJson<PrData>(join(dir, 'prs', `${k}.json`));
+		if (pr) prs.push(pr);
+	}
+	const design = await readFile(join(dir, 'design.md'), 'utf8').catch(() => undefined);
+	const pinned = await readJson<{ sha256: string }>(join(dir, 'design.json'));
+	const stale = await readJson<Stale>(join(dir, 'stale.json')).catch(() => undefined);
+	return {
+		kind: 'facts',
+		packet: {
+			facts: facts.value,
+			text: text.value,
+			patches,
+			prs,
+			heads: (await readJson<Head[]>(join(dir, 'heads.json'))) ?? [],
+			notes: await readList<Note>(join(dir, 'notes.json')),
+			replies: await readList<Reply>(join(dir, 'replies.json')),
+			...(stale && { stale }),
+			...(design !== undefined && pinned && { design: { md: design, sha256: pinned.sha256 } })
+		}
+	};
 }
 
 /** A packet stored before the title and description, with a one-sentence lede and a Background section. */
@@ -279,7 +410,7 @@ async function readStoredPatch(dir: string, name: 'since'): Promise<StoredPatch 
 /** The note and calls of the send-back an earlier item ended in; absent when that item has no reject on disk. */
 export async function readSentBack(root: string, id: string): Promise<{ note: string; calls: NonNullable<Extract<Decision, { decision: 'reject' }>['calls']> } | undefined> {
 	const decision = await readJson<Decision>(join(root, 'items', id, 'decision.json'));
-	if (decision?.decision !== 'reject') return undefined;
+	if (decision?.decision !== 'reject' || !('note' in decision)) return undefined;
 	return { note: decision.note, calls: decision.calls ?? [] };
 }
 
@@ -327,4 +458,18 @@ export async function writeDecisionOnce(root: string, id: string, decision: Deci
 	if (await stillListed(dir)) return 'written';
 	await unlink(join(dir, 'decision.json')).catch(() => undefined);
 	return 'gone';
+}
+
+/**
+ * Writes `notes.json` through a temp file and a rename, so a reader never sees half of it. Returns
+ * false when the item was withdrawn, taking the file back as `writeDecision` does.
+ */
+export async function writeNotes(root: string, id: string, notes: Note[]): Promise<boolean> {
+	const dir = join(root, 'items', id);
+	const tmp = join(dir, `notes.json.${randomUUID()}.tmp`);
+	await writeFile(tmp, JSON.stringify(notes));
+	await rename(tmp, join(dir, 'notes.json'));
+	if (await stillListed(dir)) return true;
+	await unlink(join(dir, 'notes.json')).catch(() => undefined);
+	return false;
 }
