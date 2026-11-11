@@ -1,10 +1,10 @@
-// The comment margin's layout: each card at its anchor's line, stacked so none overlaps another.
+// The notes margin's layout: each card at its anchor's line, stacked so none overlaps another.
 // Pure, so the stacking is tested without a browser.
 
-/** Above this width the margin sits beside the page; below it, it is a drawer. */
-export const WIDE_MARGIN = '(min-width: 1260px)';
+/** Above this width the margin sits beside the page, as `packet.css` lays it out; below it, it stacks under the page. */
+export const WIDE_MARGIN = '(min-width: 1181px)';
 
-/** Space between two stacked cards, round 6's 12px. */
+/** Space between two stacked cards, 12px. */
 export const CARD_GAP = 12;
 
 export interface CardBox {

@@ -13,6 +13,7 @@ import { checkCurrent } from '#lib/server/heads.ts';
 import { buildPacketDecision, parseNotes } from '#lib/server/packet-decision.ts';
 import {
 	listWaiting,
+	readEarlier,
 	readItem,
 	writeDecision,
 	writeDecisionOnce,
@@ -138,6 +139,7 @@ export const load: PageServerLoad = async ({ params }) => {
 			kind: 'packet' as const,
 			decision,
 			packet,
+			earlier: await readEarlier(APPROVAL_QUEUE_STATE, meta, packet.textMd),
 			deepDiveHtml: render(deepDiveBody(packet.textMd)),
 			designHtml: packet.design ? renderDesign(packet.design.md) : null
 		};

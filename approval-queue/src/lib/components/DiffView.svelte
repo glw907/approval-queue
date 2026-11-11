@@ -13,7 +13,7 @@ file), which reads as a link too.
 </script>
 
 {#if file && !big}
-	<div class="diffbox"><DiffTable {file} /></div>
+	<div class="diffbox"><DiffTable {file} {pr} /></div>
 {:else}
 	<p class="muted">
 		{#if big}<code>{path}</code> changes {changedLines(file!)} lines, more than the {MAX_CHANGED} this page shows.{:else}The snapshot holds no text diff for <code>{path}</code>.{/if}

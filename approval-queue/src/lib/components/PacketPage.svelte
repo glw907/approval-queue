@@ -10,7 +10,8 @@ once. Approve posts `calls`, `decidedForYou`, and `notes` to the `approve` actio
 same to `reject`, and with no note it posts nothing and says so. An out-of-date packet disables
 Approve. A decided packet shows its picks, notes, and replies as stored and no controls.
 
-The margin is T8's: this page owns its element, the notes store, and the notes a "Say why" starts.
+The notes margin is `NotesMargin`; this page owns the notes store, the notes a "Say why" starts, and
+the claims a diff note needs open.
 -->
 <script lang="ts">
 	import { goto } from '$app/navigation';
@@ -19,6 +20,8 @@ The margin is T8's: this page owns its element, the notes store, and the notes a
 	import type { Call, DecidedCall } from '#lib/facts.ts';
 	import { desk } from '#lib/desk.svelte.ts';
 	import { COUNTING, held, UNDONE } from '#lib/held.svelte.ts';
+	import { anchorAt } from '#lib/anchors.ts';
+	import { isDiff } from '#lib/note-dom.ts';
 	import { Notes, postNotes } from '#lib/notes.svelte.ts';
 	import { patchFiles, plural, prLabel, statusLine } from '#lib/packet-view.ts';
 	import { nextItem } from '#lib/queue.ts';
@@ -28,6 +31,7 @@ The margin is T8's: this page owns its element, the notes store, and the notes a
 	import PacketChanged from './PacketChanged.svelte';
 	import PacketFold from './PacketFold.svelte';
 	import PacketReference from './PacketReference.svelte';
+	import NotesMargin from './NotesMargin.svelte';
 	import Prose from './Prose.svelte';
 
 	let { data }: { data: Extract<PageData, { kind: 'packet' }> } = $props();
@@ -50,7 +54,10 @@ The margin is T8's: this page owns its element, the notes store, and the notes a
 
 	const savedNotes: Note[] = restored ? readJson(restored.form.get('notes'), packet.notes) : packet.notes;
 	const notes = new Notes(savedNotes, (all) => postNotes(`${page.url.pathname}?/notes`, all));
-	let claimOpen = $state<boolean[]>(text.claims.map(() => false));
+	// A diff is not rendered while its claim is closed, so a claim holding a note's line starts open.
+	/* svelte-ignore state_referenced_locally */
+	const diffNotes = [...savedNotes, ...(data.earlier?.notes ?? [])].flatMap((n) => (n.anchor && isDiff(n.anchor) ? [n.anchor] : []));
+	let claimOpen = $state<boolean[]>(text.claims.map((c) => diffNotes.some((a) => a.pr === c.pr && a.file === c.path)));
 	let error = $state('');
 	let deciding = false;
 
@@ -89,10 +96,10 @@ The margin is T8's: this page owns its element, the notes store, and the notes a
 
 	/** Starts a note on a call the reader changed, anchored to its heading for the margin to place. */
 	function sayWhy(heading: string) {
-		if (notes.items.some((n) => n.anchor && 'quote' in n.anchor && n.anchor.section === 'calls' && n.anchor.quote === heading && n.text.trim() === '')) return;
-		const section = document.getElementById('calls')?.textContent?.replace(/\r\n?/g, '\n') ?? '';
+		if (notes.items.some((n) => n.anchor && !isDiff(n.anchor) && n.anchor.section === 'calls' && n.anchor.quote === heading && n.text.trim() === '')) return;
+		const section = document.getElementById('calls')?.textContent ?? '';
 		const from = Math.max(0, section.indexOf(heading));
-		notes.add({ id: crypto.randomUUID(), text: '', anchor: { section: 'calls', quote: heading, prefix: '', suffix: '', from, to: from + heading.length } });
+		notes.add({ id: crypto.randomUUID(), text: '', anchor: anchorAt(section, from, from + heading.length, 'calls') });
 	}
 
 	/** Moves focus to the next call card's picked option after the one holding focus, wrapping to the first. */
@@ -195,13 +202,11 @@ The margin is T8's: this page owns its element, the notes store, and the notes a
 	});
 	// Typing pauses are saved by the store; leaving the page saves what is pending.
 	$effect(() => () => void notes.flush());
-
-	const replyFor = (id: string) => packet.replies.find((r) => r.note === id);
 </script>
 
 <div class="packet">
 	<main id="main" tabindex="-1" class="packet-main">
-		<div class="packet-body">
+		<div class="packet-body" id="packet-body">
 			<p class="kicker">
 				<b>{status.lead}</b> {status.rest}
 				{#if facts.kind === 'stop' && facts.reason}
@@ -224,7 +229,7 @@ The margin is T8's: this page owns its element, the notes store, and the notes a
 				</div>
 			</section>
 
-			<PacketFold name="Deep dive" variant="deep">
+			<PacketFold name="Deep dive" variant="deep" id="deep" eager>
 				{#snippet title()}Deep dive{/snippet}
 				{#snippet sub()}<Prose text={text.deepDive} />{/snippet}
 				{#snippet children()}{@html data.deepDiveHtml}{/snippet}
@@ -248,7 +253,7 @@ The margin is T8's: this page owns its element, the notes store, and the notes a
 					<h2 class="sec" id="decided-h">Decided for you</h2>
 					<p class="secnote">The session took these itself. Each shows the option it applied.</p>
 					{#each facts.decidedForYou as call, i (i)}
-						<PacketFold name="Decided for you: {text.decided[i].heading}" variant="decided">
+						<PacketFold name="Decided for you: {text.decided[i].heading}" variant="decided" eager>
 							{#snippet title()}{text.decided[i].heading}{/snippet}
 							{#snippet sub()}Applied: {call.applied}{/snippet}
 							{#snippet children()}
@@ -306,21 +311,5 @@ The margin is T8's: this page owns its element, the notes store, and the notes a
 		</div>
 	</main>
 
-	<aside id="margin" class="margin" aria-label="Notes">
-		<h2>Your notes</h2>
-		{#if decided}
-			{#each notes.items as note (note.id)}
-				{@const reply = replyFor(note.id)}
-				<div class="stored">
-					{#if note.anchor && 'quote' in note.anchor}<q>{note.anchor.quote}</q>{/if}
-					<p>{note.text}</p>
-					{#if reply}<p class="muted"><b>{reply.outcome}.</b> {reply.text}{#if reply.ref} <code>{reply.ref}</code>{/if}</p>{/if}
-				</div>
-			{:else}
-				<p class="hint">No notes were written.</p>
-			{/each}
-		{:else}
-			<p class="hint">Select any text, including a line of a diff. A draft note appears here beside it. Notes go to the session with your decision.</p>
-		{/if}
-	</aside>
+	<NotesMargin {notes} {decided} replies={packet.replies} earlier={data.earlier} />
 </div>

@@ -378,7 +378,7 @@
 	font-size: 0.82rem;
 }
 
-/* The notes margin: T8 fills it. */
+/* The notes margin. Wide, each card sits at its passage's line (NotesMargin sets `top`); narrow, they stack. */
 .packet .margin {
 	border-left: 1px dashed var(--site-rule-color);
 	padding: 30px 16px 120px;
@@ -394,6 +394,26 @@
 	color: var(--color-muted);
 	margin: 0 0 10px;
 }
+.packet .margin .notelist {
+	list-style: none;
+	margin: 0;
+	padding: 0;
+}
+.packet .margin .note {
+	position: relative;
+	background: var(--site-field-bg);
+	border: 1px solid var(--color-base-300);
+	border-radius: var(--radius-box);
+	padding: 9px 10px 6px;
+	margin-bottom: 10px;
+	font-size: 0.88rem;
+}
+.packet .margin.wide .note {
+	position: absolute;
+	left: 16px;
+	right: 16px;
+	margin-bottom: 0;
+}
 .packet .margin q {
 	display: block;
 	quotes: none;
@@ -401,18 +421,75 @@
 	color: var(--color-muted);
 	border-left: 2px solid var(--color-warning);
 	padding-left: 8px;
-	margin: 0 0 4px;
+	margin: 0 18px 7px 0;
 }
-.packet .margin .stored {
-	border: 1px solid var(--color-base-300);
-	border-radius: var(--radius-box);
+.packet .margin .note .badge {
+	margin-bottom: 7px;
+}
+.packet .margin .note .textarea {
+	width: 100%;
+	min-height: 3.4rem;
+	font-size: 0.9rem;
+	line-height: 1.4;
+	padding: 5px 8px;
 	background: var(--site-field-bg);
-	padding: 9px 10px;
-	margin-bottom: 10px;
-	font-size: 0.88rem;
+	border-color: var(--site-field-border);
+	resize: none;
 }
-.packet .margin .stored p {
+.packet .margin .note .x {
+	position: absolute;
+	top: 4px;
+	right: 4px;
+}
+.packet .margin .note.earlier {
+	border-style: dotted;
+}
+.packet .margin .note .said {
 	margin: 0 0 4px;
+	white-space: pre-wrap;
+}
+.packet .margin .note .reply {
+	margin: 4px 0;
+	color: var(--color-muted);
+}
+.packet .margin .note.pending {
+	border: 1px dashed var(--color-primary);
+	background: var(--color-base-100);
+	padding-bottom: 9px;
+}
+.packet .margin .note.pending q {
+	margin-right: 0;
+	border-left-color: var(--color-primary);
+}
+.packet .margin .note.pending .btn {
+	width: 100%;
+	justify-content: space-between;
+}
+
+/* A passage a note sits on, painted by the CSS Custom Highlight API. */
+::highlight(note) {
+	background-color: color-mix(in oklab, var(--color-warning) 38%, transparent);
+	color: inherit;
+}
+::highlight(draft) {
+	background-color: color-mix(in oklab, var(--color-primary) 22%, transparent);
+	color: inherit;
+}
+
+/* A paragraph of a resend that differs from the sent-back text; the pseudo-element says so to a screen reader. */
+.packet .changed-para {
+	border-left: 3px solid var(--color-warning);
+	padding-left: 8px;
+	margin-left: -11px;
+}
+.packet .changed-para::before {
+	content: 'Changed since you sent it back. ';
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	overflow: hidden;
+	clip-path: inset(50%);
+	white-space: nowrap;
 }
 
 @media (max-width: 1180px) {

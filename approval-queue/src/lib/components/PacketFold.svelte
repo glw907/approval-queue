@@ -1,8 +1,9 @@
 <!-- @component
 One fold of the packet page: a stock daisyUI `collapse` on a native `details`, with a title and a sentence
 that says what is inside. Its body renders only once opened, so a file's diff loads when its row is
-opened. Each time it opens it posts its name to the page's `fold` action, which appends to the fold
-log; the post is best effort and never blocks the reader. `open` is bindable so a link can open it.
+opened; an `eager` fold keeps its text on the page while closed. Each time it opens it posts its name
+to the page's `fold` action, which appends to the fold log; the post is best effort and never blocks
+the reader. `open` is bindable so a link can open it.
 -->
 <script lang="ts">
 	import { page } from '$app/state';
@@ -20,10 +21,12 @@ log; the post is best effort and never blocks the reader. `open` is bindable so 
 		titleClass?: string;
 		id?: string;
 		open?: boolean;
+		/** Render the body while closed too, so its text is on the page for a note to anchor to. A diff stays lazy. */
+		eager?: boolean;
 		children: Snippet;
 	}
 
-	let { name, title, sub, variant = '', titleClass = '', id, open = $bindable(false), children }: Props = $props();
+	let { name, title, sub, variant = '', titleClass = '', id, open = $bindable(false), eager = false, children }: Props = $props();
 
 	function toggled(e: Event & { currentTarget: HTMLDetailsElement }) {
 		open = e.currentTarget.open;
@@ -37,6 +40,6 @@ log; the post is best effort and never blocks the reader. `open` is bindable so 
 <details class={['collapse collapse-arrow', variant]} {id} {open} ontoggle={toggled}>
 	<summary class={['collapse-title', titleClass]}>{@render title()}{#if sub}<span class="sub">{@render sub()}</span>{/if}</summary>
 	<div class="collapse-content">
-		{#if open}{@render children()}{/if}
+		{#if open || eager}{@render children()}{/if}
 	</div>
 </details>

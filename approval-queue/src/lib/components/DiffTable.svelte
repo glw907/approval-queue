@@ -1,11 +1,16 @@
 <!-- @component
-One file's unified diff as a table: old and new line numbers, a sign, and the line. Lines wrap
+One file's unified diff as a table: old and new line numbers, a sign, and the line. Each code row names
+its pull request, file, side, and line in `data-*` attributes, which the notes margin reads to anchor a
+note to the line. Lines wrap
 rather than scroll, so the table never widens the page. It matches the PR screen's Files rows.
 -->
 <script lang="ts">
 	import type { DiffFile } from '#lib/diff.ts';
 
-	let { file }: { file: DiffFile } = $props();
+	let { file, pr }: { file: DiffFile; pr: string } = $props();
+
+	/** The line a row anchors a note to: a removed line by its old number, any other by its new one. */
+	const anchorOf = (row: DiffFile['rows'][number]) => (row.kind === 'hunk' ? undefined : row.kind === 'del' ? { side: 'old', line: row.oldLine } : { side: 'new', line: row.newLine });
 </script>
 
 <table class="desk-diff" aria-label="Diff of {file.path}">
@@ -14,7 +19,8 @@ rather than scroll, so the table never widens the page. It matches the PR screen
 	</thead>
 	<tbody>
 		{#each file.rows as row, i (i)}
-			<tr class={row.kind}>
+			{@const at = anchorOf(row)}
+			<tr class={row.kind} data-pr={at && pr} data-file={at && file.path} data-side={at?.side} data-line={at?.line}>
 				<td class="ln">{row.kind === 'add' || row.kind === 'hunk' ? '' : (row.oldLine ?? '')}</td>
 				<td class="ln">{row.kind === 'del' || row.kind === 'hunk' ? '' : (row.newLine ?? '')}</td>
 				<td class="sg">

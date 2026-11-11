@@ -124,6 +124,15 @@ export interface FactPacket {
 	design?: { md: string; sha256: string };
 }
 
+/** What a resend carries from the item it revises: that item's notes with their replies, and the paragraphs of the new `text.md` that differ from its text. */
+export interface Earlier {
+	item: string;
+	revision: number;
+	notes: Note[];
+	replies: Reply[];
+	changed: string[];
+}
+
 export type ItemContent =
 	| { kind: 'design'; doc: string }
 	| { kind: 'facts'; packet: FactPacket }
@@ -369,4 +378,33 @@ export async function writeNotes(root: string, id: string, notes: Note[]): Promi
 	if (await stillListed(dir)) return true;
 	await unlink(join(dir, 'notes.json')).catch(() => undefined);
 	return false;
+}
+
+const blocks = (md: string) => md.split(/\n{2,}/).map((b) => b.trim()).filter(Boolean);
+const squash = (block: string) => block.replace(/\s+/g, ' ');
+
+/** The paragraphs of `now` that `before` does not hold, as written; whitespace differences do not count. */
+export function changedParagraphs(now: string, before: string): string[] {
+	const had = new Set(blocks(before).map(squash));
+	return blocks(now).filter((b) => !had.has(squash(b)));
+}
+
+/**
+ * What the item `meta.revises` names holds for the page: its notes, the replies the resend stored on
+ * it, and the paragraphs of `textMd` that changed since its text. Undefined for an item that revises
+ * nothing or whose earlier item is gone.
+ */
+export async function readEarlier(root: string, meta: ItemMeta, textMd: string): Promise<Earlier | undefined> {
+	if (!meta.revises) return undefined;
+	const { item, revision } = meta.revises;
+	const dir = join(root, 'items', item);
+	const before = await readFile(join(dir, 'text.md'), 'utf8').catch(() => undefined);
+	if (before === undefined) return undefined;
+	return {
+		item,
+		revision,
+		notes: await readList<Note>(join(dir, 'notes.json')),
+		replies: await readList<Reply>(join(dir, 'replies.json')),
+		changed: changedParagraphs(textMd, before)
+	};
 }

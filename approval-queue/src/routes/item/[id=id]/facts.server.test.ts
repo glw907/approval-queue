@@ -92,6 +92,27 @@ describe('a new-shape packet', () => {
 		expect(data.packet.stale).toEqual({ ref: 'aq-fixture/sample#1', queued: 'h1', now: 'h9' });
 	});
 
+	it('load carries a resend\u2019s earlier notes with their replies and marks the paragraphs that changed', async () => {
+		const EARLIER = '20261010T100000-1';
+		const edir = join(state.root, 'items', EARLIER);
+		await mkdir(edir, { recursive: true });
+		const text = await readFile(join(dir(), 'text.md'), 'utf8');
+		const opening = text.split('\n\n')[1];
+		await writeFile(join(edir, 'text.md'), text.replace(opening, 'An older opening paragraph.'));
+		await writeFile(join(edir, 'notes.json'), JSON.stringify([NOTE]));
+		await writeFile(join(edir, 'replies.json'), JSON.stringify([{ note: 'n1', outcome: 'fixed', text: 'Fixed', ref: 'abc1234' }]));
+		await writeFile(join(dir(), 'item.json'), JSON.stringify({ id: ID, kind: 'packet', title: 'A packet', created: '2026-10-11T10:00:00Z', revises: { item: EARLIER, revision: 2 } }));
+		const data = await loaded();
+		expect(data.earlier).toMatchObject({ item: EARLIER, revision: 2, notes: [NOTE], replies: [{ note: 'n1', outcome: 'fixed' }] });
+		expect(data.earlier.changed).toEqual([opening]);
+	});
+
+	it('load carries nothing for a packet that revises nothing, or whose earlier item is gone', async () => {
+		expect((await loaded()).earlier).toBeUndefined();
+		await writeFile(join(dir(), 'item.json'), JSON.stringify({ id: ID, kind: 'packet', title: 'A packet', created: 'c', revises: { item: 'gone', revision: 2 } }));
+		expect((await loaded()).earlier).toBeUndefined();
+	});
+
 	it('load returns an old-shape packet as its stored text, read-only', async () => {
 		await rm(dir(), { recursive: true });
 		await mkdir(dir(), { recursive: true });

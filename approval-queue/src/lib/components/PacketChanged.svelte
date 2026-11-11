@@ -32,7 +32,7 @@ open a claim.
 		{@const stored = file(claim.pr, claim.path)}
 		{@const diff = diffs(claim.pr).get(claim.path)}
 		<PacketFold name="Claim {i + 1}: {claim.path}" id="claim-{i}" titleClass="claim" bind:open={open[i]}>
-			{#snippet title()}<Prose text={claim.text} />{/snippet}
+			{#snippet title()}<span data-para><Prose text={claim.text} /></span>{/snippet}
 			{#snippet sub()}
 				{prLabel(claim.pr)}, <code>{claim.path}</code>{#if stored}, +{stored.additions} −{stored.deletions}{#if stored.rank === 0}, a held path{/if}{/if}
 			{/snippet}

@@ -39,7 +39,7 @@ last); a file's diff loads when its row is opened. The steps are a numbered list
 	<h2 class="sec" id="reference-h">Reference</h2>
 	<p class="secnote">Nothing here needs a decision.</p>
 
-	<PacketFold name="Reviews and checks">
+	<PacketFold name="Reviews and checks" eager>
 		{#snippet title()}Reviews and checks{/snippet}
 		{#snippet sub()}{plural(facts.reviews.length, 'review')} read, and the checks on {plural(prs.length, 'pull request')}.{/snippet}
 		{#snippet children()}
@@ -82,7 +82,7 @@ last); a file's diff loads when its row is opened. The steps are a numbered list
 		{/snippet}
 	</PacketFold>
 
-	<PacketFold name="If you approve">
+	<PacketFold name="If you approve" eager>
 		{#snippet title()}If you approve{/snippet}
 		{#snippet sub()}{plural(facts.steps.length, 'step')}. {yours ? `The session runs ${facts.steps.length - yours} of them and you run ${yours}.` : 'The session runs all of them.'}{/snippet}
 		{#snippet children()}

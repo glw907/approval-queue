@@ -52,7 +52,7 @@ that claim through `onjump`, so no diff appears twice on the page.
 			{#if !locked}<button type="button" class="btn btn-ghost btn-xs" onclick={() => onsaywhy(text.heading)}>Say why</button>{/if}
 		</div>
 	{/if}
-	<PacketFold name="Evidence: {text.heading}">
+	<PacketFold name="Evidence: {text.heading}" eager>
 		{#snippet title()}Evidence{/snippet}
 		{#snippet sub()}{call.evidence.length === 1 ? 'One fact' : `${call.evidence.length} facts`}, from {sources.join(', ')}.{/snippet}
 		{#snippet children()}
