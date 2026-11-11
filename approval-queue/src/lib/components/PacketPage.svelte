@@ -207,12 +207,7 @@ the claims a diff note needs open.
 <div class="packet">
 	<main id="main" tabindex="-1" class="packet-main">
 		<div class="packet-body" id="packet-body">
-			<p class="kicker">
-				<b>{status.lead}</b> {status.rest}
-				{#if facts.kind === 'stop' && facts.reason}
-					<span class="reason muted"><Prose text={facts.reason.text} /> <code>{facts.reason.source}</code></span>
-				{/if}
-			</p>
+			<p class="kicker"><b>{status.lead}</b> {status.rest}</p>
 			{#if stale && !decided}
 				<div role="note" class="alert alert-warning" id="stale">
 					<p>

@@ -27,9 +27,7 @@
 	color: var(--cairn-warning-ink);
 	font-weight: 600;
 }
-.packet .kicker .reason {
-	display: block;
-	margin-top: 2px;
+.packet .reason {
 	font-size: 0.92rem;
 	margin: 0 0 10px;
 	max-width: 41rem;
@@ -361,10 +359,31 @@
 	white-space: pre;
 }
 
-/* The decision bar sits at the foot of the reading column. */
+/* The decision bar docks to the foot of the viewport, 18px wider than the column on each side, as the
+   prototype's does: no fade behind it, no bottom border, rounded on top only. */
 .packet .barwrap {
-	margin-inline: -18px;
-	padding-inline: 18px;
+	background: none;
+	margin: 44px -18px 0;
+	padding: 0;
+}
+.packet .bar {
+	border-bottom: 0;
+	border-radius: var(--radius-box) var(--radius-box) 0 0;
+	padding: 11px 18px;
+	background: var(--color-base-100);
+}
+[data-theme='survey-dark'] .packet .bar {
+	background: var(--color-base-100);
+}
+@media (prefers-color-scheme: dark) {
+	:root:not([data-theme]) .packet .bar {
+		background: var(--color-base-100);
+	}
+}
+.packet .bar .btn {
+	height: 40px;
+	min-height: 40px;
+	padding-inline: 16px;
 }
 .packet .bar .state {
 	margin-left: 0;
