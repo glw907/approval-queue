@@ -14,17 +14,17 @@ Geoff and return his decision as JSON. `README.md` holds the interfaces and the 
     file and a text file.
   - The app shows a one-column packet page with anchored notes, a digest page, and a history page.
   - The docs kind, the single-`pr` kind, Defer, per-part verdicts, and the contents rail are gone.
-- Tasks T0 to T10 are committed. T11 (this README and STATUS) is in progress, and the end-to-end
-  check (CT) has not run.
+- Pass 2a is PR-ready: tasks T0 to T11 are committed, the end-to-end check ran (steps 1 to 7 and 9
+  pass; step 8, Orca, heard no focus events and fell back to the accessibility tree), and the
+  whole-branch review's three blocking findings are folded. The PR body holds the results.
 - Pass 2b changes the merge guard, the allow rule, the `approval-packet` skill, and the register in
   `glw907/workstation`, and in `glw907/survey` under Geoff's ruling.
 - `conductor-approval-queue` owns both passes and sends one close packet for their PRs.
 
 ## Next action
 
-The executor `approval-queue-pass-2a` runs CT, the whole-branch review, and one fix round, then
-marks the PR ready and tells the conductor. The conductor hands the close packet over and runs the
-cutover with pass 2b.
+The conductor hands the close packet over, then runs the cutover with pass 2b once Geoff approves.
+The executor `approval-queue-pass-2a` has ended.
 
 ## Cutover
 

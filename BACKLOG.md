@@ -12,21 +12,24 @@
 
 ## Medium
 
-- [ ] **#61** A PR whose diff touches an escape-bearing file can't be queued `#bug` `#approval-queue` *(2026-11-01)*
+- [x] **#61** A PR whose diff touches an escape-bearing file can't be queued `#bug` `#approval-queue` *(2026-11-01)*
   `gh pr diff` now refuses a diff with terminal escape sequences unless passed `--allow-escape-sequences`, so `approval-queue packet` and `--check` exit 1 on such a PR. glw907/cairn-cms#180 hit this by deleting 30 `.ansi` reference frames, with no added line carrying an escape. The session wrote the packet to its state dir and merged under the hand-over's queue-down rule. The queue should render the neutralized diff, or fall back to `git diff`, since passing raw escapes to a browser page needs its own thought.
+  Done in pass 2a (PR #14): `snapshot` retries `gh pr diff` with `--allow-escape-sequences` and stores the patch with the C0 control bytes other than tab and newline removed.
 
 - [ ] **#60** Two approved packets kept no decision.json `#bug` `#approval-queue` *(2026-11-01)*
   Geoff approved packets 20261101T090321-3628943 and 20261101T131042-271886 on 2026-11-01, and neither left a `decision.json`, so both were withdrawn and his chat word stood in for the approval. Design items saved fine that day, and both losses were packets. The cause is unexplained, so read the save path for a packet first. A record packet does not wait on its decision, so nothing stalled, but a lost approve on a waiting packet would hold a run.
-- [ ] **#59** An orderly reboot retires an undecided item, so `collect` can't recover it `#bug` `#approval-queue` *(2026-10-31)*
+- [x] **#59** An orderly reboot retires an undecided item, so `collect` can't recover it `#bug` `#approval-queue` *(2026-10-31)*
   Shutdown sends TERM to the waiting `approval-queue packet`, and the `trap 'exit 143' TERM HUP INT` line runs the EXIT trap's `retire_item`, the same path `withdraw` uses. `item.json` is gone, and `collect` answers "no item is queued". #16's recovery covers only a KILL or a crash, so a session that tells Geoff a reboot is safe loses the packet without notice. Seen on phonebook packet 20261031T151942-2819338 (retired 15:35:26 at shutdown, resent unchanged). Have `withdraw` leave a marker for the waiter to check, so a plain TERM leaves `item.json` for `collect`.
+  Done in pass 2a (PR #14): a TERM, HUP, or INT leaves `item.json`, and only `withdraw` retires an item, through a `withdrawn` marker the exit trap checks. #60 shows the same leavings.
 - [ ] **#58** A docs review's page controls: F8 order, a new page's diff button, and the added-text underline `#improvement` `#approval-queue` `#initiative:docs-system` *(2026-10-26)*
   F8 ("next call") always starts at the page after the last one used, so with two open calls on page 1 and one on page 2 it goes page 1, page 2, page 1. A new page (`base` empty) still offers "Show all unchanged lines" with nothing to unfold. Added text takes a solid underline like a link, so a whole new paragraph can read as a link. Found in the svelte and accessibility reviews of the docs cutover (PR #12).
 - [ ] **#57** A docs review's comment and send-back edges `#improvement` `#approval-queue` `#initiative:docs-system` *(2026-10-26)*
   A new comment takes its range before the flush that precedes the post, so text that moves during the flush leaves it stale. The send-back post names `blob:<path>` fields the reject action never reads. The `p.bg.bg-flat` callouts in `DocsView.svelte` are home-grown beside the stock `alert` the missing-page notice uses. Browser localStorage keys `desk.calls.*` are never cleaned up. Found in the reviews of the docs cutover (PR #12).
 - [ ] **#56** `readReplies` duplicates the `replies.json` read in `readDocs` `#improvement` `#approval-queue` `#initiative:docs-system` *(2026-10-26)*
   `readDocs` has only the item directory, so it cannot call `readReplies(root, id)`; merge the two so one reader serves the route and the comment store.
-- [ ] **#55** Normalize the docs command's tool-failure exit codes `#improvement` `#approval-queue` `#initiative:docs-system` *(2026-10-26)*
+- [x] **#55** Normalize the docs command's tool-failure exit codes `#improvement` `#approval-queue` `#initiative:docs-system` *(2026-10-26)*
   `fetch_pr` exits with `gh`'s own status (4 for auth, 127 for a missing `gh`) where the contract's refusals table says 1, and the notes and replies checks run after the `gh` fetch, so a malformed notes file exits 1 instead of 2 while `gh` is down. A docs item's `pr.json` also carries `ref`, `head`, and `state`, which the `pr` kind's does not.
+  Done in pass 2a (PR #14): the docs half went with the docs kind, and `snapshot`, `packet`, `merge`, and `land` exit 1 and print the `gh` error on a tool failure.
 - [x] **#54** Run the docs review's end-to-end check again after the close fixes `#improvement` `#approval-queue` `#initiative:docs-system` *(2026-10-26)*
   The scratch-PR check ran before the close review's fixes (a per-worktree save queue, the queued text as the edit count's base, a locked approve for a missing page). Unit and route tests cover each, and no browser run has seen them. The next real docs review exercises them first.
   Done: rerun on head 0af23a1 with scratch PR #13 passed (two pages saved back to back, the edit count survived a reload, steps 2 to 8 held).
@@ -137,22 +140,25 @@
 
 ## Low
 
-- [ ] **#43** The approve action's 410 for a withdrawn packet has no test `#improvement` `#approval-queue` `#initiative:approval-queue` *(2026-10-25)*
+- [x] **#43** The approve action's 410 for a withdrawn packet has no test `#improvement` `#approval-queue` `#initiative:approval-queue` *(2026-10-25)*
   The route test covers the reject action only; approve takes the same `form.has('fingerprint')` path (whole-branch review of the polish pass).
+  Done in pass 2a (PR #14): `facts.server.test.ts` covers an approve posted after the item is withdrawn between the read and the write, which answers 410 and leaves no `decision.json`.
 
 - [ ] **#42** Small cues the polish pass found and left `#improvement` `#approval-queue` `#initiative:approval-queue` *(2026-10-25)*
   "Sent back" in "Decided this session" takes the green success ink; the decision bar's Defer is hidden while the send-back note is open; `PacketAsks`' comment does not name the digit keys, and the digit caps show on a decided packet; each rail initiative is a `section` landmark; the `packet-facts` cache only drops a key when its file goes; `.linkbtn`, `.reopen`, and the pane toggle are about 20px tall and unmeasured against 2.5.8.
 
 - [ ] **#41** A `collect` can read a decision that the app is about to back off `#improvement` `#approval-queue` `#initiative:approval-queue` *(2026-10-25)*
   With a `collect` beside a `withdraw` and Geoff's post in the same microsecond window, the collect can print a `decision.json` the app then unlinks, while his page says nothing was recorded. The reverse ordering is covered by `withdraw`'s "run collect". A fix is a design call, for example `collect` checking `item.json` again after reading the decision (task-scope review of the polish pass).
+  Pass 2a (PR #14) covers the command side: a `collect` racing a `withdraw` on a decided item keeps the decision (`tests/lifecycle.test.sh`). The app's back-off, which unlinks a `decision.json` when it finds `item.json` gone, is unchanged and still open.
 
 - [x] **#40** `approval-queue withdraw` prints "No such file" from `proc_stat` when the waiter is gone `#bug` `#approval-queue` `#initiative:approval-queue` *(2026-10-25)*
   `read -r s <"/proc/$1/stat" 2>/dev/null` fails its redirect before the `2>/dev/null` applies, so bash prints `line 25: /proc/<pid>/stat: No such file or directory`. The result is right; the line is noise. Group the read in braces with the redirect outside.
   Batch 4: `withdraw` printed `line 25: /proc/511192/stat: No such file or directory` and nothing else, though the item was gone (404); it should print "withdrew <id>". Record: ~/Projects/initiatives/docs-system/research/2026-10-24-extend-blueprints-batch-4-friction.md (approval-queue 2)
   Done: PR #10.
 
-- [ ] **#39** A design's table renders without cell padding or borders, and its headings do not nest in a packet part `#bug` `#approval-queue` `#initiative:approval-queue` *(2026-10-25)*
+- [x] **#39** A design's table renders without cell padding or borders, and its headings do not nest in a packet part `#bug` `#approval-queue` `#initiative:approval-queue` *(2026-10-25)*
   The columns of a rendered design table run together on the design screen and in a packet part (`DesignView`'s `.desk-read` has no table rule). An embedded design's `##` headings render as `h2` inside a part's Why, so the outline jumps up, and the prose there inherits the Why body's muted colour.
+  Done in pass 2a (PR #14): a design packet renders the whole design with demoted headings and the daisyUI `table` class.
 
 - [ ] **#38** The Undo toasts have no key and no length setting for someone who turns single-key shortcuts off `#improvement` `#approval-queue` `#initiative:approval-queue` *(2026-10-25)*
   `z` reaches the held decision's Undo only with single-key shortcuts on, and the 10-second flash Undo has no key. A speech-input user must Tab to a toast at the end of the page in time. Options: a chord that ignores single-key mode, "Press Z to undo" in the announcement, or a hold length next to the shortcuts setting (daisyui-a11y review of the polish pass, WCAG 2.2.1).
