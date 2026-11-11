@@ -8,7 +8,6 @@ export const HOLD_MS = 5000;
 
 export const UNDONE = 'Decision undone. Nothing was sent.';
 export const COUNTING = 'This item’s decision is already counting down. Undo it first to decide again.';
-export const RESTORE_BLOCKED = 'Save or cancel your comment, then Undo opens the item again.';
 
 /** A decision taken on one item, waiting out its hold or posting. */
 export interface HeldDecision {
@@ -20,7 +19,7 @@ export interface HeldDecision {
 	/** The absolute form action `enhance` supplied, such as `http://127.0.0.1:7907/item/x?/approve`. */
 	href: string;
 	form: FormData;
-	outcome: 'approve' | 'reject' | 'submit' | 'defer';
+	outcome: 'approve' | 'reject' | 'submit';
 	toast: string;
 }
 
@@ -44,21 +43,18 @@ export interface Seed {
 	note: string;
 	/** A packet's answered asks, by ask index. */
 	answers: Record<number, string>;
-	/** A packet's routine verdicts, by part ref. */
-	verdicts: Record<string, string>;
 	/** A PR's or design's card picks, by card index. */
 	picks: Array<number | undefined>;
 	/** A triage list's rows in order; empty on every other kind. */
-	rows: Array<{ disposition: string; note: string }>;
+	rows: Array<{ disposition: string }>;
 }
 
-/** Reads back the fields `ItemPanel`'s form and its `form="decision-form"` inputs post. */
+/** Reads back the fields `ItemPanel`'s form posts. */
 export function seedFrom(form: FormData, kind: HeldDecision['kind']): Seed {
-	const seed: Seed = { note: '', answers: {}, verdicts: {}, picks: [], rows: [] };
+	const seed: Seed = { note: '', answers: {}, picks: [], rows: [] };
 	if (kind === 'triage') {
-		// Triage rows post `disposition` and `note` in pairs; it has no send-back note.
-		const notes = form.getAll('note').map(String);
-		seed.rows = form.getAll('disposition').map((d, i) => ({ disposition: String(d), note: notes[i] ?? '' }));
+		// Triage rows post one `disposition` each; it has no send-back note.
+		seed.rows = form.getAll('disposition').map((d) => ({ disposition: String(d) }));
 		return seed;
 	}
 	seed.note = String(form.get('note') ?? '');
@@ -66,7 +62,6 @@ export function seedFrom(form: FormData, kind: HeldDecision['kind']): Seed {
 		const text = String(value);
 		let m: RegExpExecArray | null;
 		if ((m = /^ask:(\d+)$/.exec(name))) seed.answers[Number(m[1])] = text;
-		else if ((m = /^part:(.+)$/.exec(name))) seed.verdicts[m[1]] = text;
 		else if ((m = /^c(\d+)$/.exec(name))) seed.picks[Number(m[1])] = Number(text);
 	}
 	return seed;
@@ -90,8 +85,6 @@ export class Held {
 	#timer: ReturnType<typeof startHold> | null = null;
 	#pausers = new Set<string>();
 	#restoring: HeldDecision | null = null;
-	/** Whether an open comment box stopped the navigation Undo started, so the item still has to open. */
-	restoreBlocked = $state(false);
 	#deps: HeldDeps;
 
 	constructor(deps: HeldDeps) {
@@ -139,25 +132,7 @@ export class Held {
 		this.ended = 'undone';
 		this.current = null;
 		this.#restoring = decision;
-		this.restoreBlocked = false;
 		await this.#deps.open(this.#restorePath(decision));
-	}
-
-	/**
-	 * Records that a guard cancelled a navigation to `pathname`, and whether that was the one Undo
-	 * started. The decision stays cancelled, and `resumeRestore` opens the item once the guard lets go.
-	 */
-	blockRestore(pathname: string): boolean {
-		const blocked = this.#restoring !== null && pathname === this.#restorePath(this.#restoring);
-		if (blocked) this.restoreBlocked = true;
-		return blocked;
-	}
-
-	/** Opens the item Undo is restoring after a guard held it back; does nothing when none is held back. */
-	async resumeRestore() {
-		if (!this.restoreBlocked || !this.#restoring) return;
-		this.restoreBlocked = false;
-		await this.#deps.open(this.#restorePath(this.#restoring));
 	}
 
 	#restorePath(decision: HeldDecision) {
@@ -182,8 +157,7 @@ export class Held {
 		try {
 			const result = await this.#post(decision);
 			if (result.type === 'success') {
-				// A deferred item comes back to the reader, so its draft and remembered calls stay.
-				if (decision.outcome !== 'defer') forget(decision.id);
+				forget(decision.id);
 				await this.#deps.refresh();
 				return;
 			}
@@ -210,15 +184,9 @@ export class Held {
 	}
 }
 
-/** Drops what a decided item no longer needs: its triage draft and its remembered calls. */
+/** Drops what a decided item no longer needs: its triage draft. */
 function forget(id: string) {
 	desk.drafts.delete(id);
-	const remember = `desk.calls.${id}`;
-	try {
-		for (const key of Object.keys(localStorage)) if (key === remember || key.startsWith(`${remember}.`)) localStorage.removeItem(key);
-	} catch {
-		// The remembered choices are a convenience; a stale entry is ignored once the item is decided.
-	}
 }
 
 export const held = new Held({

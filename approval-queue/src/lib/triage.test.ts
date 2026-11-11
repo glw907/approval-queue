@@ -2,10 +2,10 @@ import { describe, expect, it } from 'vitest';
 import { changedCount, groupRows, moveRow, seedRows, type Row } from './triage.ts';
 
 const rows: Row[] = [
-	{ action: '1', why: '', disposition: 'now', proposed: 'now', note: 'a' },
-	{ action: '2', why: '', disposition: 'defer', proposed: 'defer', note: 'b' },
-	{ action: '10', why: '', disposition: 'now', proposed: 'now', note: 'c' },
-	{ action: '3', why: '', disposition: 'drop', proposed: 'drop', note: 'd' }
+	{ action: '1', why: '', disposition: 'now', proposed: 'now' },
+	{ action: '2', why: '', disposition: 'defer', proposed: 'defer' },
+	{ action: '10', why: '', disposition: 'now', proposed: 'now' },
+	{ action: '3', why: '', disposition: 'drop', proposed: 'drop' }
 ];
 
 describe('moveRow', () => {
@@ -22,9 +22,9 @@ describe('moveRow', () => {
 describe('groupRows', () => {
 	it('keeps item-number order, the position in the list, inside a section', () => {
 		const text = [
-			{ action: 'zebra stripes', why: '', disposition: 'now', proposed: 'now', note: '' },
-			{ action: 'apple', why: '', disposition: 'defer', proposed: 'defer', note: '' },
-			{ action: 'mango', why: '', disposition: 'drop', proposed: 'drop', note: '' }
+			{ action: 'zebra stripes', why: '', disposition: 'now', proposed: 'now' },
+			{ action: 'apple', why: '', disposition: 'defer', proposed: 'defer' },
+			{ action: 'mango', why: '', disposition: 'drop', proposed: 'drop' }
 		] satisfies Row[];
 		const g = groupRows(moveRow(text, 2, 'now'));
 		expect(g.now.map((r) => r.index)).toEqual([0, 2]);
@@ -44,7 +44,7 @@ describe('changedCount', () => {
 });
 
 describe('seedRows', () => {
-	const fresh = rows.map((row) => ({ ...row, disposition: row.proposed, note: '' }));
+	const fresh = rows.map((row) => ({ ...row, disposition: row.proposed }));
 
 	it('restores an unsent draft, so calls made before leaving the item survive the return', () => {
 		const draft = moveRow(fresh, 0, 'drop');

@@ -9,8 +9,8 @@ const shutting = new Set<HTMLElement>();
 const BEHIND = ['#rail', '.appbar', '#main', '#review'];
 
 /**
- * Makes `el` inert, unless it holds the open drawer, as `#main` holds a document's comment margin:
- * then only its children that do not hold the drawer go inert, so the drawer stays usable.
+ * Makes `el` inert, unless it holds the open drawer: then only its children that do not hold the
+ * drawer go inert, so the drawer stays usable.
  */
 function shut(el: Element, drawer: Element) {
 	if (el === drawer) return;
@@ -31,8 +31,8 @@ function sync() {
 }
 
 /**
- * Opens or closes the queue rail or a pane as a modal drawer: the review pane, or the comment margin
- * whose id `pane` names. The page behind goes inert while one is open, focus moves into it, and
+ * Opens or closes the queue rail or a pane as a modal drawer: the review pane, or the pane whose id
+ * `pane` names. The page behind goes inert while one is open, focus moves into it, and
  * closing returns focus to the control that opened it.
  */
 export async function setDrawer(which: 'rail' | 'pane', open: boolean, from?: HTMLElement | null, pane = 'review') {

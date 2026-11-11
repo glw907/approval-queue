@@ -1,25 +1,21 @@
 <!-- @component
 The packet's opening sections, the header aside: "If you approve" (the numbered steps, each with
-who runs it and, where the packet routes the step, a verdict segment) and "Not checked" (a note with
+who runs it and, where the packet routes the step, the session's fact and a Why) and "Not checked" (a note with
 a warning rule).
 
-A step's verdict is a routine row on `step:<n>`; `verdicts` is bound up so the page can follow what
-changed. A step the packet does not route shows no segment.
+A routed step shows the session's own fact and a Why; the step's verdict posts as a hidden field
+the item panel holds.
 -->
 <script lang="ts">
 	import type { PageData } from '../../routes/item/[id=id]/$types';
 	import PacketIcon from './PacketIcon.svelte';
-	import PacketSeg from './PacketSeg.svelte';
 	import Prose from './Prose.svelte';
 
 	interface Props {
 		data: Extract<PageData, { kind: 'packet' }>;
-		/** The verdict chosen for each part, by ref. */
-		verdicts: Record<string, string>;
-		decided: boolean;
 	}
 
-	let { data, verdicts = $bindable({}), decided }: Props = $props();
+	let { data }: Props = $props();
 
 	const yours = $derived(data.steps.filter((s) => s.tag === 'you').length);
 	const row = (n: number) => data.routine.find((r) => r.ref === `step:${n}`);
@@ -58,11 +54,6 @@ changed. A step the packet does not route shows no segment.
 						</details>
 					{/if}
 				</div>
-				{#if routed}
-					<div class="sc">
-						<PacketSeg ref={routed.ref} kind={routed.kind} session={routed.verdict} label="Step {step.n}" bind:verdicts {decided} />
-					</div>
-				{/if}
 			</li>
 		{/each}
 	</ol>

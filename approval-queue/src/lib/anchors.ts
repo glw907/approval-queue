@@ -1,6 +1,6 @@
 // Geoff's comments on a docs review and the author's replies to them, with the anchor that ties
-// each to its text. Pure functions, shared by the server (which builds and re-places the anchors) and
-// the editor. Every offset is into LF-normalized text, as `readDocs` reads it.
+// each to its text. Pure functions that build and re-place anchors. Every offset is into
+// LF-normalized text.
 
 /** How the author answered a comment: made the change, kept the text with a reason, or answered a question. */
 export type ReplyStatus = 'done' | 'kept' | 'answered';

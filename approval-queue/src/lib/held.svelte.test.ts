@@ -16,7 +16,7 @@ function decision(id: string, outcome: HeldDecision['outcome'] = 'approve'): Hel
 	return {
 		id,
 		title: `Item ${id}`,
-		kind: 'docs',
+		kind: 'design',
 		subject: `the page ${id}`,
 		href: `http://127.0.0.1:7907/item/${id}?/${outcome}`,
 		form,
@@ -55,16 +55,6 @@ describe('Held', () => {
 		expect(store.ids.size).toBe(0);
 		expect(desk.drafts.has('a')).toBe(false);
 		expect(store.ended).toBe('sent');
-	});
-
-	it('keeps the drafts of a deferred item, which comes back to the reader', async () => {
-		const { store, post, refresh } = setup();
-		desk.drafts.set('a', []);
-		store.hold(decision('a', 'defer'));
-		await vi.advanceTimersByTimeAsync(HOLD_MS);
-		expect(post).toHaveBeenCalledTimes(1);
-		expect(refresh).toHaveBeenCalledTimes(1);
-		expect(desk.drafts.has('a')).toBe(true);
 	});
 
 	it('sends nothing on Undo, opens the item again, and hands its decision back once', async () => {
@@ -109,29 +99,6 @@ describe('Held', () => {
 		expect(store.hold(decision('a', 'reject'))).toBe(false);
 		expect(store.current).toBe(first);
 		expect(store.hold(decision('b'))).toBe(true);
-	});
-
-	it('keeps an Undo cancelled by an open comment box, and opens the item once the box closes', async () => {
-		const { store, post, open } = setup();
-		const d = decision('a');
-		store.hold(d);
-		open.mockImplementationOnce(async () => {
-			expect(store.blockRestore('/item/b')).toBe(false);
-			expect(store.blockRestore('/item/a')).toBe(true);
-		});
-		await store.undo();
-		expect(store.restoreBlocked).toBe(true);
-		expect(store.current).toBeNull();
-		await vi.advanceTimersByTimeAsync(HOLD_MS * 2);
-		expect(post).not.toHaveBeenCalled();
-		expect(open).toHaveBeenCalledTimes(1);
-		await store.resumeRestore();
-		expect(open).toHaveBeenCalledTimes(2);
-		expect(open).toHaveBeenLastCalledWith('/item/a');
-		expect(store.restoreBlocked).toBe(false);
-		expect(store.take('a')).toBe(d);
-		await store.resumeRestore();
-		expect(open).toHaveBeenCalledTimes(2);
 	});
 
 	it('keeps a second decision paused while the pointer stays on the toast', async () => {
@@ -229,17 +196,15 @@ describe('Held', () => {
 });
 
 describe('seedFrom', () => {
-	it('reads a packet’s note, answers, and verdicts back from its form data', () => {
+	it('reads a packet’s note and answers back from its form data', () => {
 		const form = new FormData();
 		form.set('fingerprint', 'f');
 		form.set('note', 'Please split it.');
 		form.set('ask:0', 'Ship it');
 		form.set('ask:2', 'Wait');
-		form.set('part:glw907/x#4', 'reject');
 		expect(seedFrom(form, 'packet')).toEqual({
 			note: 'Please split it.',
 			answers: { 0: 'Ship it', 2: 'Wait' },
-			verdicts: { 'glw907/x#4': 'reject' },
 			picks: [],
 			rows: []
 		});
@@ -255,29 +220,14 @@ describe('seedFrom', () => {
 		expect(seed.note).toBe('');
 	});
 
-	it('reads triage rows in order, pairing each disposition with its note', () => {
+	it('reads triage rows in order', () => {
 		const form = new FormData();
-		for (const [d, n] of [['now', ''], ['drop', 'Not worth it'], ['defer', '']]) {
-			form.append('disposition', d);
-			form.append('note', n);
-		}
+		for (const d of ['now', 'drop', 'defer']) form.append('disposition', d);
 		const seed = seedFrom(form, 'triage');
-		expect(seed.rows).toEqual([
-			{ disposition: 'now', note: '' },
-			{ disposition: 'drop', note: 'Not worth it' },
-			{ disposition: 'defer', note: '' }
-		]);
+		expect(seed.rows).toEqual([{ disposition: 'now' }, { disposition: 'drop' }, { disposition: 'defer' }]);
 		expect(seed.note).toBe('');
 	});
 
-	it('reads a docs review’s send-back note from a post carrying two pages and a call', () => {
-		const form = new FormData();
-		form.set('blob:docs/a.md', 'abc');
-		form.set('blob:docs/b.md', 'def');
-		form.set('call:B3', 'Keep it');
-		form.set('note', '- Still open: Why\n');
-		expect(seedFrom(form, 'docs')).toMatchObject({ note: '- Still open: Why\n', answers: {}, verdicts: {}, picks: [] });
-	});
 });
 
 describe('desk.flash', () => {

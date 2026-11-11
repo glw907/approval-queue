@@ -5,8 +5,6 @@ export type Disposition = Proposed;
 /** A file row plus the reader's call; the row's number is its position in the list. */
 export interface Row extends TriageRow {
 	disposition: Disposition;
-	/** Geoff's own words; the session's `why` is never overwritten. */
-	note: string;
 }
 
 /** Returns a copy with only row `index` changed, so the array's order never shifts under the view. */

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { stack } from './margin.ts';
+import { stack } from './margin-stack.ts';
 
 describe('stack', () => {
 	it('leaves cards that do not meet at their own lines', () => {

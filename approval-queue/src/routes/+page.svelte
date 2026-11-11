@@ -6,8 +6,8 @@ rows without moving the reader. Row links replace the history entry, so the empt
 `window.close()` keeps working. Each row's one link stretches over the row, so a row is one tab
 stop and the whole row is the target; it carries `data-q`, so j and k walk the rows, and its
 description is the row's meta line, then the orphan line when no session waits. An item whose decision `held` is counting down or posting
-is left off, and the empty state shows once nothing else waits. A deferred row sits under
-"Deferred"; an orphaned row says no session is waiting for its answer.
+is left off, and the empty state shows once nothing else waits. An orphaned row says no session is
+waiting for its answer.
 -->
 <script lang="ts">
 	import { age, boardGroups, SORT_COOKIE, type Sort } from '#lib/board.ts';

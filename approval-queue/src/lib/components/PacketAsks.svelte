@@ -64,7 +64,7 @@ and refuses a post that leaves one unanswered. Renders nothing for a packet with
 						{#if bound?.kind === 'pr'}
 							<PartFiles since={bound.since} />
 							{#if bound.totals}
-								<div class="mt-2"><FilesDiff groups={bound.groups ?? []} totals={bound.totals} focusKey={false} /></div>
+								<div class="mt-2"><FilesDiff groups={bound.groups ?? []} totals={bound.totals} /></div>
 							{/if}
 						{/if}
 					{/if}

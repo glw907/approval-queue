@@ -10,25 +10,6 @@ export interface ChecksSummary {
 	rows: { name: string; state: CheckState }[];
 }
 
-/**
- * The technical notes: what follows the `## Brief`, less the "Before merge" and "Review" sections,
- * which have their own places on the page. A body with no brief keeps its lead text too.
- */
-export function technicalNotes(body: string): string {
-	const parts: { title: string; lines: string[] }[] = [{ title: '', lines: [] }];
-	for (const line of body.split('\n')) {
-		const heading = /^##\s+(.*?)\s*#*\s*$/.exec(line);
-		if (heading) parts.push({ title: heading[1], lines: [] });
-		else parts[parts.length - 1].lines.push(line);
-	}
-	const hasBrief = parts.some((p) => p.title === 'Brief');
-	return parts
-		.filter((p) => !/^(brief|before merge|review)$/i.test(p.title) && (p.title !== '' || !hasBrief))
-		.map((p) => (p.title ? `## ${p.title}\n\n${p.lines.join('\n').trim()}` : p.lines.join('\n').trim()))
-		.filter(Boolean)
-		.join('\n\n');
-}
-
 /** A design doc with its `## Brief` section removed; the page shows the brief above the document. */
 export function withoutBrief(doc: string): string {
 	const out: string[] = [];
