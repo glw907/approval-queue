@@ -4,6 +4,13 @@
 
 ## High
 
+- [ ] **#70** Give every page one shell, one notes margin, and a written set of UI rules `#improvement` `#approval-queue` `#initiative:unattended-rounds` *(2026-11-12)*
+  Geoff, 2026-11-12: "The notes UI should be the same across all pages", "Selecting text should pull up a notes box on the right side. That should be consistant acorss all of approval queue", and the app "probably needs a larger UI/UX cleanup and standardization pass".
+  Today only the packet page has the margin (`approval-queue/src/lib/components/NotesMargin.svelte`). The digest page keeps a note form inside each folded line (`approval-queue/src/routes/digest/+page.svelte:45`), and the report page has no notes (`approval-queue/src/lib/components/ReportPage.svelte:31`).
+  The pages use three shells: `.packet` on the packet, digest, and history pages; `mx-auto max-w-3xl p-8` on the report, retired, and legacy pages; `flex-1 px-5` on the board and claim pages. The board carries 133 lines of page-local CSS and `DesignView.svelte` 67.
+  The repo has no UI rules file, so each pass chose its markup. Scope for one round: write the rules (the Survey recipe, the shell, the margin, the fold), prototype each changed page for Geoff before the plan, then move every page to them. Takes #69 with it.
+  Left alone: a note can be anchored to a passage on one page only, and each new page adds another layout. Found by Geoff on the digest page; `b877919` is the stopgap that keeps a digest line open.
+
 - [x] **#44** Give a decision whose session ended an owner `#bug` `#approval-queue` `#initiative:docs-system` *(2026-10-24)*
   Two page approvals (Content model, Arrange the admin sidebar, 2026-10-24 16:26) landed in decision files after their queueing session ended; the follow-up (mark glw907/cairn-cms#139 ready, CI, merge) has no owner. `collect` covers a deferred item, but an approve with no live session is a file in a folder.
   Add an `approval-queue pending` listing of decided items with no recorded follow-up, or a decision hook that runs a named command.
