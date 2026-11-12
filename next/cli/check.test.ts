@@ -182,14 +182,14 @@ describe('check usage', () => {
 	it('prints the usage for no argument', () => {
 		const { code, err } = run();
 		expect(code).toBe(2);
-		expect(err).toBe('usage: approval-queue check <doc.md>\n');
+		expect(err).toContain('usage: approval-queue check|send <doc.md>');
 	});
 
 	it('prints the usage for another subcommand', () => {
 		const path = join(dir, 'x.md');
 		copyFileSync(join(MOCKUP, 'content/30-round-report.md'), path);
-		const { code, err } = run('send', path);
+		const { code, err } = run('frobnicate', path);
 		expect(code).toBe(2);
-		expect(err).toBe('usage: approval-queue check <doc.md>\n');
+		expect(err).toContain('usage: approval-queue check|send <doc.md>');
 	});
 });
