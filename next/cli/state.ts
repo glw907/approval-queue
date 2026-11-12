@@ -14,8 +14,8 @@ export type State =
  * withdrawn.
  *
  * @remarks A `withdraw` counts only while waiting. An `undo` returns decided to waiting. A
- * `handed` record names the decision it hands as `decision: <n>`, the number of that decision's
- * file, and counts only when `n` is the current decision. Any other action is a decision and
+ * `handed` record names the decision it hands as `decision: <n>`, the record's 1-based
+ * position, which is its file number while `writeDecision` numbers files without gaps, and counts only when `n` is the current decision. Any other action is a decision and
  * counts only while waiting. Handed and withdrawn are final.
  *
  * For the server (pass A4): import this function and never write a second fold. After writing an

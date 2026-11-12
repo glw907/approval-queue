@@ -26,6 +26,7 @@ function alive(pid: number): boolean {
 }
 
 async function stop(pid: number): Promise<void> {
+	if (!alive(pid)) return;
 	for (const signal of ['SIGTERM', 'SIGKILL'] as const) {
 		try {
 			process.kill(pid, signal);
@@ -279,6 +280,7 @@ export async function restart(): Promise<number> {
 		}
 	} finally {
 		fs.rmSync(stage, { recursive: true, force: true });
+		fs.closeSync(logFd);
 		fs.closeSync(restartLock);
 	}
 }

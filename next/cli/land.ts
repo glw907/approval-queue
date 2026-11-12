@@ -63,8 +63,12 @@ export async function land(ref: string, sentence: string): Promise<number> {
 		process.stderr.write(`approval-queue: ${repo} has no default branch\n`);
 		return 1;
 	}
-	const poll = Number(process.env.APPROVAL_QUEUE_POLL_S ?? 30);
-	const cap = Number(process.env.APPROVAL_QUEUE_POLL_MAX_S ?? 900);
+	const seconds = (name: string, fallback: number) => {
+		const value = Number(process.env[name] ?? fallback);
+		return Number.isFinite(value) && value > 0 ? value : fallback;
+	};
+	const poll = seconds('APPROVAL_QUEUE_POLL_S', 30);
+	const cap = seconds('APPROVAL_QUEUE_POLL_MAX_S', 900);
 	let waited = 0;
 	for (;;) {
 		const read = ghJson<LandView>([
