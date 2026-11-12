@@ -2,18 +2,19 @@ import { storeRoot } from '#lib/store/store.ts';
 import { check } from './check.ts';
 import { land } from './land.ts';
 import { ghView } from './pr.ts';
+import { restart } from './restart.ts';
 import { send } from './send.ts';
 import { USAGE, waitForDecision } from './wait.ts';
 import { withdraw } from './withdraw.ts';
 
-const [command, arg, ...rest] = process.argv.slice(2);
+const [command, arg = '', ...rest] = process.argv.slice(2);
 
 function usage(): never {
 	process.stderr.write(`${USAGE}\n`);
 	process.exit(2);
 }
 
-async function dispatch(arg: string): Promise<number> {
+async function dispatch(): Promise<number> {
 	switch (command) {
 		case 'check': {
 			const { lines, code } = check(arg, ghView);
@@ -28,10 +29,13 @@ async function dispatch(arg: string): Promise<number> {
 			return withdraw(arg);
 		case 'land':
 			return land(arg, rest[0] ?? '');
+		case 'restart':
+			return restart();
 		default:
 			return usage();
 	}
 }
 
-if (!arg || rest.length > (command === 'land' ? 1 : 0)) usage();
-process.exit(await dispatch(arg));
+const wanted = command === 'restart' ? 0 : command === 'land' ? 2 : 1;
+if (!command || [arg, ...rest].filter((a, i) => i < wanted || a !== '').length > wanted || (wanted && !arg)) usage();
+process.exit(await dispatch());
