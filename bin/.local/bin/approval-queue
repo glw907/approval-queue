@@ -669,7 +669,7 @@ queue_packet() {
   fi
   if [ -n "$dsrc" ]; then
     cp "$dsrc" "$item/design.md"
-    jq -n --arg sha "$(sha256sum "$item/design.md" | cut -d' ' -f1)" '{sha256: $sha}' >"$item/design.json"
+    jq -n --arg sha "$(sha256sum "$item/design.md" | cut -d' ' -f1)" --arg path "$(realpath "$dsrc")" '{sha256: $sha, path: $path}' >"$item/design.json"
   fi
   [ -z "$replies_file" ] || store_replies "$replies_file" "$prev/replies.json"
   jq -n --arg id "$id" --arg initiative "$initiative" --arg title "$(jq -r '.facts.title' "$checked")" \
@@ -817,11 +817,14 @@ single_log() {
 # stale_poll: writes stale.json {ref, queued, now} when a pinned head, or the design's hash, differs from what
 # was queued. A gh failure is skipped; the next poll asks again.
 stale_poll() {
-  local ref head now dkey found
+  local ref head now dkey dfile found
   [ ! -e "$item/stale.json" ] || return 0
   if [ -e "$item/design.json" ]; then
     dkey=$(jq -r '.design | "\(.repo):\(.path)"' "$item/facts.json")
-    now=$(sha256sum "$projects/$(jq -r '.design.repo' "$item/facts.json")/$(jq -r '.design.path' "$item/facts.json")" 2>/dev/null | cut -d' ' -f1) || now=""
+    # The recorded path is where the packet found the design. An item queued before it was recorded reads the projects tree.
+    dfile=$(jq -r '.path // empty' "$item/design.json")
+    [ -n "$dfile" ] || dfile="$projects/$(jq -r '.design.repo' "$item/facts.json")/$(jq -r '.design.path' "$item/facts.json")"
+    now=$(sha256sum "$dfile" 2>/dev/null | cut -d' ' -f1) || now=""
     head=$(jq -r '.sha256' "$item/design.json")
     ref=$dkey
     [ -n "$now" ] && [ "$now" != "$head" ] || return 0
