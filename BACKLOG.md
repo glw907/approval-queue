@@ -4,6 +4,12 @@
 
 ## High
 
+- [ ] **#71** An open tab can show nothing waiting while a packet waits `#bug` `#approval-queue` `#initiative:unattended-rounds` *(2026-11-12)*
+  Geoff, 2026-11-12, with close packet `20261112T083259-3290807` waiting since 08:33: "Nothing is waiting in the queue." and then "This is another approval-queue bug." At the same minute a fresh browser on the same host was redirected from `/` to that packet, the rail listed it and the round report, and the packet's waiting command was alive.
+  What is known: the server process started at 08:40, seven minutes after the packet was queued, when `b877919` was built and restarted. A tab opened before that keeps the old build's client code, and its only refresh is the layout's poll (`approval-queue/src/routes/+layout.svelte:80`, `invalidate('desk:queue')` every 2000 ms), whose failure nothing reports.
+  Not known: whether Geoff's tab predated the restart, and whether a reload cleared it. The stale-tab cause is a guess until reproduced. To reproduce: leave a tab on the empty board, rebuild and restart the server, queue a test item under a scratch `APPROVAL_QUEUE_STATE`, and watch the tab's `__data.json` requests.
+  The fix should make a tab that can't refresh say so, or reload itself when the build changes, and a test should cover it. Left alone: a packet waits unseen and its round stalls with no sign to Geoff, since the queue is the only place a session asks him anything.
+
 - [ ] **#70** Give every page one shell, one notes margin, and a written set of UI rules `#improvement` `#approval-queue` `#initiative:unattended-rounds` *(2026-11-12)*
   Geoff, 2026-11-12: "The notes UI should be the same across all pages", "Selecting text should pull up a notes box on the right side. That should be consistant acorss all of approval queue", and the app "probably needs a larger UI/UX cleanup and standardization pass".
   Today only the packet page has the margin (`approval-queue/src/lib/components/NotesMargin.svelte`). The digest page keeps a note form inside each folded line (`approval-queue/src/routes/digest/+page.svelte:45`), and the report page has no notes (`approval-queue/src/lib/components/ReportPage.svelte:31`).
