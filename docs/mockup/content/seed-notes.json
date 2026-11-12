@@ -1,0 +1,12 @@
+{
+  "20-survey-edit": [
+    {"quote": "Keep an edit to a file Survey owns, and accept a test with ten findings?", "was": "Two answers needed before workstation #233 and #234 merge", "entries": [
+      {"who": "geoff", "example": true, "time": "2026-11-12T09:40", "text": "The title counts the questions without saying what they are."},
+      {"who": "claude", "time": "2026-11-12T11:52", "text": "Retitled so it names both questions."}]},
+    {"quote": "because #234 was built on top of #233 and can't merge before it", "was": "because its branch is cut from #233's", "entries": [
+      {"who": "geoff", "example": true, "time": "2026-11-12T09:42", "text": "What does \"cut from\" mean here?"},
+      {"who": "claude", "time": "2026-11-12T11:52", "text": "Reworded. #234 was built on top of #233, so it can't merge first."}]},
+    {"quote": "fix the four rules in round.md as backlog #81", "entries": [
+      {"who": "claude", "time": "2026-11-12T11:52", "text": "Why I recommend this over fixing it now: round.md belongs to an earlier pass, and the design you approved for this pass left it alone. Fixing it here would go outside that design."}]}
+  ]
+}

@@ -1,0 +1,15 @@
+[
+  {"tool": "Approval Queue", "repo": "glw907/approval-queue", "lines": [
+    {"pr": 18, "time": "2026-11-12T08:06", "text": "A round's report is now an item in the queue, with one button that marks it read."},
+    {"pr": 17, "time": "2026-11-12T06:41", "text": "Packets, merged pull requests, and digest lines carry the id of their round, and the pages group by round."},
+    {"pr": 16, "time": "2026-11-12T05:42", "text": "A stop packet's button reads \"Answer and resume\" and merges nothing, and the `merge` command refuses a pull request whose base isn't the default branch."},
+    {"pr": 15, "time": "2026-11-12T04:52", "text": "An approve now finds a design at the path its packet recorded, which fixes the approve the queue refused on 2026-11-11, and a new `restart` command rebuilds and restarts the app."}
+  ]},
+  {"tool": "Standards", "repo": "glw907/standards", "lines": [
+    {"pr": 20, "time": "2026-11-12T04:23", "text": "The brainstorming skill reads before it asks, and a design lists what done looks like."},
+    {"pr": 19, "time": "2026-11-11T21:25", "text": "The Go conventions skill is down to 1,394 words, with the rest moved to two reference files, and CI now caps it at 1,400."}
+  ]},
+  {"tool": "Workstation", "repo": "glw907/workstation", "lines": [
+    {"pr": 229, "time": "2026-11-11T22:14", "text": "The gate has a new lane that checks only the files you changed, it runs shellcheck, and the TypeScript, Go, and Svelte language servers are on."}
+  ]}
+]
