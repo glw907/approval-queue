@@ -267,6 +267,7 @@ usage_rc snapshot "$work/text.md"
 queue packet sample "$work/facts.json" "$work/text.md"
 assert_eq "$(jq -c '[.kind, .title, .initiative, (.pid | type), (.pidStart | type), has("revises")]' "$dir/item.json")" \
   '["packet","Skip a decided item in the queue order","sample","number","number",false]' "close: item.json"
+assert_eq "$(jq -c 'has("round")' "$dir/item.json")" "false" "close: item.json has no round key"
 assert_eq "$(cmp -s "$work/facts.json" "$dir/facts.json"; echo $?)" "0" "close: facts.json copied"
 assert_eq "$(cmp -s "$work/text.md" "$dir/text.md"; echo $?)" "0" "close: text.md copied"
 assert_eq "$(cmp -s "$work/snapshot/aq-fixture-sample-2.patch" "$dir/snapshot/aq-fixture-sample-2.patch"; echo $?)" "0" "close: snapshot copied"
@@ -550,6 +551,24 @@ queue design glw907/sample "A title" "$root/single-design.md"
 decide '{"decision":"hold"}'
 assert_eq "$(tail -n 1 "$log" | jq -c '[.ref,.kind,.lane,.verdict]')" '["glw907/sample:single-design.md","design","single","hold"]' "design kind: log line"
 assert_eq "$(($(log_lines) - before))" "1" "design kind: log line count"
+
+# ---- a round: the check names the rule, and the queued item holds the id ----
+ROUND_RULE="lowercase letters, digits, and hyphens, starting with a letter, 12 characters at most"
+mkpr 1 $HA OPEN pass
+mkpr 2 $HB OPEN pass
+jq '. + {round: "ur-queue-long"}' "$work/facts.json" >"$work/round-long.json"
+jq '. + {round: "Ur-queue"}' "$work/facts.json" >"$work/round-upper.json"
+jq '. + {round: "ur-queue"}' "$work/facts.json" >"$work/round-ok.json"
+refused "round too long" "$ROUND_RULE" packet --check sample "$work/round-long.json" "$work/text.md"
+refused "round not lowercase" "$ROUND_RULE" packet --check sample "$work/round-upper.json" "$work/text.md"
+run snapshot "$work/round-ok.json"
+assert_eq "$rc" "0" "round: snapshot"
+run packet --check sample "$work/round-ok.json" "$work/text.md"
+assert_eq "$rc" "0" "round: check exit code"
+queue packet sample "$work/round-ok.json" "$work/text.md"
+assert_eq "$(jq -r '.round' "$dir/item.json")" "ur-queue" "round: item.json holds the round"
+assert_eq "$(cmp -s "$work/round-ok.json" "$dir/facts.json"; echo $?)" "0" "round: facts.json copied"
+decide '{"decision":"reject","calls":[],"decidedForYou":[],"notes":[]}'
 
 live_leak
 

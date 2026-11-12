@@ -22,14 +22,37 @@ export interface BoardRow {
 	irreversible: boolean;
 	/** Set on an item that is not a packet; the board names its kind in place of its asks. */
 	single?: string;
+	/** The unattended round the packet belongs to, from its `item.json`. */
+	round?: string;
+	/** The repo names (the part after the slash) the packet's parts hold, once each. */
+	repoNames?: string[];
 	/** The session that queued the item is gone, so the row says nothing is waiting for the answer. */
 	orphaned: boolean;
 }
 
-export interface BoardGroup {
-	title: string;
+/** A run of one group's rows under one round heading; the rows with no round form a section with no heading. */
+export interface BoardSection {
+	round?: string;
+	heading?: string;
 	rows: BoardRow[];
 }
+
+export interface BoardGroup {
+	title: string;
+	/** Every row of the group, in the chosen order. */
+	rows: BoardRow[];
+	/** The rows with no round first, then one section per round. */
+	sections: BoardSection[];
+}
+
+/** The group title of a waiting packet: its initiative's title, else the id, else "No initiative". */
+export const groupTitle = (meta: { initiativeTitle?: string; initiative?: string }): string =>
+	meta.initiativeTitle || (meta.initiative && meta.initiative !== 'none' ? meta.initiative : 'No initiative');
+
+const roundHeading = (round: string, rows: BoardRow[]): string => {
+	const names = [...new Set(rows.flatMap((r) => r.repoNames ?? []))].sort();
+	return names.length ? `Round ${round} \u00b7 ${names.join(', ')}` : `Round ${round}`;
+};
 
 const byOldest = (a: BoardRow, b: BoardRow) => a.created.localeCompare(b.created) || a.id.localeCompare(b.id);
 const byAsks = (a: BoardRow, b: BoardRow) => b.asks - a.asks || byOldest(a, b);
@@ -43,10 +66,22 @@ export function boardGroups(rows: BoardRow[], sort: Sort): BoardGroup[] {
 	for (const row of rows) {
 		map.set(row.group, [...(map.get(row.group) ?? []), row]);
 	}
-	const total = (g: BoardGroup) => g.rows.reduce((n, r) => n + r.asks, 0);
-	const groups = [...map].map(([title, list]) => ({ title, rows: list.sort(order) }));
+	const total = (list: BoardRow[]) => list.reduce((n, r) => n + r.asks, 0);
+	const sectionsOf = (list: BoardRow[]): BoardSection[] => {
+		const byRound = new Map<string, BoardRow[]>();
+		for (const r of list) if (r.round) byRound.set(r.round, [...(byRound.get(r.round) ?? []), r]);
+		const loose = list.filter((r) => !r.round);
+		const rounds = [...byRound]
+			.map(([round, rs]) => ({ round, heading: roundHeading(round, rs), rows: rs }))
+			.sort((a, b) => (sort === 'asks' ? total(b.rows) - total(a.rows) : 0) || byOldest(a.rows[0], b.rows[0]));
+		return [...(loose.length ? [{ rows: loose }] : []), ...rounds];
+	};
+	const groups = [...map].map(([title, list]) => {
+		const rows = list.sort(order);
+		return { title, rows, sections: sectionsOf(rows) };
+	});
 	const rank = (a: BoardGroup, b: BoardGroup) =>
-		(sort === 'asks' ? total(b) - total(a) : 0) || byOldest(a.rows[0], b.rows[0]);
+		(sort === 'asks' ? total(b.rows) - total(a.rows) : 0) || byOldest(a.rows[0], b.rows[0]);
 	return [
 		...groups.filter((g) => g.title !== SINGLES).sort(rank),
 		...groups.filter((g) => g.title === SINGLES)
@@ -96,6 +131,42 @@ export function railLine(item: RailItem, now = Date.now()): string {
 	if (item.kind === 'design') return `Design, ${ago}`;
 	const calls = item.asks === 0 ? 'no calls' : `${item.asks} call${item.asks === 1 ? '' : 's'}`;
 	return `${PACKET_WORD[item.packetKind ?? 'stop']}, ${calls}, ${ago}`;
+}
+
+/** The waiting items the rail groups: those with no round in the order given, then initiative groups that hold a round. */
+export function railRounds<T extends { created: string; round?: string; initiative?: string; initiativeTitle?: string }>(
+	items: T[]
+): { loose: T[]; groups: Array<{ title: string; rounds: Array<{ round: string; items: T[] }> }> } {
+	const oldest = (list: T[]) => list.reduce((a, i) => (i.created < a ? i.created : a), list[0].created);
+	const byGroup = new Map<string, Map<string, T[]>>();
+	for (const item of items) {
+		if (!item.round) continue;
+		const title = groupTitle(item);
+		const rounds = byGroup.get(title) ?? new Map<string, T[]>();
+		rounds.set(item.round, [...(rounds.get(item.round) ?? []), item]);
+		byGroup.set(title, rounds);
+	}
+	const groups = [...byGroup].map(([title, rounds]) => ({
+		title,
+		rounds: [...rounds].map(([round, list]) => ({ round, items: list })).sort((a, b) => oldest(a.items).localeCompare(oldest(b.items)))
+	}));
+	groups.sort((a, b) => oldest(a.rounds[0].items).localeCompare(oldest(b.rounds[0].items)));
+	return { loose: items.filter((i) => !i.round), groups };
+}
+
+/** One repo's digest lines (newest first) as sections: one with no heading when no line has a round, else a section per round, then "No round". */
+export function digestSections<T extends { time: string; round?: unknown }>(lines: T[]): Array<{ heading?: string; lines: T[] }> {
+	const roundOf = (l: T) => (typeof l.round === 'string' && l.round !== '' ? l.round : undefined);
+	if (!lines.some(roundOf)) return [{ lines }];
+	const byRound = new Map<string, T[]>();
+	for (const l of lines) {
+		const r = roundOf(l);
+		if (r) byRound.set(r, [...(byRound.get(r) ?? []), l]);
+	}
+	const newest = (list: T[]) => list.reduce((a, l) => (l.time > a ? l.time : a), list[0].time);
+	const rounds = [...byRound].sort((a, b) => newest(b[1]).localeCompare(newest(a[1]))).map(([r, list]) => ({ heading: `Round ${r}`, lines: list }));
+	const none = lines.filter((l) => !roundOf(l));
+	return [...rounds, ...(none.length ? [{ heading: 'No round', lines: none }] : [])];
 }
 
 const dayKey = (time: string) => new Date(time).toLocaleDateString('en-CA');

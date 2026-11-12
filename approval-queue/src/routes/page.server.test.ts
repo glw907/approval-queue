@@ -49,6 +49,15 @@ describe('/', () => {
 		expect(data.rows[0].rules).toContain('public-surface');
 	});
 
+	it('carries a packet\'s round and its repo names onto its row, and no round key when it has none', async () => {
+		await seedFacts(state.root, 'r1', 'close', { round: 'ur-queue' });
+		await seedFacts(state.root, 'r2', 'close', { created: '2026-10-11T11:00:00Z' });
+		const { rows } = await board();
+		const byId = Object.fromEntries(rows.map((r) => [r.id, r]));
+		expect(byId.r1).toMatchObject({ round: 'ur-queue', repoNames: ['sample'] });
+		expect('round' in byId.r2).toBe(false);
+	});
+
 	it('marks a packet with an irreversible call, and only that packet', async () => {
 		await seedFacts(state.root, 'p1', 'close', { initiative: 'sample-ui', initiativeTitle: 'Sample UI' });
 		await seedFacts(state.root, 'p2', 'close', { initiative: 'sample-ui', initiativeTitle: 'Sample UI', created: '2026-10-11T11:00:00Z' });

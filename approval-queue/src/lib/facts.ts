@@ -48,6 +48,8 @@ export interface DocRef {
 export interface Facts {
 	kind: PacketKind;
 	title: string;
+	/** The unattended round the packet belongs to; absent on a packet outside a round. */
+	round?: string;
 	/** Stop packets only: why the pass paused. */
 	reason?: Source;
 	/** `owner/repo#n` in merge order; empty on a design packet. */
@@ -113,6 +115,9 @@ export const UNFORCED_CAP = 3;
 
 /** The longest headline the board and the page header show on one or two lines. */
 const TITLE_MAX = 80;
+
+const ROUND_ID = /^[a-z][a-z0-9-]{0,11}$/;
+export const ROUND_RULE = 'lowercase letters, digits, and hyphens, starting with a letter, 12 characters at most';
 
 const PR_REF = /^[\w.-]+\/[\w.-]+#[1-9]\d*$/;
 const PATH_LINE = /^[^\s:#]+:[1-9]\d*(?:-[1-9]\d*)?$/;
@@ -226,6 +231,12 @@ export function parseFacts(json: string): Parsed<Facts> {
 	if (!isText(raw.title)) errors.push('the fact file needs a title string');
 	else errors.push(...titleDefects(raw.title));
 
+	let round: string | undefined;
+	if ('round' in raw) {
+		if (typeof raw.round === 'string' && ROUND_ID.test(raw.round)) round = raw.round;
+		else errors.push(`round is ${ROUND_RULE}`);
+	}
+
 	let reason: Source | undefined;
 	if (kind === 'stop') {
 		const list = sourceList(isObject(raw.reason) ? [raw.reason] : undefined, 'reason', errors);
@@ -298,6 +309,7 @@ export function parseFacts(json: string): Parsed<Facts> {
 		value: {
 			kind: kind as PacketKind,
 			title: raw.title as string,
+			...(round !== undefined && { round }),
 			...(reason && { reason }),
 			prs,
 			...(design && { design }),

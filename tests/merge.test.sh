@@ -210,6 +210,32 @@ assert_eq "$(grep '^pr merge' "$glog")" "pr merge 1 --repo aq-fixture/app --merg
 assert_eq "$(wc -l <"$state/digest.jsonl")" 1 "digest lines"
 assert_eq "$(jq -c '[.ref, .head, .claim, .lane]' "$state/digest.jsonl")" '["'"$A"'","'"$HA"'","small fix","land"]' "land digest line"
 assert_eq "$(jq -r '.time | type' "$state/digest.jsonl")" string "digest time"
+assert_eq "$(jq -c 'has("round")' "$state/digest.jsonl")" false "land digest line has no round key"
+
+# land --round: the digest line holds the round.
+reset; rm -f "$state/digest.jsonl"; pr 1 OPEN $HA "Clean." '[{"status":"COMPLETED","conclusion":"SUCCESS"}]'
+run land --round ur-queue $A "small fix"
+assert_eq "$rc" 0 "land round exit"
+assert_eq "$(grep -c '^pr merge' "$glog")" 1 "land round merges once"
+assert_eq "$(jq -c '[.ref, .head, .claim, .lane, .round]' "$state/digest.jsonl")" '["'"$A"'","'"$HA"'","small fix","land","ur-queue"]' "land round digest line"
+
+# land --round with a bad id: exit 2 naming the rule, no gh call, no digest line.
+reset; rm -f "$state/digest.jsonl"
+run land --round UR_Queue-way-too-long $A c
+assert_eq "$rc" 2 "land bad round exit"
+grep -qF "lowercase letters, digits, and hyphens, starting with a letter, 12 characters at most" "$err" || { echo "FAIL: land bad round: rule not named: $(cat "$err")"; fail=1; }
+# An accented letter is not in a to z, whatever the caller's locale: the command and the fact check agree.
+run land --round ür-queue $A c
+assert_eq "$rc" 2 "land accented round exit"
+grep -qF "12 characters at most" "$err" || { echo "FAIL: land accented round: rule not named: $(cat "$err")"; fail=1; }
+assert_eq "$(wc -l <"$glog")" 0 "land accented round makes no gh call"
+assert_eq "$(wc -c <"$glog")" 0 "land bad round makes no gh call"
+[ ! -e "$state/digest.jsonl" ] || { echo "FAIL: a bad round logged a digest line"; fail=1; }
+run land --round
+assert_eq "$rc" 2 "land --round alone exit"
+run land --round ur-queue $A
+assert_eq "$rc" 2 "land --round with no claim exit"
+assert_eq "$(merges)" 0 "land round usage errors merge nothing"
 
 # land refusals: closed, Before merge, a failing check (each makes no call and logs nothing).
 rm -f "$state/digest.jsonl"

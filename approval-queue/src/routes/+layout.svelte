@@ -1,7 +1,7 @@
 <!-- @component
 The page skeleton: the queue rail pinned left and the open screen beside it, then the shortcut
 sheet, the live region, and the toast. The rail lists what waits for the reader (each waiting
-packet, design, and triage list), then the digest and history, which need no decision; it shows no
+packet, design, and triage list; a round's items sit under their initiative and a round heading below the rest), then the digest and history, which need no decision; it shows no
 badge or count, and below 1180px it is hidden. One `keydown` listener on the document turns every
 key into a `keyAction`; the rail, the drawers, the sheet, and Undo act on it here, and the open
 screen acts on the rest through `desk.handlers`.
@@ -15,7 +15,7 @@ pointer moves over it or while focus is on it. A held or posting item leaves the
 	import { page } from '$app/state';
 	import { onMount } from 'svelte';
 	import { fade } from 'svelte/transition';
-	import { digestLine, railLine } from '#lib/board.ts';
+	import { digestLine, railLine, railRounds } from '#lib/board.ts';
 	import { closeDrawers } from '#lib/components/frame/drawers.ts';
 	import { desk } from '#lib/desk.svelte.ts';
 	import { held } from '#lib/held.svelte.ts';
@@ -26,6 +26,7 @@ pointer moves over it or while focus is on it. A held or posting item leaves the
 	let sheet: HTMLDialogElement;
 	const currentId = $derived(page.params.id);
 	const waiting = $derived(data.queue.filter((item) => !held.ids.has(item.id)));
+	const rail = $derived(railRounds(waiting));
 	const onPath = (path: string) => page.url.pathname === path || page.url.pathname.startsWith(`${path}/`);
 
 	type SheetRow = { keys: string[]; text: string; single?: boolean };
@@ -195,27 +196,49 @@ pointer moves over it or while focus is on it. A held or posting item leaves the
 <svelte:document onkeydown={onKeydown} />
 <svelte:window onpagehide={() => held.leave()} />
 
+{#snippet entry(item: (typeof waiting)[number])}
+	<li>
+		<a
+			href="/item/{item.id}"
+			data-q
+			class={[item.id === currentId && 'menu-active']}
+			aria-current={item.id === currentId ? 'page' : undefined}
+		>
+			{item.headline ?? item.title}
+			<small>{railLine(item)}</small>
+			{#if item.orphaned}<small class="orphan">No session is waiting for this.</small>{/if}
+		</a>
+	</li>
+{/snippet}
+
 <div class="shell">
 	<nav id="rail" class="rail" aria-label="Queue">
 		<div class="wordmark"><i class="benchmark"></i>Approval Queue</div>
 		<ul class="menu w-full">
 			<li class="menu-title">Waiting for you</li>
-			{#each waiting as item (item.id)}
-				<li>
-					<a
-						href="/item/{item.id}"
-						data-q
-						class={[item.id === currentId && 'menu-active']}
-						aria-current={item.id === currentId ? 'page' : undefined}
-					>
-						{item.headline ?? item.title}
-						<small>{railLine(item)}</small>
-						{#if item.orphaned}<small class="orphan">No session is waiting for this.</small>{/if}
-					</a>
-				</li>
-			{:else}
-				<li class="menu-disabled"><span>Nothing waiting</span></li>
+			{#each rail.loose as item (item.id)}
+				{@render entry(item)}
 			{/each}
+			{#each rail.groups as group, gi (group.title)}
+				<li>
+					<h2 class="menu-title" id="rail-group-{gi}">{group.title}</h2>
+					<ul aria-labelledby="rail-group-{gi}">
+						{#each group.rounds as round, ri (round.round)}
+							<li>
+								<h3 class="menu-title" id="rail-round-{gi}-{ri}">Round {round.round}</h3>
+								<ul aria-labelledby="rail-round-{gi}-{ri}">
+									{#each round.items as item (item.id)}
+										{@render entry(item)}
+									{/each}
+								</ul>
+							</li>
+						{/each}
+					</ul>
+				</li>
+			{/each}
+			{#if waiting.length === 0}
+				<li class="menu-disabled"><span>Nothing waiting</span></li>
+			{/if}
 			<li class="menu-title">No decision needed</li>
 			<li>
 				<a href="/digest" class={[onPath('/digest') && 'menu-active']} aria-current={onPath('/digest') ? 'page' : undefined}>

@@ -18,6 +18,8 @@ export interface DigestLine {
 	head: string;
 	claim: string;
 	lane: string;
+	/** The round `land --round` recorded; absent on a line written without one. */
+	round?: string;
 	notes: DigestNote[];
 	replies: Reply[];
 }

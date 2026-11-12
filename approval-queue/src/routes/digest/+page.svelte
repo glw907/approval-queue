@@ -7,6 +7,8 @@ posts to the `note` action, and blank text removes it. The form works without sc
 <script lang="ts">
 	import { enhance } from '$app/forms';
 
+	import { digestSections } from '#lib/board.ts';
+
 	let { data, form } = $props();
 
 	const REPLIES = { fixed: 'Fixed', filed: 'Filed', answered: 'Answered' };
@@ -36,7 +38,9 @@ posts to the `note` action, and blank text removes it. The form works without sc
 			{#each data.groups as group (group.repo)}
 				<section aria-labelledby="repo-{group.repo}">
 					<h2 class="sec" id="repo-{group.repo}">{group.repo.split('/').pop()}</h2>
-					{#each group.lines as line (line.line)}
+					{#each digestSections(group.lines) as section (section.heading ?? '')}
+					{#if section.heading}<h3 class="round-heading">{section.heading}</h3>{/if}
+					{#each section.lines as line (line.line)}
 						{@const note = line.notes[0]}
 						<details class="collapse collapse-arrow" open={form?.saved === line.line || undefined}>
 							<summary class="collapse-title claim">
@@ -64,6 +68,7 @@ posts to the `note` action, and blank text removes it. The form works without sc
 							</div>
 						</details>
 					{/each}
+					{/each}
 				</section>
 			{/each}
 		</div>
@@ -76,6 +81,11 @@ posts to the `note` action, and blank text removes it. The form works without sc
 </div>
 
 <style>
+	.round-heading {
+		margin: 16px 0 4px;
+		font-size: 0.94rem;
+		font-weight: 600;
+	}
 	.note-form {
 		margin-top: 8px;
 	}

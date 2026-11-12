@@ -71,7 +71,7 @@ the claims a diff note needs open.
 
 	const stale = $derived(packet.stale);
 	const initiative = $derived(meta.initiativeTitle || (meta.initiative && meta.initiative !== 'none' ? meta.initiative : ''));
-	const status = $derived(statusLine(facts, initiative));
+	const status = $derived(statusLine(facts, initiative, meta.round));
 
 	const parsed = new Map<string, ReturnType<typeof patchFiles>>();
 	/** The snapshot's files for a pull request, parsed once. */
