@@ -158,7 +158,8 @@ pidB=$(listener)
 [ -n "$pidB" ] && [ "$pidB" != "$pidA" ] || { echo "FAIL: step 3: pid $pidB is not new"; fail=1; }
 assert_eq "$(cmdline "$pidB")" "node $app/build " "step 3: B's command line"
 assert_eq "$(code "$base/item/$item1")" "200" "step 3: B serves the item page"
-curl -s --max-time 5 "$base/item/$item1" | grep -q 'Original text' || { echo "FAIL: step 3: the item page lacks the design's text"; fail=1; }
+page=$(curl -s --max-time 5 "$base/item/$item1")
+grep -q 'Original text' <<<"$page" || { echo "FAIL: step 3: the item page lacks the design's text"; fail=1; }
 for d in .stage build.prev node_modules.prev; do
   [ ! -e "$app/$d" ] || { echo "FAIL: step 3: $d is left"; fail=1; }
 done

@@ -418,7 +418,7 @@ if [ "${1:-}" = restart ]; then
   # r_ours <pid>: succeeds for this app's server on this state root: `node <app>/build` with the state root in its environment.
   r_ours() {
     [ "$(tr '\0' ' ' <"/proc/$1/cmdline" 2>/dev/null)" = "node $rapp/build " ] \
-      && tr '\0' '\n' <"/proc/$1/environ" 2>/dev/null | grep -qxF "APPROVAL_QUEUE_STATE=$root"
+      && grep -qxzF "APPROVAL_QUEUE_STATE=$root" "/proc/$1/environ" 2>/dev/null
   }
   r_up() { curl -sf --max-time 3 "$rbase/" >/dev/null 2>&1; }
   # r_wait_down: waits up to 10 seconds until the port has no listener and the page does not answer.
@@ -472,12 +472,16 @@ if [ "${1:-}" = restart ]; then
       r_wait_down || true
     fi
     for d in build node_modules; do
-      [ ! -e "$rapp/$d.prev" ] || { rm -rf "${rapp:?}/$d" && mv -T "$rapp/$d.prev" "$rapp/$d"; } || true
+      if [ -e "$rapp/$d.prev" ]; then
+        { rm -rf "${rapp:?}/$d" && mv -T "$rapp/$d.prev" "$rapp/$d"; } || true
+      elif [ ! -e "$rstage/$d" ]; then
+        rm -rf "${rapp:?}/$d" || true
+      fi
     done
-    r_start
+    r_start || true
     for i in $(seq 100); do
       r_up && break
-      sleep 0.1
+      sleep 0.1 || true
     done
     if r_up; then echo "approval-queue: restart failed; the old build answers again, see $rlog" >&2
     else echo "approval-queue: restart failed; the old build does not answer, see $rlog" >&2; fi
