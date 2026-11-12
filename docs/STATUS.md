@@ -1,5 +1,30 @@
 # Status
 
+<!-- round-report ur-queue -->
+Report: ~/Projects/initiatives/.claude/worktrees/unattended-rounds/unattended-rounds/reports/ur-queue-report.md
+
+# Round ur-queue, glw907/approval-queue, written 2026-11-11 18:52
+Round state: running
+Queue live through: none
+
+| Pass | State | PR | Planned min | Actual min | Usage before (week / Fable) | Usage after |
+| --- | --- | --- | --- | --- | --- | --- |
+| Q1 | planning | none | 60 | | 68% / 15% | |
+| Q2 | not started | none | 90 | | | |
+| Q3 | not started | none | 120 | | | |
+| Q4 | not started | none | 120 | | | |
+
+Stops: 0
+Refusals: 0
+Calls sent to Geoff: 0
+Planning misses: none yet
+Trials: Fable 5.2 planned 0 passes; 0 sessions ran under /goal; 0 went idle before an end line.
+Opus seats under rule 6: none
+Waiting for Geoff: nothing
+Landed: nothing
+Resume from: /var/home/glw907/Projects/initiatives/.claude/worktrees/unattended-rounds/unattended-rounds/plans/ur-queue-conductor-prompt.txt
+<!-- /round-report -->
+
 The Approval Queue: a local SvelteKit app and a command that put a session's hand-over in front of
 Geoff and return his decision as JSON. `README.md` holds the interfaces and the gate.
 
