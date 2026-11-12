@@ -10,7 +10,7 @@ Queue live through: Q1
 | Pass | State | PR | Planned min | Actual min | Usage before (week / Fable) | Usage after |
 | --- | --- | --- | --- | --- | --- | --- |
 | Q1 | merged | #15 | 60 | ~60 | 68% / 15% | 73% / 24% |
-| Q2 | planning | none | 90 | | 73% / 24% | |
+| Q2 | running | none | 90 | | 73% / 24% | |
 | Q3 | not started | none | 120 | | | |
 | Q4 | not started | none | 120 | | | |
 
@@ -18,7 +18,7 @@ Stops: 0
 Refusals: 0
 Calls sent to Geoff: 0
 Planning misses: [file-list] 1, [stale-fact] 1 (Q1)
-Trials: Fable 5.2 planned 1 pass; 1 session ran under /goal; 0 went idle before an end line.
+Trials: Fable 5.2 planned 2 passes; 2 sessions ran under /goal; 0 went idle before an end line.
 Opus seats under rule 6: none
 Waiting for Geoff: nothing
 Landed: Q1 (#15)
