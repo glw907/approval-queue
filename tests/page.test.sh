@@ -275,6 +275,9 @@ page "$jr2" jreport
 has "joined report page" "$root/jreport.html" "Std round report, second"
 has "joined report page" "$root/jreport.html" "Mark read"
 tr '\n\t' '  ' <"$root/jreport.html" | grep -o '<nav id="rail".*</nav>' >"$root/jrail.html"
+tr '\n\t' '  ' <"$root/jreport.html" | grep -o '<main id="main".*</main>' >"$root/jreport.main"
+has "joined report page" "$root/jreport.main" "Q2"
+assert_eq "$(grep -o 'Round ur-std' "$root/jrail.html" | wc -l)" 1 "joined rail: Round ur-std once"
 has "joined rail" "$root/jrail.html" "/item/$jr2"
 lacks "joined rail" "$root/jrail.html" "/item/$jr1"
 
