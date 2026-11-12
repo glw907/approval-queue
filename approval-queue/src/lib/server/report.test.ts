@@ -39,6 +39,8 @@ describe('waitingInRound', () => {
 		await seed('p3', { ...packet, round: 'other', title: 'other round', created: '2026-11-12T07:00:00Z' });
 		await seed('p4', { ...packet, initiative: 'x', title: 'other initiative', created: '2026-11-12T07:00:00Z' });
 		await seed('d1', { kind: 'design', title: 'design', created: '2026-11-12T07:00:00Z' });
+		await seed('p5', { ...packet, title: 'decided', created: '2026-11-12T07:00:00Z' }, { 'decision.json': '{"decision":"approve"}' });
+		await seed('r9', { ...report, title: 'another report', created: '2026-11-12T07:00:00Z' });
 		expect((await waitingInRound(root, report)).map((l) => l.title)).toEqual(['first', 'second']);
 	});
 });

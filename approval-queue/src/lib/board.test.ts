@@ -205,10 +205,12 @@ describe('a round report', () => {
 		}
 	});
 
-	it('does not move a round ahead of another because of its report under the asks sort', () => {
+	it('does not move a round ahead of another because of its report, under either sort', () => {
 		const list = [rrow('a', 'Init', '2026-11-12T07:00:00Z', 'ur-a', 1), rrow('b', 'Init', '2026-11-12T08:00:00Z', 'ur-b', 1), rep('rep', '2026-11-12T06:00:00Z', 'ur-b')];
-		const [group] = boardGroups(list, 'asks');
-		expect(group.sections.map((s) => s.round)).toEqual(['ur-a', 'ur-b']);
+		for (const sort of ['asks', 'oldest'] as const) {
+			const [group] = boardGroups(list, sort);
+			expect(group.sections.map((s) => s.round)).toEqual(['ur-a', 'ur-b']);
+		}
 	});
 
 	it('heads a round holding only its report "Round <id>", and is never the opening row', () => {

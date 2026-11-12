@@ -59,6 +59,8 @@ const roundHeading = (round: string, rows: BoardRow[]): string => {
 
 const byOldest = (a: BoardRow, b: BoardRow) => a.created.localeCompare(b.created) || a.id.localeCompare(b.id);
 const byAsks = (a: BoardRow, b: BoardRow) => b.asks - a.asks || byOldest(a, b);
+/** The row a section or group ranks by: its first packet or item, and the report only when nothing else is there. */
+const lead = (rows: BoardRow[]) => rows.find((r) => r.single !== ROUND_REPORT) ?? rows[0];
 
 /**
  * Groups rows by initiative. `SINGLES` comes after them, and "Asks first" ranks a group by its total.
@@ -76,8 +78,8 @@ export function boardGroups(rows: BoardRow[], sort: Sort): BoardGroup[] {
 		const loose = list.filter((r) => !r.round);
 		const rounds = [...byRound]
 			.map(([round, rs]) => ({ round, heading: roundHeading(round, rs), rows: rs }))
-			.sort((a, b) => (sort === 'asks' ? total(b.rows) - total(a.rows) : 0) || byOldest(a.rows[0], b.rows[0]))
-			// The report leads its round, and moves only after the sections are ranked, so a report never changes how its round ranks against the packets it sits with.
+			.sort((a, b) => (sort === 'asks' ? total(b.rows) - total(a.rows) : 0) || byOldest(lead(a.rows), lead(b.rows)))
+			// The report leads its round, and moves only after the sections are ranked, so it never changes how its round ranks, whatever its age.
 			.map((r) => ({ ...r, rows: [...r.rows.filter((x) => x.single === ROUND_REPORT), ...r.rows.filter((x) => x.single !== ROUND_REPORT)] }));
 		return [...(loose.length ? [{ rows: loose }] : []), ...rounds];
 	};
@@ -86,7 +88,7 @@ export function boardGroups(rows: BoardRow[], sort: Sort): BoardGroup[] {
 		return { title, rows, sections: sectionsOf(rows) };
 	});
 	const rank = (a: BoardGroup, b: BoardGroup) =>
-		(sort === 'asks' ? total(b.rows) - total(a.rows) : 0) || byOldest(a.rows[0], b.rows[0]);
+		(sort === 'asks' ? total(b.rows) - total(a.rows) : 0) || byOldest(lead(a.rows), lead(b.rows));
 	return [
 		...groups.filter((g) => g.title !== SINGLES).sort(rank),
 		...groups.filter((g) => g.title === SINGLES)

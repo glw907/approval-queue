@@ -218,6 +218,8 @@ lacks "history" "$root/history.main" "Queue round report title"
 ridx=$(jq '.nodes[1].data | index("Round report")' "$root/board.json")
 assert_eq "$(jq --argjson i "$ridx" '[.nodes[1].data[] | select(type == "object" and .single == $i)] | length' "$root/board.json")" 1 "board data: one Round report row"
 has "board data" "$root/board-node.json" "$wreport"
+has "board data" "$root/board-node.json" "$wdesign"
+has "board data" "$root/board-node.json" "$wtriage"
 has "board data" "$root/board-node.json" "2 of 3 passes merged, 1 parked"
 lacks "board data" "$root/board-node.json" "$oreport"
 lacks "board data" "$root/board-node.json" "$hreport"
@@ -239,6 +241,7 @@ lacks "report page" "$root/report.main" "/item/$wclose"
 has "report page" "$root/report.main" "Landed in this round"
 has "report page" "$root/report.main" "https://github.com/aq-fixture/sample/pull/14"
 has "report page" "$root/report.main" "https://github.com/aq-fixture/sample/pull/15"
+for n in sample/pull/11 sample/pull/12 other/pull/13; do lacks "report page" "$root/report.main" "$n"; done
 assert_eq "$(grep -o 'Mark read' "$root/report.main" | wc -l)" 1 "report page: one Mark read button"
 
 # A read report's page says Read and offers no button.

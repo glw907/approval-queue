@@ -49,7 +49,7 @@ posts `?/read` and is gone once the report is read. Decision keys do nothing her
 	<h2 class="mt-8 text-lg font-semibold">Landed in this round</h2>
 	{#if data.landed.length}
 		<ul class="mt-2 list-disc pl-5">
-			{#each data.landed as pr (pr.ref)}
+			{#each data.landed as pr}
 				<li><a class="link" href={pr.url}>{pr.ref}</a>, {pr.claim}</li>
 			{/each}
 		</ul>
