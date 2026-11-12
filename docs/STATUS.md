@@ -12,7 +12,7 @@ Queue live through: Q3
 | Q1 | merged | #15 | 60 | ~60 | 68% / 15% | 73% / 24% |
 | Q2 | merged | #16 | 90 | ~49 | 73% / 24% | 75% / 28% |
 | Q3 | merged | #17 | 120 | ~59 | 75% / 28% | 77% / 31% |
-| Q4 | not started | none | 120 | | | |
+| Q4 | planning | none | 120 | | 77% / 31% | |
 
 Stops: 0
 Note: Q2's PR first paraphrased its acceptance items; the conductor asked the executor by message to quote them verbatim before landing.
