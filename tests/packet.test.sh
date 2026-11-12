@@ -48,11 +48,17 @@ STUB
 # (the diff), and logs every call to gh.log. Flags, as files beside the PR: .escape (the diff is refused until
 # --allow-escape-sequences), .toolarge (the diff is refused as past 300 files, and `gh api` answers from
 # .apifiles), .moving (every view reports another head), .pend <count> (the next <count> views that ask for
-# statusCheckRollup see a check in progress).
+# statusCheckRollup see a check in progress). `repo view` answers the default branch named in $STUB_DIR/default
+# (main when absent), or fails when $STUB_DIR/repofail exists.
 cat >"$stubs/gh" <<'STUB'
 #!/usr/bin/env bash
 printf '%s\n' "gh $*" >>"$STUB_DIR/gh.log"
 sub=$1 verb=${2:-}
+if [ "$sub" = repo ]; then
+  if [ -e "$STUB_DIR/repofail" ]; then echo "gh: could not resolve repository $3" >&2; exit 1; fi
+  jq -nc --arg b "$(cat "$STUB_DIR/default" 2>/dev/null || echo main)" '{defaultBranchRef: {name: $b}}'
+  exit 0
+fi
 repo="" fields="" escape=0 n=""
 args=("$@")
 for ((i = 2; i < ${#args[@]}; i++)); do
@@ -112,7 +118,7 @@ printf '# A design\n\nOriginal text.\n' >"$designfile"
 A=aq-fixture/sample#1 B=aq-fixture/sample#2
 HA=aaaa111 HB=bbbb222
 
-# mkpr <n> <head> <state> <checks: pass|fail|pending|none>: writes the gh stub's answer for fixture PR n.
+# mkpr <n> <head> <state> <checks: pass|fail|pending|none> [base]: writes the gh stub's answer for fixture PR n.
 mkpr() {
   local checks='[]'
   case "$4" in
@@ -122,8 +128,8 @@ mkpr() {
   esac
   local files='[{"path":"lib/queue.test.ts","additions":3,"deletions":0},{"path":"lib/queue.ts","additions":2,"deletions":1}]'
   [ "$1" != 2 ] || files='[{"path":"docs/queue.md","additions":1,"deletions":0}]'
-  jq -n --arg h "$2" --arg s "$3" --argjson n "$1" --argjson c "$checks" --argjson f "$files" \
-    '{state: $s, headRefOid: $h, title: "PR \($n)", body: "Body of \($n).", statusCheckRollup: $c, files: $f}' >"$root/pr-aq-fixture-sample-$1.json"
+  jq -n --arg h "$2" --arg s "$3" --argjson n "$1" --argjson c "$checks" --argjson f "$files" --arg base "${5:-main}" \
+    '{state: $s, headRefOid: $h, title: "PR \($n)", body: "Body of \($n).", statusCheckRollup: $c, files: $f, baseRefName: $base}' >"$root/pr-aq-fixture-sample-$1.json"
   cp "$FIX/snapshot/aq-fixture-sample-$1.patch" "$root/pr-aq-fixture-sample-$1.patch"
 }
 mkpr 1 $HA OPEN pass
@@ -365,6 +371,24 @@ assert_eq "$(grep -c 'pr view 1 ' "$root/gh.log")" "1" "--check with pending che
 # A check that stays pending refuses at the cap.
 refused "pending past the cap" "still has checks pending after 3s" packet sample "$work/facts.json" "$work/text.md"
 mkpr 1 $HA OPEN pass
+# A PR based on another branch is refused, logged, and queues nothing, with and without --check.
+mkpr 2 $HB OPEN pass release
+rm -f "$state/refusals.jsonl"
+: >"$root/gh.log"
+refused "off-base PR with --check" "$B" packet --check sample "$work/facts.json" "$work/text.md"
+for w in release main; do grep -qF -- "$w" "$root/err" || { echo "FAIL: off-base PR: message lacks $w"; fail=1; }; done
+assert_eq "$(grep -c 'repo view' "$root/gh.log")" "1" "off-base PR: one default-branch read for one repo"
+assert_eq "$(wc -l <"$state/refusals.jsonl")" "1" "off-base PR: logged to refusals.jsonl"
+refused "off-base PR" "$B" packet sample "$work/facts.json" "$work/text.md"
+mkpr 2 $HB OPEN pass
+# A failed default-branch read exits 1 and logs no refusal.
+: >"$root/repofail"
+rm -f "$state/refusals.jsonl"
+run packet --check sample "$work/facts.json" "$work/text.md"
+assert_eq "$rc" "1" "repo view failure: exit code"
+grep -qF 'could not resolve repository' "$root/err" || { echo "FAIL: repo view failure: gh error not printed"; fail=1; }
+[ ! -e "$state/refusals.jsonl" ] || { echo "FAIL: repo view failure logged a refusal"; fail=1; }
+rm -f "$root/repofail"
 # A resend of a retired one-file packet, and an old-grammar file, exit 2 naming the replacement.
 refused "one-file form" "the approval-packet skill" packet sample "$work/text.md"
 printf '# Old\n\n## Brief\n\nx\n' >"$root/old-packet.md"
