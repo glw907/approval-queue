@@ -32,7 +32,7 @@ has() { grep -qF -- "$3" "$2" || { echo "FAIL: $1: lacks '$3'"; fail=1; }; }
 lacks() { ! grep -qF -- "$3" "$2" || { echo "FAIL: $1: holds '$3'"; fail=1; }; }
 # primary <page>: the text of the btn-primary button, whitespace squeezed. The tag may carry other attributes, a
 # disabled one included; the word "Approve" also sits in the shortcut sheet, so the whole page proves nothing.
-primary() { tr '\n\t' '  ' <"$1" | grep -o '<button[^>]*btn btn-primary[^>]*>[^<]*' | sed 's/^[^>]*>//; s/[[:space:]]\+/ /g; s/^ //'; }
+primary() { tr '\n\t' '  ' <"$1" | grep -o '<button[^>]*btn btn-primary[^>]*>[^<]*' | sed 's/^[^>]*>//; s/[[:space:]]\+/ /g; s/^ //; s/ $//'; }
 
 # A random free port from 7931 to 7999, and a state directory inside the temporary root.
 PORT=""
@@ -93,7 +93,7 @@ page "$stale" stale
 has "stop page" "$root/stop.html" "Pass parked until you answer."
 has "stop page" "$root/stop.html" "Answering merges nothing. The session runs the steps below, then relaunches the pass."
 lacks "stop page" "$root/stop.html" "Pass paused until you decide."
-case "$(primary "$root/stop.html")" in "Answer and resume"*) ;; *) echo "FAIL: stop page: primary button reads '$(primary "$root/stop.html")'"; fail=1 ;; esac
+assert_eq "$(primary "$root/stop.html")" "Answer and resume" "stop page: the primary buttons"
 
 # The close and design pages keep "Approve".
 for k in close design; do

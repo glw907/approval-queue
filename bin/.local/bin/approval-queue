@@ -739,11 +739,12 @@ rank_of() {
 }
 
 # queue_packet: checks the fact file and text against the snapshot, reads each PR (waiting for pending checks),
-# and writes the item directory, item.json last. With --check it stops before writing anything. Leaves the lock
+# and writes the item directory, item.json last. A PR whose base is not the repo's default branch is a defect, and
+# a failed read of the default branch exits 1. With --check it stops before writing anything. Leaves the lock
 # released.
 queue_packet() {
   local rc=0 k ref pinned view st waited ranks prev="" have ids missing rdefects dkey="" dsrc="" snapdir checked="$fetch/checked.json"
-  local revises prs=() held=() defects=()
+  local revises prs=() held=() defects=() prepo
   if [ "$initiative" != none ]; then
     [[ $initiative =~ ^[a-z0-9-]+$ && -e "$projects/initiatives/$initiative/initiative.yaml" ]] \
       || refuse_packet "the initiative is none or the id of a record: no initiatives/$initiative/initiative.yaml under $projects (the approval-packet skill)"

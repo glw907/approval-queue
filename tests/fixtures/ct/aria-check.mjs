@@ -29,7 +29,7 @@ try {
 	check((await radios.first().isChecked()) === true, 'the session\'s pick is checked');
 	const send = await page.getByRole('button', { name: /^Send back/ }).textContent();
 	const approve = await page.getByRole('button', { name: /^(Approve|Answer and resume)/ }).textContent();
-	check(/Send back/.test(send) && /Approve/.test(approve), `the decision bar's buttons are named "${send.trim()}" and "${approve.trim().replace(/\s+/g, ' ')}"`);
+	check(/Send back/.test(send) && /^(Approve|Answer and resume)/.test(approve.trim()), `the decision bar's buttons are named "${send.trim()}" and "${approve.trim().replace(/\s+/g, ' ')}"`);
 	console.log(await page.locator('#margin').ariaSnapshot());
 } finally {
 	await browser.close();
