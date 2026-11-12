@@ -190,6 +190,7 @@ heading row that spans the three columns after the initiative's; the heading hol
 		font-size: 0.875rem;
 		font-weight: 600;
 		text-align: left;
+		vertical-align: top;
 	}
 	.board-row:hover {
 		background-color: var(--color-base-200);
@@ -265,6 +266,7 @@ heading row that spans the three columns after the initiative's; the heading hol
 			display: block;
 		}
 		.round-row > .init-cell {
+			display: block;
 			padding-block: 8px 0;
 		}
 		.round-row > .init-cell:has(.sr-only) {
@@ -274,7 +276,8 @@ heading row that spans the three columns after the initiative's; the heading hol
 			display: block;
 			padding-block: 8px 0;
 		}
-		.board-table tbody + tbody.grp-start > tr:first-child > :global(td) {
+		.board-table tbody + tbody.grp-start > tr:first-child > :global(td),
+		.board-table tbody + tbody.grp-start > tr:first-child > .round-cell {
 			border-top: 0;
 		}
 		.board-table tbody + tbody.grp-start > tr:first-child > :global(.init-cell) {
