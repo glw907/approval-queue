@@ -30,7 +30,7 @@ describe('the board page', () => {
 		const at = ['Unattended rounds', 'Headline loose', 'Round ur-queue', 'Headline q1', 'Headline q2', 'Round ur-ws'].map((t) => html.indexOf(t));
 		expect(at.every((n) => n >= 0)).toBe(true);
 		expect(at).toEqual([...at].sort((a, b) => a - b));
-		expect(html).toContain('approval-queue');
+		expect(html).toContain('Round ur-queue · approval-queue');
 		expect(html.match(/Round ur-queue/g)).toHaveLength(1);
 		expect(html).toContain(SINGLES);
 	});

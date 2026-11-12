@@ -8,7 +8,7 @@ stop and the whole row is the target; it carries `data-q`, so j and k walk the r
 description is the row's meta line, then the orphan line when no session waits. An item whose decision `held` is counting down or posting
 is left off, and the empty state shows once nothing else waits. An orphaned row says no session is
 waiting for its answer. A group's rows with no round come first, then each round's rows under a
-heading row that spans the table; the heading holds no link, so j and k still walk item rows only.
+heading row that spans the three columns after the initiative's; the heading holds no link, so j and k still walk item rows only.
 -->
 <script lang="ts">
 	import { age, boardGroups, SORT_COOKIE, type Sort } from '#lib/board.ts';
@@ -103,7 +103,7 @@ heading row that spans the table; the heading holds no link, so j and k still wa
 									<th role="rowheader" scope="row" class="init-cell align-top">
 										{#if si === 0}{group.title}{:else}<span class="sr-only">{group.title}</span>{/if}
 									</th>
-									<th role="columnheader" scope="colgroup" colspan="3" class="round-cell">{section.heading}</th>
+									<th role="rowheader" scope="rowgroup" colspan="3" class="round-cell">{section.heading}</th>
 								</tr>
 							{/if}
 							{#each section.rows as row, i (row.id)}

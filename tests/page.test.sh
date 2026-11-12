@@ -163,6 +163,7 @@ page "$rstop" rstop
 tr '\n\t' '  ' <"$root/rstop.html" | grep -o '<p class="kicker">[^/]*/b>[^<]*</p>' >"$root/rstop.kicker"
 has "status line" "$root/rstop.kicker" "Round ur-queue of unattended-rounds"
 tr '\n\t' '  ' <"$root/stop.html" | grep -o '<p class="kicker">[^/]*/b>[^<]*</p>' >"$root/stop.kicker"
+has "status line, no round" "$root/stop.kicker" "Pass parked"
 lacks "status line, no round" "$root/stop.kicker" "Round "
 
 # The board's data: the second node holds all seven waiting items and both rounds.

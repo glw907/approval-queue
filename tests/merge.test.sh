@@ -224,6 +224,12 @@ reset; rm -f "$state/digest.jsonl"
 run land --round UR_Queue-way-too-long $A c
 assert_eq "$rc" 2 "land bad round exit"
 grep -qF "lowercase letters, digits, and hyphens, starting with a letter, 12 characters at most" "$err" || { echo "FAIL: land bad round: rule not named: $(cat "$err")"; fail=1; }
+# An accented letter is not in a to z, whatever the caller's locale: the command and the fact check agree.
+: >"$glog"
+run land --round ür-queue $A c
+assert_eq "$rc" 2 "land accented round exit"
+grep -qF "12 characters at most" "$err" || { echo "FAIL: land accented round: rule not named: $(cat "$err")"; fail=1; }
+assert_eq "$(wc -l <"$glog")" 0 "land accented round makes no gh call"
 assert_eq "$(wc -c <"$glog")" 0 "land bad round makes no gh call"
 [ ! -e "$state/digest.jsonl" ] || { echo "FAIL: a bad round logged a digest line"; fail=1; }
 run land --round

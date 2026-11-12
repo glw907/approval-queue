@@ -390,7 +390,7 @@ if [ "${1:-}" = land ]; then
   if [ "${1:-}" = --round ]; then
     [ $# -ge 4 ] || { echo "$usage" >&2; exit 2; }
     lround=$2
-    [[ $lround =~ ^[a-z][a-z0-9-]{0,11}$ ]] || refuse "the round id is lowercase letters, digits, and hyphens, starting with a letter, 12 characters at most"
+    (LC_ALL=C; [[ $lround =~ ^[a-z][a-z0-9-]{0,11}$ ]]) || refuse "the round id is lowercase letters, digits, and hyphens, starting with a letter, 12 characters at most"
     shift 2
   fi
   if [ $# -ne 2 ] || [[ ! $1 =~ $ref_pattern ]]; then echo "$usage" >&2; exit 2; fi

@@ -47,6 +47,7 @@ describe('fact file', () => {
 
 	it('parses a fact file with no round to a value with no round key', () => {
 		const r = parseFacts(fixture('close-facts.json'));
+		expect(r.ok).toBe(true);
 		expect(r.ok && 'round' in r.value).toBe(false);
 	});
 
