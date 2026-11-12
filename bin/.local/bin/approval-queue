@@ -12,7 +12,8 @@ usage="usage: approval-queue <design|triage> <repo> <title> <source>
        approval-queue collect <id>
        approval-queue merge [--skip <owner/repo#n>]... [--premerge-done <owner/repo#n>]... <id>
        approval-queue land <owner/repo#n> <claim>
-       approval-queue digest <owner/repo#n> <claim>"
+       approval-queue digest <owner/repo#n> <claim>
+       approval-queue restart"
 root="${XDG_STATE_HOME:-$HOME/.local/state}/approval-queue"
 id_pattern='^[0-9]{8}T[0-9]{6}-[0-9]+$'
 
@@ -381,6 +382,156 @@ if [ "${1:-}" = digest ]; then
   [ "$(jq -r '.state' <<<"$dview")" != OPEN ] || refuse "$1 is still open; land it or send it in a packet"
   digest_line "$1" "$(jq -r '.headRefOid' <<<"$dview")" "$2" record
   exit 0
+fi
+
+# restart: replaces the running server with a fresh build of this checkout's app. It stages and builds beside the
+# running build, so the old server keeps serving every page until the swap, then stops it, swaps the build and
+# node_modules in under start.lock, starts the new server, and puts the old one back when the new one does not
+# come up. Stdout stays empty; build output goes to server.log.
+if [ "${1:-}" = restart ]; then
+  shift
+  if [ $# -ne 0 ]; then echo "$usage" >&2; exit 2; fi
+  rport="${APPROVAL_QUEUE_PORT:-7907}"
+  rbase="http://127.0.0.1:$rport"
+  rapp=$(realpath "$(dirname "$(realpath "$0")")/../../../approval-queue")
+  rlog="$root/server.log"
+  rstage="$rapp/.stage"
+  mkdir -p "$root"
+  : >>"$rlog"
+
+  # One restart at a time. The lock is taken before anything is touched, so the one that loses leaves the stage alone.
+  exec 7>"$root/restart.lock"
+  flock -n 7 || { echo "approval-queue: another restart is running; nothing was touched" >&2; exit 1; }
+  trap 'rm -rf "$rstage"' EXIT
+  trap 'exit 143' TERM HUP INT
+
+  # r_listener: prints the pid of the one process listening on the port and nothing when none does. A listener with
+  # no pid in the ss output, or more than one process, fails.
+  r_listener() {
+    local out pids
+    out=$(ss -ltnpH "sport = :$rport" 2>/dev/null) || out=""
+    [ -n "$out" ] || return 0
+    pids=$(grep -o 'pid=[0-9]*' <<<"$out" | cut -d= -f2 | sort -u) || pids=""
+    [ -n "$pids" ] && [ "$(grep -c . <<<"$pids")" = 1 ] && [ "$(grep -c . <<<"$out")" = "$(grep -c 'pid=' <<<"$out")" ] || return 1
+    echo "$pids"
+  }
+  # r_ours <pid>: succeeds for this app's server on this state root: `node <app>/build` with the state root in its environment.
+  r_ours() {
+    [ "$(tr '\0' ' ' <"/proc/$1/cmdline" 2>/dev/null)" = "node $rapp/build " ] \
+      && tr '\0' '\n' <"/proc/$1/environ" 2>/dev/null | grep -qxF "APPROVAL_QUEUE_STATE=$root"
+  }
+  r_up() { curl -sf --max-time 3 "$rbase/" >/dev/null 2>&1; }
+  # r_wait_down: waits up to 10 seconds until the port has no listener and the page does not answer.
+  r_wait_down() {
+    local i
+    for i in $(seq 100); do
+      [ -z "$(ss -ltnH "sport = :$rport" 2>/dev/null)" ] && ! r_up && return 0
+      sleep 0.1
+    done
+    return 1
+  }
+  # r_start: starts the server as `queue_item` does, with both lock descriptors closed so that no server holds a lock.
+  r_start() {
+    HOST=127.0.0.1 PORT="$rport" APPROVAL_QUEUE_STATE="$root" setsid -f node "$rapp/build" 7>&- 9>&- >>"$rlog" 2>&1
+  }
+  # r_item_ok: the page of one undecided item answers, or no item waits.
+  r_item_ok() {
+    local d
+    for d in "$root"/items/*/; do
+      [ -e "${d}item.json" ] && [ ! -e "${d}decision.json" ] || continue
+      curl -sf --max-time 5 "$rbase/item/$(basename "$d")" >/dev/null 2>&1
+      return
+    done
+    return 0
+  }
+  # r_verify <old pid>: the new server answers under another pid, is this app's build, and serves an item page.
+  r_verify() {
+    local i pid
+    for i in $(seq 100); do
+      r_up && break
+      sleep 0.1
+    done
+    r_up || return 1
+    pid=$(r_listener) || return 1
+    [ -n "$pid" ] && [ "$pid" != "$1" ] && r_ours "$pid" && r_item_ok
+  }
+  # r_swap: the running build and node_modules become .prev, and the staged ones take their place.
+  r_swap() {
+    local d
+    for d in build node_modules; do
+      if [ -e "$rapp/$d" ]; then mv -T "$rapp/$d" "$rapp/$d.prev" || return 1; fi
+      if [ -e "$rstage/$d" ]; then mv -T "$rstage/$d" "$rapp/$d" || return 1; fi
+    done
+  }
+  # r_rollback: stops a new server that listens, puts the .prev directories back, and starts the old build.
+  r_rollback() {
+    local d i p=""
+    p=$(r_listener) || p=""
+    if [ -n "$p" ] && r_ours "$p"; then
+      kill -TERM "$p" 2>/dev/null || true
+      r_wait_down || true
+    fi
+    for d in build node_modules; do
+      [ ! -e "$rapp/$d.prev" ] || { rm -rf "${rapp:?}/$d" && mv -T "$rapp/$d.prev" "$rapp/$d"; } || true
+    done
+    r_start
+    for i in $(seq 100); do
+      r_up && break
+      sleep 0.1
+    done
+    if r_up; then echo "approval-queue: restart failed; the old build answers again, see $rlog" >&2
+    else echo "approval-queue: restart failed; the old build does not answer, see $rlog" >&2; fi
+  }
+
+  # Stage the source beside the running build and build it there. The old server is untouched until the swap.
+  rm -rf "$rstage"
+  mkdir -p "$rstage"
+  tar -C "$rapp" --anchored --exclude=./node_modules --exclude=./build --exclude=./.svelte-kit --exclude=./.stage \
+    --exclude=./build.prev --exclude=./node_modules.prev -cf - . | tar -C "$rstage" -xf - \
+    || { echo "approval-queue: could not copy the app's source into $rstage" >&2; exit 1; }
+  if ! (cd "$rstage" && npm ci && APPROVAL_QUEUE_PORT="$rport" npm run build) >>"$rlog" 2>&1; then
+    echo "approval-queue: the staged build failed; nothing was swapped, see $rlog" >&2
+    exit 1
+  fi
+
+  # Settle a swap an earlier run was killed in the middle of: a .prev moves back when its live directory is
+  # missing, and goes when the live directory is there.
+  exec 9>"$root/start.lock"
+  flock 9
+  for rd in build node_modules; do
+    if [ -e "$rapp/$rd.prev" ]; then
+      if [ -e "$rapp/$rd" ]; then rm -rf "${rapp:?}/$rd.prev"; else mv -T "$rapp/$rd.prev" "$rapp/$rd"; fi
+    fi
+  done
+
+  # Find the old server: only this app's build on this state root is stopped.
+  oldpid=""
+  oldpid=$(r_listener) || { echo "approval-queue: the process on port $rport can't be identified; nothing was changed" >&2; exit 1; }
+  if [ -n "$oldpid" ]; then
+    r_ours "$oldpid" || { echo "approval-queue: port $rport is held by pid $oldpid, which is not this queue's server; nothing was changed" >&2; exit 1; }
+  elif r_up; then
+    echo "approval-queue: something answers on port $rport with no listener to identify; nothing was changed" >&2
+    exit 1
+  fi
+
+  # From the first signal to the end, a stop signal to this command waits: a half-swapped app has no server.
+  trap ':' TERM HUP INT
+  if [ -n "$oldpid" ]; then
+    kill -TERM "$oldpid" 2>/dev/null || true
+    if ! r_wait_down; then
+      if r_up; then rans="the page still answers"; else rans="the page does not answer"; fi
+      echo "approval-queue: pid $oldpid was sent TERM and still holds port $rport; $rans; nothing was swapped" >&2
+      exit 1
+    fi
+  fi
+
+  if r_swap && r_start && r_verify "$oldpid"; then
+    rm -rf "${rapp:?}/build.prev" "${rapp:?}/node_modules.prev"
+    echo "approval-queue: restarted, pid $(r_listener)" >&2
+    exit 0
+  fi
+  r_rollback
+  exit 1
 fi
 
 # The retired forms exit 2, each naming its replacement.
