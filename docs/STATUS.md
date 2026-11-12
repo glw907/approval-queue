@@ -12,14 +12,14 @@ Queue live through: Q3
 | Q1 | merged | #15 | 60 | ~60 | 68% / 15% | 73% / 24% |
 | Q2 | merged | #16 | 90 | ~49 | 73% / 24% | 75% / 28% |
 | Q3 | merged | #17 | 120 | ~59 | 75% / 28% | 77% / 31% |
-| Q4 | planning | none | 120 | | 77% / 31% | |
+| Q4 | running | none | 120 | | 77% / 31% | |
 
 Stops: 0
 Note: Q2's PR first paraphrased its acceptance items; the conductor asked the executor by message to quote them verbatim before landing.
 Refusals: 0
 Calls sent to Geoff: 0
 Planning misses: [file-list] 1, [stale-fact] 1 (Q1); [file-list] 1, [stale-fact] 1 (Q2); [estimate] 1, [file-list] 1 (Q3)
-Trials: Fable 5.2 planned 3 passes; 3 sessions ran under /goal; 0 went idle before an end line.
+Trials: Fable 5.2 planned 4 passes; 4 sessions ran under /goal; 0 went idle before an end line.
 Opus seats under rule 6: none
 Waiting for Geoff: nothing
 Landed: Q1 (#15), Q2 (#16), Q3 (#17)
