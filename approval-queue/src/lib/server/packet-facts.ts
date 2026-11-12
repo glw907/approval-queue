@@ -11,6 +11,8 @@ export interface PacketFacts {
 	rules: string[];
 	/** How many distinct repos the parts name. */
 	repos: number;
+	/** The repo names (the part after the slash) the parts hold, once each. */
+	repoNames: string[];
 	irreversible: boolean;
 }
 
@@ -44,6 +46,7 @@ function summarize(stored: Facts): PacketFacts {
 		asks: stored.calls.length,
 		rules: [...new Set(stored.calls.map((call) => call.rule))],
 		repos: repos.size,
+		repoNames: [...new Set([...repos].map((repo) => repo.split('/').pop() as string))],
 		irreversible: stored.calls.some((call) => call.rule === 'irreversible')
 	};
 }

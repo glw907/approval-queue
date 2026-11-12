@@ -42,6 +42,8 @@ Geoff and return his decision as JSON. `README.md` holds the interfaces and the 
   request not based on the repo's default branch; a stop packet's page says "Pass parked until you
   answer." with an "Answer and resume" button. `tests/page.test.sh` serves a built copy and reads the
   pages. Backlog #64 holds the rest of the stop page's "approve" wording.
+- Pass Q3 (branch `ur-q3`): a fact file, a queued item, and a `land --round <id>` digest line carry a
+  round; the board, the sidebar, the digest page, and the status line show it. Backlog #65, #66.
 - pavilion runs the new build: the cutover ran on 2026-11-11 with `glw907/workstation#227` and
   Survey 1.6.0.
 

@@ -11,7 +11,7 @@ usage="usage: approval-queue <design|triage> <repo> <title> <source>
        approval-queue pending
        approval-queue collect <id>
        approval-queue merge [--skip <owner/repo#n>]... [--premerge-done <owner/repo#n>]... <id>
-       approval-queue land <owner/repo#n> <claim>
+       approval-queue land [--round <id>] <owner/repo#n> <claim>
        approval-queue digest <owner/repo#n> <claim>
        approval-queue restart"
 root="${XDG_STATE_HOME:-$HOME/.local/state}/approval-queue"
@@ -375,17 +375,24 @@ if [ "${1:-}" = merge ]; then
   exit 0
 fi
 
-# digest_line <ref> <head> <claim> <lane>: appends one line to digest.jsonl.
+# digest_line <ref> <head> <claim> <lane> [round]: appends one line to digest.jsonl, with a sixth key when a round is given.
 digest_line() {
   mkdir -p "$root"
-  jq -nc --arg t "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg r "$1" --arg h "$2" --arg c "$3" --arg l "$4" \
-    '{time: $t, ref: $r, head: $h, claim: $c, lane: $l}' >>"$root/digest.jsonl"
+  jq -nc --arg t "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg r "$1" --arg h "$2" --arg c "$3" --arg l "$4" --arg round "${5:-}" \
+    '{time: $t, ref: $r, head: $h, claim: $c, lane: $l} + (if $round == "" then {} else {round: $round} end)' >>"$root/digest.jsonl"
 }
 
-# land <ref> <claim>: merges a small PR the session judged, once its checks are not failing, at the head it read. It
-# refuses a PR whose base is not the repo's default branch.
+# land [--round <id>] <ref> <claim>: merges a small PR the session judged, once its checks are not failing, at the head
+# it read. It refuses a PR whose base is not the repo's default branch. With --round, the digest line holds the round.
 if [ "${1:-}" = land ]; then
   shift
+  lround=
+  if [ "${1:-}" = --round ]; then
+    [ $# -ge 4 ] || { echo "$usage" >&2; exit 2; }
+    lround=$2
+    [[ $lround =~ ^[a-z][a-z0-9-]{0,11}$ ]] || refuse "the round id is lowercase letters, digits, and hyphens, starting with a letter, 12 characters at most"
+    shift 2
+  fi
   if [ $# -ne 2 ] || [[ ! $1 =~ $ref_pattern ]]; then echo "$usage" >&2; exit 2; fi
   lref=$1 lclaim=$2
   for lf in "$root"/items/*/item.json; do
@@ -410,7 +417,7 @@ if [ "${1:-}" = land ]; then
   done
   lhead=$(jq -r '.headRefOid' <<<"$lview")
   merge_pr "$lref" "$lhead" || exit 1
-  digest_line "$lref" "$lhead" "$lclaim" land
+  digest_line "$lref" "$lhead" "$lclaim" land "$lround"
   exit 0
 fi
 
@@ -876,8 +883,10 @@ queue_packet() {
   fi
   [ -z "$replies_file" ] || store_replies "$replies_file" "$prev/replies.json"
   jq -n --arg id "$id" --arg initiative "$initiative" --arg title "$(jq -r '.facts.title' "$checked")" \
+    --arg round "$(jq -r '.facts.round // ""' "$checked")" \
     --arg created "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --argjson revises "$revises" --argjson pid "$$" --argjson pidstart "$pidstart" \
     '{id: $id, kind: "packet", title: $title, initiative: $initiative, created: $created, pid: $pid, pidStart: $pidstart}
+     + (if $round == "" then {} else {round: $round} end)
      + (if $revises == null then {} else {revises: $revises} end)' >"$item/item.json.tmp"
   mv "$item/item.json.tmp" "$item/item.json"
   exec 8>&-

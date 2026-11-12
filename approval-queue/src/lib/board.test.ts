@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { age, boardGroups, digestDay, decisionWord, digestLine, longDay, openingRow, railLine, SINGLES, spokenAge, type BoardRow } from './board.ts';
+import { age, boardGroups, digestDay, digestSections, decisionWord, digestLine, longDay, openingRow, railLine, railRounds, SINGLES, spokenAge, type BoardRow } from './board.ts';
 
 const row = (id: string, group: string, created: string, asks = 0): BoardRow => ({
 	id,
@@ -31,6 +31,93 @@ describe('boardGroups', () => {
 		const groups = boardGroups(rows, 'oldest');
 		expect(groups.map((g) => g.title)).toEqual(['Old', 'Busy', SINGLES]);
 		expect(groups[1].rows.map((r) => r.id)).toEqual(['c', 'b']);
+	});
+});
+
+const rrow = (id: string, group: string, created: string, round: string | undefined, asks = 0, repoNames?: string[]): BoardRow => ({
+	...row(id, group, created, asks),
+	...(round && { round }),
+	...(repoNames && { repoNames })
+});
+
+describe('boardGroups with rounds', () => {
+	const mixed = [
+		rrow('loose', 'Init', '2026-10-11T10:00:00Z', undefined),
+		rrow('q1', 'Init', '2026-10-11T11:00:00Z', 'ur-queue', 1, ['approval-queue']),
+		rrow('q2', 'Init', '2026-10-11T12:00:00Z', 'ur-queue', 1, ['approval-queue']),
+		rrow('w1', 'Init', '2026-10-11T10:30:00Z', 'ur-ws', 0)
+	];
+
+	it('puts the loose rows first, then each round once with its rows together', () => {
+		const [group] = boardGroups(mixed, 'oldest');
+		expect(group.sections.map((s) => [s.heading, s.rows.map((r) => r.id)])).toEqual([
+			[undefined, ['loose']],
+			['Round ur-ws', ['w1']],
+			['Round ur-queue \u00b7 approval-queue', ['q1', 'q2']]
+		]);
+		expect(group.rows.map((r) => r.id)).toEqual(['loose', 'w1', 'q1', 'q2']);
+	});
+
+	it('lists a section\'s repos in name order, and none when its rows name none', () => {
+		const list = [
+			rrow('a', 'Init', '2026-10-11T10:00:00Z', 'ur-ws', 0, ['workstation', 'standards']),
+			rrow('b', 'Init', '2026-10-11T10:30:00Z', 'ur-ws', 0, ['standards']),
+			rrow('c', 'Init', '2026-10-11T11:00:00Z', 'ur-queue')
+		];
+		const [group] = boardGroups(list, 'oldest');
+		expect(group.sections.map((s) => s.heading)).toEqual(['Round ur-ws \u00b7 standards, workstation', 'Round ur-queue']);
+	});
+
+	it('gives one section in each group for the same round id under two initiatives', () => {
+		const list = [rrow('a', 'One', '2026-10-11T10:00:00Z', 'ur-queue'), rrow('b', 'Two', '2026-10-11T11:00:00Z', 'ur-queue')];
+		expect(boardGroups(list, 'oldest').map((g) => g.sections.length)).toEqual([1, 1]);
+	});
+
+	it('ranks round sections by asks under "Asks first" and by age under "Oldest first"', () => {
+		expect(boardGroups(mixed, 'asks')[0].sections.map((s) => s.round)).toEqual([undefined, 'ur-queue', 'ur-ws']);
+		expect(boardGroups(mixed, 'oldest')[0].sections.map((s) => s.round)).toEqual([undefined, 'ur-ws', 'ur-queue']);
+	});
+
+	it('gives rows with no round one section with no heading', () => {
+		const groups = boardGroups(rows, 'asks');
+		expect(groups.map((g) => g.sections.map((s) => [s.heading, s.rows.length]))).toEqual([[[undefined, 2]], [[undefined, 1]], [[undefined, 1]]]);
+	});
+});
+
+describe('railRounds', () => {
+	const item = (id: string, created: string, round?: string, initiativeTitle = 'Init') => ({ id, created, initiative: 'x', initiativeTitle, ...(round && { round }) });
+
+	it('keeps rows with no round in the order given and groups the rest under their initiative and round', () => {
+		const items = [item('a', '1'), item('r1', '2', 'ur-queue'), item('b', '3'), item('r2', '4', 'ur-ws'), item('r3', '5', 'ur-queue')];
+		const out = railRounds(items);
+		expect(out.loose.map((i) => i.id)).toEqual(['a', 'b']);
+		expect(out.groups.map((g) => [g.title, g.rounds.map((r) => [r.round, r.items.map((i) => i.id)])])).toEqual([
+			['Init', [['ur-queue', ['r1', 'r3']], ['ur-ws', ['r2']]]]
+		]);
+	});
+
+	it('gives nothing for an empty list, and drops a round and its group with their last item', () => {
+		expect(railRounds([])).toEqual({ loose: [], groups: [] });
+		const out = railRounds([item('a', '1'), item('r1', '2', 'ur-queue', 'Other')]);
+		expect(out.groups.map((g) => g.title)).toEqual(['Other']);
+		expect(railRounds([item('a', '1')]).groups).toEqual([]);
+	});
+});
+
+describe('digestSections', () => {
+	const dl = (claim: string, time: string, round?: unknown) => ({ claim, time, ...(round !== undefined && { round }) });
+
+	it('gives lines with no round one unheaded section', () => {
+		expect(digestSections([dl('a', '3'), dl('b', '2')])).toEqual([{ lines: [dl('a', '3'), dl('b', '2')] }]);
+	});
+
+	it('orders rounds by newest line and puts "No round" last, and a bad round counts as none', () => {
+		const lines = [dl('n1', '9', 'ur-ws'), dl('x', '8'), dl('q', '7', 'ur-queue'), dl('num', '6', 7), dl('blank', '5', ''), dl('w', '4', 'ur-ws')];
+		expect(digestSections(lines).map((s) => [s.heading, s.lines.map((l) => l.claim)])).toEqual([
+			['Round ur-ws', ['n1', 'w']],
+			['Round ur-queue', ['q']],
+			['No round', ['x', 'num', 'blank']]
+		]);
 	});
 });
 

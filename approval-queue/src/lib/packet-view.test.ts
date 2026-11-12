@@ -17,6 +17,12 @@ describe('packet-view', () => {
 		expect(statusLine(facts({ kind: 'design', design: { repo: 'sample', path: 'd.md' } }), '')).toEqual({ lead: 'A design for your approval.', rest: 'in sample.' });
 	});
 
+	it('opens the second part of the status line with the round', () => {
+		const stop = facts({ prs: ['o/a#1', 'o/b#2'] });
+		expect(statusLine(stop, 'Setup tooling', 'ur-queue')).toEqual({ lead: 'Pass parked until you answer.', rest: 'Round ur-queue of Setup tooling in a and b.' });
+		expect(statusLine(facts({ prs: ['o/sample#1'] }), '', 'ur-queue').rest).toBe('Round ur-queue in sample.');
+	});
+
 	it('words the primary button and the stop sentence by kind', () => {
 		expect(primaryLabel('stop')).toBe('Answer and resume');
 		expect(primaryLabel('close')).toBe('Approve');

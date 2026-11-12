@@ -41,11 +41,14 @@ export function packetRepos(facts: Facts): string[] {
 	return [...new Set([...facts.prs.map(repoOf), ...(facts.design ? [facts.design.repo] : [])])];
 }
 
-/** The status line's two parts: the kind in a sentence, then the initiative and the repos. The fact file holds no pass number, so none is named. */
-export function statusLine(facts: Facts, initiative: string): { lead: string; rest: string } {
+/** The status line's two parts: the kind in a sentence, then the round, the initiative, and the repos ("Round ur-queue of Setup tooling in a and b."). */
+export function statusLine(facts: Facts, initiative: string, round?: string): { lead: string; rest: string } {
 	const repos = packetRepos(facts);
 	const where = repos.length ? `in ${list(repos)}` : '';
-	return { lead: LEAD[facts.kind], rest: [initiative, where].filter(Boolean).join(' ') + (initiative || where ? '.' : '') };
+	const roundPart = round ? `Round ${round}` : '';
+	const middle = round && initiative ? [roundPart, 'of', initiative].join(' ') : roundPart || initiative;
+	const rest = [middle, where].filter(Boolean).join(' ');
+	return { lead: LEAD[facts.kind], rest: rest + (rest ? '.' : '') };
 }
 
 /**

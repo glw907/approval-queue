@@ -7,7 +7,8 @@ rows without moving the reader. Row links replace the history entry, so the empt
 stop and the whole row is the target; it carries `data-q`, so j and k walk the rows, and its
 description is the row's meta line, then the orphan line when no session waits. An item whose decision `held` is counting down or posting
 is left off, and the empty state shows once nothing else waits. An orphaned row says no session is
-waiting for its answer.
+waiting for its answer. A group's rows with no round come first, then each round's rows under a
+heading row that spans the table; the heading holds no link, so j and k still walk item rows only.
 -->
 <script lang="ts">
 	import { age, boardGroups, SORT_COOKIE, type Sort } from '#lib/board.ts';
@@ -81,7 +82,7 @@ waiting for its answer.
 			<div class="mt-4">
 				<!-- svelte-ignore a11y_no_redundant_roles: the phone layout sets display:block, which drops table semantics in some browsers, so the roles restore them -->
 				<table class="table board-table" role="table">
-					<caption class="sr-only">Packets and items waiting for you, grouped by initiative</caption>
+					<caption class="sr-only">Packets and items waiting for you, grouped by initiative and round</caption>
 					<!-- svelte-ignore a11y_no_redundant_roles: the phone layout sets display:block, which drops table semantics in some browsers, so the roles restore them -->
 					<thead role="rowgroup">
 						<!-- svelte-ignore a11y_no_redundant_roles: the phone layout sets display:block, which drops table semantics in some browsers, so the roles restore them -->
@@ -94,12 +95,22 @@ waiting for its answer.
 					</thead>
 					{#each groups as group (group.title)}
 						<!-- svelte-ignore a11y_no_redundant_roles: the phone layout sets display:block, which drops table semantics in some browsers, so the roles restore them -->
-						<tbody role="rowgroup">
-							{#each group.rows as row, i (row.id)}
+						{#each group.sections as section, si (section.round ?? '')}
+						<tbody role="rowgroup" class={si === 0 ? 'grp-start' : undefined}>
+							{#if section.heading}
+								<!-- svelte-ignore a11y_no_redundant_roles: the phone layout sets display:block, which drops table semantics in some browsers, so the roles restore them -->
+								<tr role="row" class="round-row">
+									<th role="rowheader" scope="row" class="init-cell align-top">
+										{#if si === 0}{group.title}{:else}<span class="sr-only">{group.title}</span>{/if}
+									</th>
+									<th role="columnheader" scope="colgroup" colspan="3" class="round-cell">{section.heading}</th>
+								</tr>
+							{/if}
+							{#each section.rows as row, i (row.id)}
 								<!-- svelte-ignore a11y_no_redundant_roles: the phone layout sets display:block, which drops table semantics in some browsers, so the roles restore them -->
 								<tr role="row" class="board-row">
 									<th role="rowheader" scope="row" class="init-cell align-top">
-										{#if i === 0}{group.title}{:else}<span class="sr-only">{group.title}</span>{/if}
+										{#if si === 0 && i === 0 && !section.heading}{group.title}{:else}<span class="sr-only">{group.title}</span>{/if}
 									</th>
 									<td role="cell" class="align-top">
 										<a
@@ -131,6 +142,7 @@ waiting for its answer.
 								</tr>
 							{/each}
 						</tbody>
+						{/each}
 					{/each}
 				</table>
 			</div>
@@ -172,6 +184,13 @@ waiting for its answer.
 	.board-row {
 		position: relative;
 	}
+	/* A round's heading row reads as a label over its rows, quieter than the initiative's title. */
+	.round-cell {
+		color: var(--color-muted);
+		font-size: 0.875rem;
+		font-weight: 600;
+		text-align: left;
+	}
 	.board-row:hover {
 		background-color: var(--color-base-200);
 	}
@@ -194,8 +213,12 @@ waiting for its answer.
 		text-decoration: underline;
 		text-underline-offset: 3px;
 	}
+	/* A later round starts under the ordinary row rule, so its heading does not read as the row above's caption. */
+	.board-table tbody:not(.grp-start) > .round-row > :global(*) {
+		border-top: 1px solid var(--color-base-300);
+	}
 	/* A heavier rule between initiatives than between rows, at the 3:1 field-border token. */
-	.board-table tbody + tbody > tr:first-child > :global(*) {
+	.board-table tbody + tbody.grp-start > tr:first-child > :global(*) {
 		border-top: 2px solid var(--site-field-border);
 	}
 
@@ -238,10 +261,23 @@ waiting for its answer.
 		.board-row > td {
 			padding-top: 4px;
 		}
-		.board-table tbody + tbody > tr:first-child > :global(td) {
+		.round-row {
+			display: block;
+		}
+		.round-row > .init-cell {
+			padding-block: 8px 0;
+		}
+		.round-row > .init-cell:has(.sr-only) {
+			padding: 0;
+		}
+		.round-row > .round-cell {
+			display: block;
+			padding-block: 8px 0;
+		}
+		.board-table tbody + tbody.grp-start > tr:first-child > :global(td) {
 			border-top: 0;
 		}
-		.board-table tbody + tbody > tr:first-child > :global(.init-cell) {
+		.board-table tbody + tbody.grp-start > tr:first-child > :global(.init-cell) {
 			padding-top: 12px;
 		}
 	}

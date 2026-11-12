@@ -27,6 +27,29 @@ describe('fact file', () => {
 		expect(r.ok).toBe(true);
 	});
 
+	const ROUND_RULE = 'lowercase letters, digits, and hyphens, starting with a letter, 12 characters at most';
+
+	it('keeps a round id the fact file names', () => {
+		const r = withEdit('close-facts.json', (f) => (f.round = 'ur-queue'));
+		expect(messages(r)).toEqual([]);
+		expect(r.ok && r.value.round).toBe('ur-queue');
+	});
+
+	it.each(['a', 'r2-d2', 'a23456789012'])('accepts the round id %s', (id) => {
+		expect(messages(withEdit('close-facts.json', (f) => (f.round = id)))).toEqual([]);
+	});
+
+	it.each(['ur-queue-long', 'Ur-queue', '1round', 'ur_queue', '-ur', 'ur queue', '', 7, null])('refuses the round %j with the rule named', (id) => {
+		const r = withEdit('close-facts.json', (f) => (f.round = id));
+		expect(r.ok).toBe(false);
+		expect(messages(r).join('\n')).toContain(ROUND_RULE);
+	});
+
+	it('parses a fact file with no round to a value with no round key', () => {
+		const r = parseFacts(fixture('close-facts.json'));
+		expect(r.ok && 'round' in r.value).toBe(false);
+	});
+
 	it('refuses a fourth unforced call', () => {
 		const r = withEdit('close-facts.json', (f) => {
 			const c = f.calls[0];

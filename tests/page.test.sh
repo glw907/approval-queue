@@ -62,6 +62,33 @@ import { seedFacts } from './src/lib/server/seed-facts.ts';
 const [state, ...ids] = process.argv.slice(1);
 for (const [id, kind] of [[ids[0], 'stop'], [ids[1], 'close'], [ids[2], 'design'], [ids[3], 'stop']]) await seedFacts(state, id, kind);
 " "$state" "$stop" "$close" "$design" "$stale") || { echo "FAIL: the items did not seed"; exit 1; }
+# Three more waiting items in rounds, two decided items for the history page, and five digest lines.
+rstop=20261111T000005-1 rclose=20261111T000006-1 wclose=20261111T000007-1 hdesign=20261110T000008-1 hround=20261110T000009-1
+(cd "$app" && node --input-type=module -e "
+import { seedFacts } from './src/lib/server/seed-facts.ts';
+import { mkdir, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
+const [state, rstop, rclose, wclose, hdesign, hround] = process.argv.slice(1);
+const unattended = { initiative: 'unattended-rounds', created: '2026-11-11T12:00:00Z' };
+await seedFacts(state, rstop, 'stop', { ...unattended, round: 'ur-queue', title: 'Queue stop title' });
+await seedFacts(state, rclose, 'close', { ...unattended, round: 'ur-queue', title: 'Queue close title' });
+await seedFacts(state, wclose, 'close', { ...unattended, round: 'ur-ws', title: 'Ws close title' });
+const dir = join(state, 'items', hdesign);
+await mkdir(dir, { recursive: true });
+await writeFile(join(dir, 'item.json'), JSON.stringify({ id: hdesign, kind: 'design', title: 'Old design title', created: '2026-11-09T10:00:00Z' }));
+await writeFile(join(dir, 'decision.json'), JSON.stringify({ decision: 'approve' }));
+await seedFacts(state, hround, 'close', { round: 'ur-queue', title: 'Old round title', created: '2026-11-09T11:00:00Z' });
+await writeFile(join(state, 'items', hround, 'decision.json'), JSON.stringify({ decision: 'approve' }));
+" "$state" "$rstop" "$rclose" "$wclose" "$hdesign" "$hround") || { echo "FAIL: the round items did not seed"; exit 1; }
+dline() { jq -nc --arg r "$1" --arg c "$2" --arg t "$3" --arg round "${4:-}" \
+  '{time: $t, ref: $r, head: "abc", claim: $c, lane: "land"} + (if $round == "" then {} else {round: $round} end)'; }
+{
+  dline aq-fixture/sample#11 "Claim plain one" 2026-11-10T10:00:00Z
+  dline aq-fixture/sample#12 "Claim plain two" 2026-11-10T11:00:00Z
+  dline aq-fixture/other#13 "Claim other repo" 2026-11-10T12:00:00Z
+  dline aq-fixture/sample#14 "Claim round one" 2026-11-11T10:00:00Z ur-queue
+  dline aq-fixture/sample#15 "Claim round two" 2026-11-11T11:00:00Z ur-queue
+} >"$state/digest.jsonl"
 sref=$(jq -r '.prs[0]' "$state/items/$stale/facts.json")
 jq -n --arg r "$sref" '{ref: $r, queued: "aaaaaaaaa111", now: "bbbbbbbbb222"}' >"$state/items/$stale/stale.json"
 
@@ -114,6 +141,53 @@ stubout=$(PATH="$SRC/tests/fixtures/ct:$PATH" gh repo view aq-fixture/sample --j
 assert_eq "$stubout" '{"defaultBranchRef":{"name":"main"}}' "stub: repo view"
 stubout=$(PATH="$SRC/tests/fixtures/ct:$PATH" gh pr view 1 --repo aq-fixture/sample --json baseRefName 2>&1)
 assert_eq "$stubout" '{"baseRefName":"main"}' "stub: pr view base"
+
+# pos <file> <text>: the offset of the text in the file's one-line form, 0 when it is absent.
+pos() { tr '\n\t' '  ' <"$1" | awk -v t="$2" '{print index($0, t)}'; }
+# The rail renders on every page, so each check below reads one part of the page.
+tr '\n\t' '  ' <"$root/stop.html" | grep -o '<nav id="rail".*</nav>' >"$root/rail.html"
+assert_eq "$(grep -o 'Round ur-queue' "$root/rail.html" | wc -l)" 1 "rail: Round ur-queue once"
+assert_eq "$(grep -o 'Round ur-ws' "$root/rail.html" | wc -l)" 1 "rail: Round ur-ws once"
+assert_eq "$(grep -o 'data-q' "$root/rail.html" | wc -l)" 7 "rail: seven entries"
+first=$(pos "$root/rail.html" "Round ur-queue")
+for id in "$stop" "$close" "$design" "$stale"; do
+  at=$(pos "$root/rail.html" "/item/$id")
+  { [ "$at" -gt 0 ] && [ "$at" -lt "$first" ]; } || { echo "FAIL: rail: $id is not before the first round heading"; fail=1; }
+done
+for t in "Queue stop title" "Queue close title" "Ws close title"; do
+  [ "$(pos "$root/rail.html" "$t")" -gt "$first" ] || { echo "FAIL: rail: '$t' is not after the first round heading"; fail=1; }
+done
+
+# The status line: one <p class="kicker"> line.
+page "$rstop" rstop
+tr '\n\t' '  ' <"$root/rstop.html" | grep -o '<p class="kicker">[^/]*/b>[^<]*</p>' >"$root/rstop.kicker"
+has "status line" "$root/rstop.kicker" "Round ur-queue of unattended-rounds"
+tr '\n\t' '  ' <"$root/stop.html" | grep -o '<p class="kicker">[^/]*/b>[^<]*</p>' >"$root/stop.kicker"
+lacks "status line, no round" "$root/stop.kicker" "Round "
+
+# The board's data: the second node holds all seven waiting items and both rounds.
+curl -sf --max-time 5 "$base/__data.json" >"$root/board.json" || { echo "FAIL: /__data.json did not answer 200"; fail=1; : >"$root/board.json"; }
+jq -c '.nodes[1]' "$root/board.json" >"$root/board-node.json" 2>/dev/null
+for id in "$stop" "$close" "$design" "$stale" "$rstop" "$rclose" "$wclose"; do has "board data" "$root/board-node.json" "$id"; done
+has "board data" "$root/board-node.json" 'ur-queue'
+has "board data" "$root/board-node.json" 'ur-ws'
+
+# The digest page: its main element holds the five claims and one heading each for the round and no round.
+curl -sf --max-time 5 "$base/digest" >"$root/digest.html" || { echo "FAIL: /digest did not answer 200"; fail=1; : >"$root/digest.html"; }
+tr '\n\t' '  ' <"$root/digest.html" | grep -o '<main id="main".*</main>' >"$root/digest.main"
+for c in "Claim plain one" "Claim plain two" "Claim other repo" "Claim round one" "Claim round two"; do has "digest" "$root/digest.main" "$c"; done
+assert_eq "$(grep -o 'Round ur-queue' "$root/digest.main" | wc -l)" 1 "digest: Round ur-queue once"
+assert_eq "$(grep -o 'No round' "$root/digest.main" | wc -l)" 1 "digest: No round once"
+
+# The history page: both decided items, one of them in a round and one a design.
+curl -sf --max-time 5 "$base/history" >"$root/history.html" || { echo "FAIL: /history did not answer 200"; fail=1; : >"$root/history.html"; }
+has "history" "$root/history.html" "Old design title"
+has "history" "$root/history.html" "Old round title"
+
+# Screenshots of the board and the digest page, when the caller asks for them.
+if [ -n "${PAGE_TEST_ROUND_SHOTS:-}" ]; then
+  node "$SRC/tests/fixtures/ct/round-shot.mjs" "$base" "$stop" "$PAGE_TEST_ROUND_SHOTS" || { echo "FAIL: the round screenshots failed"; fail=1; }
+fi
 
 # A screenshot of the stop page, when the caller asks for one.
 if [ -n "${PAGE_TEST_SHOT:-}" ]; then

@@ -1,6 +1,6 @@
 import { APPROVAL_QUEUE_STATE } from '$app/env/private';
 import { redirect } from '@sveltejs/kit';
-import { openingRow, SINGLES, SORT_COOKIE, type BoardRow, type Sort } from '#lib/board.ts';
+import { groupTitle, openingRow, SINGLES, SORT_COOKIE, type BoardRow, type Sort } from '#lib/board.ts';
 import { listWaiting, type ItemMeta } from '#lib/server/items.ts';
 import { packetFacts } from '#lib/server/packet-facts.ts';
 import type { PageServerLoad } from './$types';
@@ -17,7 +17,8 @@ async function toRow(meta: ItemMeta): Promise<BoardRow> {
 	if (!facts) return { ...base, headline: meta.id, group: SINGLES, asks: 0, rules: [], repos: 1, irreversible: false, single: 'Unreadable' };
 	return {
 		...base,
-		group: meta.initiativeTitle || (meta.initiative && meta.initiative !== 'none' ? meta.initiative : 'No initiative'),
+		group: groupTitle(meta),
+		...(meta.round && { round: meta.round }),
 		...facts
 	};
 }

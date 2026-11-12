@@ -32,6 +32,8 @@ export interface ItemMeta {
 	initiative?: string;
 	/** The initiative record's title; empty for `none`. */
 	initiativeTitle?: string;
+	/** The unattended round a packet belongs to, written by the command from the fact file; absent outside a round. */
+	round?: string;
 	/**
 	 * Set when the item resends what Geoff sent back: the earlier item, this item's round (2 for the
 	 * first resend), and the head or hash of each part he sent back.

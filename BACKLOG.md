@@ -12,6 +12,14 @@
 
 ## Medium
 
+- [ ] **#66** `digest` takes no `--round` `#improvement` `#approval-queue` *(2026-11-11)*
+  Pass Q3 added `land --round <id>`. `digest`, which records a merge already done, still writes a line with no round, so a recorded merge shows under "No round".
+  Give `digest` the same first-argument flag and id rule.
+
+- [ ] **#65** The next item after a decision follows queue order, not the rail's round order `#improvement` `#approval-queue` *(2026-11-11)*
+  The rail now groups a round's items under their initiative, so its order can differ from the queue order that picks the item shown after a decision.
+  Have the page that follows a decision pick the next item in the rail's order.
+
 - [ ] **#64** A stop packet's page still says "approve" after the answer `#improvement` `#approval-queue` *(2026-11-11)*
   After "Answer and resume" the page shows the "Approved the packet." toast, "Approved" on the decided page, an "If you approve" fold, and "Approve the packet" in the shortcut sheet. Pass Q2 reworded the lead, the status line, and the button only.
   Word each of the four by kind, through `primaryLabel` in `packet-view.ts`.

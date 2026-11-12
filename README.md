@@ -32,7 +32,7 @@ The hook's `settings.json` entry lives in the workstation repo and calls `claude
 | `approval-queue snapshot <facts.json>` | Writes `snapshot/` beside the fact file: one `<owner>-<repo>-<n>.patch` per pull request at its current head, and `heads.json`. |
 | `approval-queue packet [--check] [--replies <replies.json>] <initiative> <facts.json> <text.md>` | Checks both files against the snapshot, queues the packet, and waits for the decision. It refuses a pull request whose base is not the repo's default branch. |
 | `approval-queue merge [--skip <owner/repo#n>]... [--premerge-done <owner/repo#n>]... <id>` | Merges each approved pull request at its pinned head. It refuses a stop packet, and a pull request not based on the default branch. |
-| `approval-queue land <owner/repo#n> <claim>` | Merges a pull request that needs no packet and adds a digest line. It refuses a pull request not based on the default branch. |
+| `approval-queue land [--round <id>] <owner/repo#n> <claim>` | Merges a pull request that needs no packet and adds a digest line, with the round when `--round` is given. It refuses a pull request not based on the default branch. |
 | `approval-queue digest <owner/repo#n> <claim>` | Records a merge already done as a digest line. |
 | `approval-queue restart` | Builds the app beside the running build, then swaps it in under `start.lock`. It exits 0 with a new server, and exits 1 with the old server answering again. |
 | `approval-queue reply <id \| digest> <replies.json>` | Stores the session's answers to Geoff's notes. |
@@ -50,6 +50,7 @@ The session writes `facts.json`. It states facts and options. It holds no prose 
 | Key | Meaning |
 | --- | --- |
 | `kind` | `design`, `close`, or `stop`. |
+| `round` | Optional. The round the packet belongs to: lowercase letters, digits, and hyphens, starting with a letter, 12 characters at most. `packet --check` refuses any other value and names the rule. |
 | `title` | The headline's subject, 80 characters or fewer, with no closing punctuation. |
 | `reason` | Stop only: `{text, source}`, why the pass paused. |
 | `prs` | `owner/repo#n` in merge order. A design packet has none. |
@@ -82,7 +83,7 @@ The command writes `items/<id>/` under the state directory (`~/.local/state/appr
 
 | File | Writer | Contents |
 | --- | --- | --- |
-| `item.json` | command | `{id, kind: "packet", title, initiative, created, pid, pidStart, revises?}` |
+| `item.json` | command | `{id, kind: "packet", title, initiative, round?, created, pid, pidStart, revises?}` |
 | `facts.json`, `text.md` | command | Copies of the checked files. |
 | `snapshot/`, `heads.json` | command | The checked snapshot, and `[{ref, head}]`, the pinned heads that `merge` reads. |
 | `prs/<k>.json` | command | `{ref, title, body, checks, files}` for the k-th pull request, with each file's `rank` ordering held paths, workflows, and configuration first and tests and generated files last. |
@@ -109,7 +110,7 @@ The server refuses an approve whose pinned heads moved (409), or when `gh` canno
 
 ### Land and digest
 
-`land` refuses a pull request that sits in a waiting item, is closed, is not based on the repo's default branch (exit 2; a failed read of the default branch exits 1), has a `## Before merge` section, or has a failing check. It merges at the head it read, and appends `{time, ref, head, claim, lane: "land"}` to `digest.jsonl` in the state directory. `digest` refuses an open pull request and appends the same line with `lane: "record"`. Neither command judges a pull request's class: the session does.
+`land` refuses a pull request that sits in a waiting item, is closed, is not based on the repo's default branch (exit 2; a failed read of the default branch exits 1), has a `## Before merge` section, or has a failing check. It merges at the head it read, and appends `{time, ref, head, claim, lane: "land", round?}` to `digest.jsonl` in the state directory. `--round <id>` goes first, takes the same id rule as the fact file, and is refused (exit 2) before any GitHub call when the id is bad; the line carries `round` only when the flag is given. `digest` refuses an open pull request and appends the same line with `lane: "record"`, and takes no `--round`. Neither command judges a pull request's class: the session does.
 
 ## Notes and replies
 
@@ -132,7 +133,7 @@ After an approve, the session merges, then answers each note with `approval-queu
 
 ## The digest and history
 
-The digest page groups `digest.jsonl` lines by repo, one claim each. Each line shows its replies and takes a note. The page shows no badge and no count. Digest notes save in `digest-notes.json` with ids `D1`, `D2`, and so on, and `approval-queue reply digest <replies.json>` answers them. The history page lists decided items newest first and has a search over titles. Each decided item opens with its notes and replies. A damaged sidecar file never hides a row.
+The digest page groups `digest.jsonl` lines by repo, one claim each. Within a repo that has any round line, a round's lines sit under a `Round <id>` heading and the rest under `No round`; a repo with no round line shows no heading. The board and the sidebar group a round's waiting items under a round heading inside their initiative, after the initiative's items that have no round, and the status line of a round's packet names the round. Each line shows its replies and takes a note. The page shows no badge and no count. Digest notes save in `digest-notes.json` with ids `D1`, `D2`, and so on, and `approval-queue reply digest <replies.json>` answers them. The history page lists decided items newest first and has a search over titles. Each decided item opens with its notes and replies. A damaged sidecar file never hides a row.
 
 The app appends `{time, item, fold}` to `folds.jsonl` each time a fold opens, for the monthly review of what Geoff reads.
 
@@ -160,7 +161,7 @@ The new build refuses the old packet format, so it goes live only with an empty 
 bash scripts/gate.sh
 ```
 
-The gate runs the app's `check` and `test`, then every `tests/*.test.sh`, including the install test (which uses a temp `HOME`) and `tests/page.test.sh`, which builds a copy of the app on a random port and reads the stop, close, design, and out-of-date pages.
+The gate runs the app's `check` and `test`, then every `tests/*.test.sh`, including the install test (which uses a temp `HOME`) and `tests/page.test.sh`, which builds a copy of the app on a random port and reads the stop, close, design, and out-of-date pages, the sidebar's round headings, `/digest`, and `/history`. `PAGE_TEST_ROUND_SHOTS=<directory>` also writes a screenshot of the board and of the digest page there.
 
 ## History
 
