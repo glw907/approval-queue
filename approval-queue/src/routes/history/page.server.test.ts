@@ -64,4 +64,9 @@ describe('/history', () => {
 		await decided('d', 'An old docs item', 1_000_000_000, {}, 'docs');
 		expect((await history()).rows.map((r) => r.id)).toEqual(['d']);
 	});
+
+	it('lists a read round report', async () => {
+		await decided('rep', 'Round ur-queue', 1_000_000_000, {}, 'report');
+		expect((await history()).rows).toMatchObject([{ id: 'rep', title: 'Round ur-queue' }]);
+	});
 });

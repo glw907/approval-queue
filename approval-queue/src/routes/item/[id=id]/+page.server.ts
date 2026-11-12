@@ -1,16 +1,18 @@
 import { rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { APPROVAL_QUEUE_STATE } from '$app/env/private';
-import { error, fail } from '@sveltejs/kit';
+import { error, fail, redirect } from '@sveltejs/kit';
 import { parseBrief, type Brief } from '#lib/brief.ts';
 import { decideCards, fingerprint, readChoices, type Card } from '#lib/cards.ts';
-import { render, renderDesign, renderInline, renderLabel } from '#lib/markdown.ts';
+import { render, renderDesign, renderInline, renderLabel, renderReport } from '#lib/markdown.ts';
+import { reportBody } from '#lib/report.ts';
 import { withoutBrief } from '#lib/pr-summary.ts';
 import { deepDiveBody } from '#lib/packet-view.ts';
 import { nextItem } from '#lib/queue.ts';
 import { appendFold } from '#lib/server/folds.ts';
 import { checkCurrent } from '#lib/server/heads.ts';
 import { historyRow } from '#lib/server/history.ts';
+import { landedInRound, waitingInRound } from '#lib/server/report.ts';
 import { buildPacketDecision, parseNotes } from '#lib/server/packet-decision.ts';
 import {
 	listWaiting,
@@ -46,6 +48,7 @@ async function decide(id: string, decision: Decision) {
 }
 
 const ALREADY_DECIDED = { message: 'Already decided' };
+const IS_REPORT = { message: 'A round report is only marked read' };
 
 /** The answer for an item its session withdrew: a packet page is offered the board, any other post gets a 404. */
 function withdrawn(packet: boolean) {
@@ -153,6 +156,17 @@ export const load: PageServerLoad = async ({ params }) => {
 			designHtml: packet.design ? renderDesign(packet.design.md) : null
 		};
 	}
+	if (content.kind === 'report') {
+		return {
+			meta,
+			decided,
+			kind: 'report' as const,
+			read: decision?.decision === 'read',
+			html: renderReport(reportBody(content.text)),
+			waiting: await waitingInRound(APPROVAL_QUEUE_STATE, meta),
+			landed: await landedInRound(APPROVAL_QUEUE_STATE, meta)
+		};
+	}
 	if (content.kind === 'legacy') {
 		const date = (await historyRow(APPROVAL_QUEUE_STATE, params.id))?.date;
 		return { meta, decided, kind: 'legacy' as const, decision, text: content.text, date };
@@ -183,6 +197,7 @@ export const actions: Actions = {
 	approve: async ({ params, request }) => {
 		const found = await readItem(APPROVAL_QUEUE_STATE, params.id);
 		if (!found) return gone(request);
+		if (found.content.kind === 'report') return fail(400, IS_REPORT);
 		if (found.content.kind === 'facts') return answer(params.id, found.decided, found.content.packet, request, 'approve');
 		const item = await readWaiting(params.id);
 		const { content } = item;
@@ -201,6 +216,7 @@ export const actions: Actions = {
 	reject: async ({ params, request }) => {
 		const found = await readItem(APPROVAL_QUEUE_STATE, params.id);
 		if (!found) return gone(request);
+		if (found.content.kind === 'report') return fail(400, IS_REPORT);
 		if (found.content.kind === 'facts') return answer(params.id, found.decided, found.content.packet, request, 'reject');
 		const item = await readWaiting(params.id);
 		if (item.content.kind !== 'design') return fail(400, { message: 'Nothing to reject' });
@@ -213,6 +229,7 @@ export const actions: Actions = {
 	notes: async ({ params, request }) => {
 		const found = await readItem(APPROVAL_QUEUE_STATE, params.id);
 		if (!found) return gone(request);
+		if (found.content.kind === 'report') return fail(400, IS_REPORT);
 		if (found.content.kind !== 'facts') return fail(400, { message: 'Not a packet with notes' });
 		if (found.decided) return fail(409, ALREADY_DECIDED);
 		const form = await request.formData().catch(() => null);
@@ -221,15 +238,31 @@ export const actions: Actions = {
 		if (!(await writeNotes(APPROVAL_QUEUE_STATE, params.id, notes))) return withdrawn(true);
 		return { saved: true };
 	},
+	/**
+	 * Marks a round report read. A report already read, or one a newer report replaced, writes nothing
+	 * and leaves the page for the next waiting item, or the board, as a fresh mark does.
+	 */
+	read: async ({ params }) => {
+		const found = await readItem(APPROVAL_QUEUE_STATE, params.id);
+		if (!found) redirect(303, '/');
+		if (found.content.kind !== 'report') return fail(400, { message: 'Not a round report' });
+		const next = nextItem(await listWaiting(APPROVAL_QUEUE_STATE), params.id);
+		if (!found.decided) await writeDecision(APPROVAL_QUEUE_STATE, params.id, { decision: 'read' });
+		redirect(303, next ? `/item/${next.id}` : '/');
+	},
 	/** Logs that a fold opened on the item. */
 	fold: async ({ params, request }) => {
-		if (!(await readItem(APPROVAL_QUEUE_STATE, params.id))) error(404, 'Not found');
+		const item = await readItem(APPROVAL_QUEUE_STATE, params.id);
+		if (!item) error(404, 'Not found');
+		if (item.content.kind === 'report') return fail(400, IS_REPORT);
 		const fold = (await request.formData().catch(() => null))?.get('fold');
 		if (typeof fold !== 'string' || !fold.trim()) return fail(400, { message: 'Name the fold' });
 		await appendFold(APPROVAL_QUEUE_STATE, params.id, fold.trim());
 		return { ok: true };
 	},
 	submit: async ({ params, request }) => {
+		const found = await readItem(APPROVAL_QUEUE_STATE, params.id);
+		if (found?.content.kind === 'report') return fail(400, IS_REPORT);
 		const item = await readWaiting(params.id);
 		if (item.content.kind !== 'triage') return fail(400, { message: 'Not a triage item' });
 		const form = await request.formData().catch(() => null);

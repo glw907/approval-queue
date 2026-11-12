@@ -1,14 +1,29 @@
 import { APPROVAL_QUEUE_STATE } from '$app/env/private';
 import { redirect } from '@sveltejs/kit';
-import { groupTitle, openingRow, SINGLES, SORT_COOKIE, type BoardRow, type Sort } from '#lib/board.ts';
+import { groupTitle, openingRow, ROUND_REPORT, SINGLES, SORT_COOKIE, type BoardRow, type Sort } from '#lib/board.ts';
 import { listWaiting, type ItemMeta } from '#lib/server/items.ts';
 import { packetFacts } from '#lib/server/packet-facts.ts';
+import { storedHeadline } from '#lib/server/report.ts';
 import type { PageServerLoad } from './$types';
 
 const KINDS = { design: 'Design', triage: 'Triage' };
 
 async function toRow(meta: ItemMeta): Promise<BoardRow> {
 	const base = { id: meta.id, headline: meta.headline ?? meta.title, created: meta.created, orphaned: meta.orphaned };
+	if (meta.kind === 'report') {
+		const headline = (await storedHeadline(APPROVAL_QUEUE_STATE, meta.id)) || meta.title;
+		return {
+			...base,
+			headline,
+			group: groupTitle(meta),
+			...(meta.round && { round: meta.round }),
+			asks: 0,
+			rules: [],
+			repos: 1,
+			irreversible: false,
+			single: ROUND_REPORT
+		};
+	}
 	if (meta.kind !== 'packet') {
 		return { ...base, group: SINGLES, asks: 0, rules: [], repos: 1, irreversible: false, single: KINDS[meta.kind] };
 	}

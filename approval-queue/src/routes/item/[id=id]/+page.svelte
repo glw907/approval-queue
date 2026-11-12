@@ -9,6 +9,7 @@ decision, and date.
 	import { decisionWord, longDay } from '#lib/board.ts';
 	import ItemPanel from '#lib/components/ItemPanel.svelte';
 	import PacketPage from '#lib/components/PacketPage.svelte';
+	import ReportPage from '#lib/components/ReportPage.svelte';
 
 	let { data } = $props();
 
@@ -21,6 +22,8 @@ decision, and date.
 {#key id}
 	{#if data.kind === 'packet'}
 		<PacketPage {data} />
+	{:else if data.kind === 'report'}
+		<ReportPage {data} />
 	{:else if data.kind === 'retired'}
 		<main id="main" tabindex="-1" class="mx-auto w-full max-w-3xl p-8">
 			<h1 class="desk-title text-2xl">{data.title}</h1>

@@ -158,3 +158,18 @@ describe('keyAction', () => {
 		expect(keyAction('a', { ...none, ctrl: true }, base)).toBeNull();
 	});
 });
+
+describe('keyAction on a round report', () => {
+	const report = ctx({ page: 'report' });
+
+	it('answers nothing to a decision key, F8, Escape, or Ctrl+Enter', () => {
+		for (const key of ['a', 'r', '1', '2', '3', 'F8', 'Escape']) expect(keyAction(key, none, report)).toBeNull();
+		expect(keyAction('Enter', { ...none, ctrl: true }, ctx({ page: 'report', noteOpen: true }))).toBeNull();
+	});
+
+	it('keeps j, k, and ?', () => {
+		expect(keyAction('j', none, report)).toBe('queue-next');
+		expect(keyAction('k', none, report)).toBe('queue-prev');
+		expect(keyAction('?', none, report)).toBe('toggle-sheet');
+	});
+});

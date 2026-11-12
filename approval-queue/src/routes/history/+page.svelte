@@ -9,7 +9,7 @@ sidecar that could not be read.
 
 	let { data } = $props();
 
-	const KINDS: Record<string, string> = { packet: 'Packet', design: 'Design', triage: 'Triage list' };
+	const KINDS: Record<string, string> = { packet: 'Packet', design: 'Design', triage: 'Triage list', report: 'Round report' };
 	const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
 	/** The line under a title: kind, decision, date, then the notes and replies when there are any. */
 	const sub = (row: (typeof data.rows)[number]) =>

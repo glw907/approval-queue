@@ -30,6 +30,9 @@ export interface BoardRow {
 	orphaned: boolean;
 }
 
+/** The `single` label of a round report's row. */
+export const ROUND_REPORT = 'Round report';
+
 /** A run of one group's rows under one round heading; the rows with no round form a section with no heading. */
 export interface BoardSection {
 	round?: string;
@@ -73,7 +76,9 @@ export function boardGroups(rows: BoardRow[], sort: Sort): BoardGroup[] {
 		const loose = list.filter((r) => !r.round);
 		const rounds = [...byRound]
 			.map(([round, rs]) => ({ round, heading: roundHeading(round, rs), rows: rs }))
-			.sort((a, b) => (sort === 'asks' ? total(b.rows) - total(a.rows) : 0) || byOldest(a.rows[0], b.rows[0]));
+			.sort((a, b) => (sort === 'asks' ? total(b.rows) - total(a.rows) : 0) || byOldest(a.rows[0], b.rows[0]))
+			// The report leads its round, and moves only after the sections are ranked, so it never reorders the board.
+			.map((r) => ({ ...r, rows: [...r.rows.filter((x) => x.single === ROUND_REPORT), ...r.rows.filter((x) => x.single !== ROUND_REPORT)] }));
 		return [...(loose.length ? [{ rows: loose }] : []), ...rounds];
 	};
 	const groups = [...map].map(([title, list]) => {
@@ -114,7 +119,7 @@ export function openingRow(rows: BoardRow[]): BoardRow | undefined {
 
 /** What the rail needs of a waiting item to describe it. */
 export interface RailItem {
-	kind: 'design' | 'triage' | 'packet';
+	kind: 'design' | 'triage' | 'packet' | 'report';
 	/** A packet's own kind, from its fact file. */
 	packetKind?: 'stop' | 'close' | 'design';
 	/** A packet's calls; 0 for any other kind. */
@@ -129,12 +134,13 @@ export function railLine(item: RailItem, now = Date.now()): string {
 	const ago = `${spokenAge(item.created, now)} ago`;
 	if (item.kind === 'triage') return `Triage list, ${ago}`;
 	if (item.kind === 'design') return `Design, ${ago}`;
+	if (item.kind === 'report') return `Round report, ${ago}`;
 	const calls = item.asks === 0 ? 'no calls' : `${item.asks} call${item.asks === 1 ? '' : 's'}`;
 	return `${PACKET_WORD[item.packetKind ?? 'stop']}, ${calls}, ${ago}`;
 }
 
 /** The waiting items the rail groups: those with no round in the order given, then initiative groups that hold a round. */
-export function railRounds<T extends { created: string; round?: string; initiative?: string; initiativeTitle?: string }>(
+export function railRounds<T extends { created: string; kind?: string; round?: string; initiative?: string; initiativeTitle?: string }>(
 	items: T[]
 ): { loose: T[]; groups: Array<{ title: string; rounds: Array<{ round: string; items: T[] }> }> } {
 	const oldest = (list: T[]) => list.reduce((a, i) => (i.created < a ? i.created : a), list[0].created);
@@ -148,7 +154,9 @@ export function railRounds<T extends { created: string; round?: string; initiati
 	}
 	const groups = [...byGroup].map(([title, rounds]) => ({
 		title,
-		rounds: [...rounds].map(([round, list]) => ({ round, items: list })).sort((a, b) => oldest(a.items).localeCompare(oldest(b.items)))
+		rounds: [...rounds]
+			.map(([round, list]) => ({ round, items: [...list.filter((i) => i.kind === 'report'), ...list.filter((i) => i.kind !== 'report')] }))
+			.sort((a, b) => oldest(a.items).localeCompare(oldest(b.items)))
 	}));
 	groups.sort((a, b) => oldest(a.rounds[0].items).localeCompare(oldest(b.rounds[0].items)));
 	return { loose: items.filter((i) => !i.round), groups };
@@ -190,4 +198,4 @@ export const longDay = (time: string) => new Date(time).toLocaleDateString('en-G
 
 /** How a decision reads on a screen: "Approved", "Sent back", "Submitted". */
 export const decisionWord = (decision: string) =>
-	({ approve: 'Approved', reject: 'Sent back', submit: 'Submitted' })[decision] ?? 'Decided';
+	({ approve: 'Approved', reject: 'Sent back', submit: 'Submitted', read: 'Read' })[decision] ?? 'Decided';

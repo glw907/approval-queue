@@ -6,6 +6,7 @@ import { digestDay } from '#lib/board.ts';
 import { readDigest } from '#lib/server/digest.ts';
 import { listWaiting } from '#lib/server/items.ts';
 import { packetFacts } from '#lib/server/packet-facts.ts';
+import { storedHeadline } from '#lib/server/report.ts';
 import type { LayoutServerLoad } from './$types';
 
 /**
@@ -28,7 +29,8 @@ export const load: LayoutServerLoad = async ({ depends, isDataRequest, cookies }
 	const queue = await Promise.all(
 		waiting.map(async (item) => {
 			const facts = item.kind === 'packet' ? await packetFacts(APPROVAL_QUEUE_STATE, item.id) : null;
-			return { ...item, asks: facts?.asks ?? 0, packetKind: facts?.kind };
+			const headline = item.kind === 'report' ? (await storedHeadline(APPROVAL_QUEUE_STATE, item.id)) || undefined : item.headline;
+			return { ...item, ...(headline && { headline }), asks: facts?.asks ?? 0, packetKind: facts?.kind };
 		})
 	);
 	const lines = (await readDigest(APPROVAL_QUEUE_STATE)).flatMap((group) => group.lines);

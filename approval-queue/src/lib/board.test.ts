@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { age, boardGroups, digestDay, digestSections, decisionWord, digestLine, longDay, openingRow, railLine, railRounds, SINGLES, spokenAge, type BoardRow } from './board.ts';
+import { age, boardGroups, digestDay, digestSections, decisionWord, digestLine, longDay, openingRow, railLine, railRounds, ROUND_REPORT, SINGLES, spokenAge, type BoardRow } from './board.ts';
 
 const row = (id: string, group: string, created: string, asks = 0): BoardRow => ({
 	id,
@@ -191,5 +191,40 @@ describe('longDay and decisionWord', () => {
 		expect(longDay('2026-11-09T12:00:00Z')).toBe('9 November 2026');
 		expect(decisionWord('reject')).toBe('Sent back');
 		expect(decisionWord('whatever')).toBe('Decided');
+	});
+});
+
+describe('a round report', () => {
+	const rep = (id: string, created: string, round = 'ur-queue') => ({ ...rrow(id, 'Init', created, round), single: ROUND_REPORT });
+
+	it('leads its round section whatever its age or the sort', () => {
+		const list = [rrow('p1', 'Init', '2026-11-12T07:00:00Z', 'ur-queue', 3), rep('rep', '2026-11-12T09:00:00Z'), rrow('p2', 'Init', '2026-11-12T08:00:00Z', 'ur-queue', 1)];
+		for (const sort of ['asks', 'oldest'] as const) {
+			const [group] = boardGroups(list, sort);
+			expect(group.sections[0].rows.map((r) => r.id)).toEqual(['rep', 'p1', 'p2']);
+		}
+	});
+
+	it('does not move a round ahead of another because of its report', () => {
+		const list = [rrow('a', 'Init', '2026-11-12T07:00:00Z', 'ur-a', 1), rrow('b', 'Init', '2026-11-12T08:00:00Z', 'ur-b', 1), rep('rep', '2026-11-12T06:00:00Z', 'ur-b')];
+		const [group] = boardGroups(list, 'asks');
+		expect(group.sections.map((s) => s.round)).toEqual(['ur-a', 'ur-b']);
+	});
+
+	it('heads a round holding only its report "Round <id>", and is never the opening row', () => {
+		const [group] = boardGroups([rep('rep', '2026-11-12T09:00:00Z')], 'asks');
+		expect(group.sections[0].heading).toBe('Round ur-queue');
+		expect(openingRow([rep('rep', '2026-11-12T09:00:00Z')])).toBeUndefined();
+	});
+
+	it('puts the report first in the rail round, words its line, and names its decision', () => {
+		const out = railRounds([
+			{ id: 'p', created: '1', kind: 'packet', initiative: 'x', initiativeTitle: 'Init', round: 'ur-queue' },
+			{ id: 'r', created: '2', kind: 'report', initiative: 'x', initiativeTitle: 'Init', round: 'ur-queue' }
+		]);
+		expect(out.groups[0].rounds[0].items.map((i) => i.id)).toEqual(['r', 'p']);
+		const now = Date.parse('2026-11-10T12:20:00Z');
+		expect(railLine({ kind: 'report', asks: 0, created: '2026-11-10T12:00:00Z' }, now)).toBe('Round report, 20 minutes ago');
+		expect(decisionWord('read')).toBe('Read');
 	});
 });

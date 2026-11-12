@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { render, renderInline, renderLabel } from './markdown.ts';
+import { render, renderInline, renderLabel, renderReport } from './markdown.ts';
+import { FIXTURE } from './report-fixture.ts';
 
 describe('render', () => {
 	it('renders markdown', () => {
@@ -41,5 +42,20 @@ describe('links', () => {
 	it('renders a label with each link as its text, so it can sit inside a link', () => {
 		expect(renderLabel('Fix [the guard](https://x.test) in **auth**')).toBe('Fix the guard in <strong>auth</strong>');
 		expect(renderLabel('<a href="x">raw</a>')).toBe('&lt;a href=&quot;x&quot;&gt;raw&lt;/a&gt;');
+	});
+});
+
+describe('renderReport', () => {
+	it('renders the table and keeps one field to a line', () => {
+		const html = renderReport(FIXTURE);
+		expect(html).toContain('<table');
+		expect(html).toMatch(/Stops: 1<br>\s*Refusals: 0/);
+	});
+
+	it('renders raw HTML and a javascript link as text', () => {
+		const html = renderReport('<script>alert(1)</script>\n\n[x](javascript:alert(1))');
+		expect(html).not.toContain('<script');
+		expect(html).toContain('&lt;script');
+		expect(html).not.toContain('<a ');
 	});
 });

@@ -35,6 +35,16 @@ describe('the board page', () => {
 		expect(html).toContain(SINGLES);
 	});
 
+	it('puts a round report first in its round and labels it', () => {
+		const html = body([
+			row('q1', 'Unattended rounds', '2026-11-11T11:00:00Z', { round: 'ur-queue' }),
+			row('rep', 'Unattended rounds', '2026-11-11T12:00:00Z', { round: 'ur-queue', single: 'Round report', asks: 0, headline: '3 of 4 passes merged, 1 parked' })
+		]);
+		expect(html.indexOf('3 of 4 passes merged, 1 parked')).toBeGreaterThan(-1);
+		expect(html.indexOf('3 of 4 passes merged')).toBeLessThan(html.indexOf('Headline q1'));
+		expect(html).toContain('Round report');
+	});
+
 	it('renders rows with no round with no round heading and one tbody for each group', () => {
 		const html = body([row('a', 'One', '2026-11-11T10:00:00Z'), row('b', 'Two', '2026-11-11T11:00:00Z')]);
 		expect(html).not.toContain('Round ');
