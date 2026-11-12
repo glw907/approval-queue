@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { isAbsolute, join } from 'node:path';
 import { promisify } from 'node:util';
 import type { FactPacket } from './items.ts';
 
@@ -48,13 +48,24 @@ export async function checkCurrent(packet: FactPacket): Promise<Refusal | undefi
 	return undefined;
 }
 
-/** A design's hash is read from the repo checkout the fact file names, under `APPROVAL_QUEUE_PROJECTS` or `~/Projects`. */
+/**
+ * A design's hash is read from the path the command recorded, which never depends on the server's
+ * environment. An item queued before the path was recorded has no `path` key and reads the repo
+ * checkout the fact file names, under `APPROVAL_QUEUE_PROJECTS` or `~/Projects`. A `path` that is
+ * not an absolute string counts as recorded and unreadable: the server can't say what moved.
+ */
 async function checkDesign({ facts, design }: FactPacket): Promise<Refusal | undefined> {
 	if (!facts.design || !design) return undefined;
+	const hash = (bytes: Buffer) => createHash('sha256').update(bytes).digest('hex');
+	if ('path' in design) {
+		const recorded = design.path;
+		const bytes = typeof recorded === 'string' && isAbsolute(recorded) ? await readFile(recorded).catch(() => undefined) : undefined;
+		if (bytes === undefined) return { status: 503, message: `Could not read the design at ${String(recorded)}; nothing was recorded` };
+		return hash(bytes) === design.sha256 ? undefined : outOfDate;
+	}
 	const projects = process.env.APPROVAL_QUEUE_PROJECTS ?? join(homedir(), 'Projects');
-	const now = await readFile(join(projects, facts.design.repo, facts.design.path)).then(
-		(bytes) => createHash('sha256').update(bytes).digest('hex'),
-		() => ''
-	);
-	return now === design.sha256 ? undefined : { status: 409, message: 'Out of date: the design changed since this packet was queued' };
+	const now = await readFile(join(projects, facts.design.repo, facts.design.path)).then(hash, () => '');
+	return now === design.sha256 ? undefined : outOfDate;
 }
+
+const outOfDate: Refusal = { status: 409, message: 'Out of date: the design changed since this packet was queued' };

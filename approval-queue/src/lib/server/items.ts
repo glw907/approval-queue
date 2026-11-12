@@ -120,8 +120,12 @@ export interface FactPacket {
 	notes: Note[];
 	replies: Reply[];
 	stale?: Stale;
-	/** A design packet's copied design and the hash the command pinned. */
-	design?: { md: string; sha256: string };
+	/**
+	 * A design packet's copied design and the hash the command pinned. `path` is the file the command
+	 * copied it from; an item queued before the path was recorded has none, and a `path` key that is
+	 * not a string is kept as found for the approve check to refuse.
+	 */
+	design?: { md: string; sha256: string; path?: unknown };
 }
 
 /** What a resend carries from the item it revises: that item's notes with their replies, and the paragraphs of the new `text.md` that differ from its text. */
@@ -301,7 +305,7 @@ async function readFactPacket(dir: string): Promise<ItemContent> {
 		if (pr) prs.push(pr);
 	}
 	const design = await readFile(join(dir, 'design.md'), 'utf8').catch(() => undefined);
-	const pinned = await readJson<{ sha256: string }>(join(dir, 'design.json'));
+	const pinned = await readJson<{ sha256: string; path?: unknown }>(join(dir, 'design.json'));
 	const stale = await readJson<Stale>(join(dir, 'stale.json')).catch(() => undefined);
 	return {
 		kind: 'facts',
@@ -315,7 +319,7 @@ async function readFactPacket(dir: string): Promise<ItemContent> {
 			notes: await readList<Note>(join(dir, 'notes.json')),
 			replies: await readList<Reply>(join(dir, 'replies.json')),
 			...(stale && { stale }),
-			...(design !== undefined && pinned && { design: { md: design, sha256: pinned.sha256 } })
+			...(design !== undefined && pinned && { design: { md: design, sha256: pinned.sha256, ...('path' in pinned && { path: pinned.path }) } })
 		}
 	};
 }
