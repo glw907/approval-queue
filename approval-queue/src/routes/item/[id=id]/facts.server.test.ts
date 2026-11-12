@@ -28,6 +28,7 @@ import { headOf, seedFacts } from '#lib/server/seed-facts.ts';
 import { actions, load } from './+page.server.ts';
 
 const ID = '20261011T100000-1';
+const OUT_OF_DATE = 'Out of date: the design changed since this packet was queued';
 
 function call(name: keyof typeof actions, fields: [string, string][] = [], id = ID) {
 	const request = new Request('http://127.0.0.1:7907/', { method: 'POST', body: new URLSearchParams(fields) });
@@ -278,8 +279,49 @@ describe('a new-shape packet', () => {
 
 		it('refuses with 409 when the design file changed, and writes nothing', async () => {
 			await source('# Edited\n');
-			expect(await call('approve', designPost)).toMatchObject({ status: 409 });
+			expect(await call('approve', designPost)).toMatchObject({ status: 409, data: { message: OUT_OF_DATE } });
 			await missing('decision.json');
+		});
+
+		describe('with a recorded path', () => {
+			const elsewhere = () => join(state.root, 'elsewhere', 'design.md');
+			const record = async (text: string, path: unknown = elsewhere()) => {
+				await rm(dir(), { recursive: true });
+				await seedFacts(state.root, ID, 'design', {}, path as string);
+				await mkdir(join(state.root, 'elsewhere'), { recursive: true });
+				await writeFile(elsewhere(), text);
+			};
+
+			it('approves from a tree that is not the server’s, with APPROVAL_QUEUE_PROJECTS unset', async () => {
+				await record('# The design\n');
+				delete process.env.APPROVAL_QUEUE_PROJECTS;
+				expect(await call('approve', designPost)).toEqual({ next: null });
+			});
+
+			it('refuses with 409 when the file was edited after the seed, and writes nothing', async () => {
+				await record('# Edited\n');
+				expect(await call('approve', designPost)).toMatchObject({ status: 409, data: { message: OUT_OF_DATE } });
+				await missing('decision.json');
+			});
+
+			it('refuses with 503 naming the path when the file is gone, and writes nothing', async () => {
+				await record('# The design\n');
+				await rm(elsewhere());
+				expect(await call('approve', designPost)).toMatchObject({
+					status: 503,
+					data: { message: `Could not read the design at ${elsewhere()}; nothing was recorded` }
+				});
+				await missing('decision.json');
+				await missing('notes.json');
+			});
+
+			it('refuses with 503 when the recorded path is relative, empty, or not a string', async () => {
+				for (const path of ['docs/design.md', '', 7, null]) {
+					await record('# The design\n', path);
+					expect(await call('approve', designPost)).toMatchObject({ status: 503 });
+					await missing('decision.json');
+				}
+			});
 		});
 	});
 });

@@ -11,9 +11,9 @@ export const headOf = (ref: string, prs: string[]) => `h${prs.indexOf(ref) + 1}`
 /**
  * Writes an item directory the way the command lays out a new-shape packet from a `fixtures/` triple
  * (`close`, `stop`, or `design`): the checked files, the snapshot's patches, `heads.json`, a
- * `prs/<k>.json` each, and for a design the copy and its pinned hash. Returns the fact file's PRs.
+ * `prs/<k>.json` each, and for a design the copy and its pinned hash, with the path it came from when `designPath` is given. Returns the fact file's PRs.
  */
-export async function seedFacts(root: string, id: string, kind: 'close' | 'stop' | 'design', meta: object = {}): Promise<string[]> {
+export async function seedFacts(root: string, id: string, kind: 'close' | 'stop' | 'design', meta: object = {}, designPath?: string): Promise<string[]> {
 	const dir = join(root, 'items', id);
 	await mkdir(join(dir, 'snapshot'), { recursive: true });
 	await mkdir(join(dir, 'prs'), { recursive: true });
@@ -29,7 +29,7 @@ export async function seedFacts(root: string, id: string, kind: 'close' | 'stop'
 	if (kind === 'design') {
 		const md = '# The design\n';
 		await writeFile(join(dir, 'design.md'), md);
-		await writeFile(join(dir, 'design.json'), JSON.stringify({ sha256: createHash('sha256').update(md).digest('hex') }));
+		await writeFile(join(dir, 'design.json'), JSON.stringify({ sha256: createHash('sha256').update(md).digest('hex'), ...(designPath !== undefined && { path: designPath }) }));
 	}
 	await writeFile(
 		join(dir, 'item.json'),

@@ -465,7 +465,7 @@ queue packet sample "$w2/facts.json" "$w2/text.md"
 dsha=$(sha256sum "$designfile" | cut -d' ' -f1)
 assert_eq "$(jq -c '[.kind, .title]' "$dir/item.json")" '["packet","Sample queue redesign"]' "design: item.json"
 assert_eq "$(cmp -s "$designfile" "$dir/design.md"; echo $?)" "0" "design: design.md copied"
-assert_eq "$(jq -c . "$dir/design.json")" "{\"sha256\":\"$dsha\"}" "design: design.json"
+assert_eq "$(jq -c . "$dir/design.json")" "{\"sha256\":\"$dsha\",\"path\":\"$(realpath "$designfile")\"}" "design: design.json"
 [ ! -e "$dir/heads.json" ] && [ ! -d "$dir/prs" ] || { echo "FAIL: design: pull request files written"; fail=1; }
 design_id=$(basename "$dir")
 dref="sample:docs/specs/2026-11-10-sample-design.md"
@@ -473,6 +473,21 @@ dref="sample:docs/specs/2026-11-10-sample-design.md"
 printf 'Edited later.\n' >>"$designfile"
 wait_for "$dir/stale.json"
 assert_eq "$(jq -r '[.ref, .queued] | join(" ")' "$dir/stale.json" 2>/dev/null)" "$dref $dsha" "design: stale.json"
+printf '# A design\n\nOriginal text.\n' >"$designfile"
+# The poll reads the recorded path: a second copy outside the projects tree, edited, writes stale.json.
+rm -f "$dir/stale.json"
+elsewhere="$root/elsewhere-design.md"
+cp "$designfile" "$elsewhere"
+jq -c --arg p "$elsewhere" '.path = $p' "$dir/design.json" >"$dir/design.json.tmp" && mv "$dir/design.json.tmp" "$dir/design.json"
+printf 'Edited elsewhere.\n' >>"$elsewhere"
+wait_for "$dir/stale.json"
+assert_eq "$(jq -r '.now' "$dir/stale.json" 2>/dev/null)" "$(sha256sum "$elsewhere" | cut -d' ' -f1)" "design: stale.json from the recorded path"
+# An item with no recorded path reads the projects tree, as before.
+rm -f "$dir/stale.json"
+jq -c 'del(.path)' "$dir/design.json" >"$dir/design.json.tmp" && mv "$dir/design.json.tmp" "$dir/design.json"
+printf 'Edited later.\n' >>"$designfile"
+wait_for "$dir/stale.json"
+assert_eq "$(jq -r '.ref' "$dir/stale.json" 2>/dev/null)" "$dref" "design: stale.json for an item with no recorded path"
 printf '# A design\n\nOriginal text.\n' >"$designfile"
 DESIGN_REJECT='{"decision":"reject","calls":[],"decidedForYou":[],"notes":[{"id":"n1","text":"Why?","anchor":null}]}'
 decide "$DESIGN_REJECT"

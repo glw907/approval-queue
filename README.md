@@ -21,7 +21,7 @@ npm ci --prefix approval-queue
 bash scripts/install.sh
 ```
 
-`scripts/install.sh` links both commands into `~/.local/bin`. The command builds the app on first use when `approval-queue/build/index.js` is missing. After an upgrade, rebuild with `npm run build --prefix approval-queue` and restart the server (`pkill -f 'approval-queue/[b]uild'`).
+`scripts/install.sh` links both commands into `~/.local/bin`. The command builds the app on first use when `approval-queue/build/index.js` is missing. After an upgrade, run `approval-queue restart`.
 
 The hook's `settings.json` entry lives in the workstation repo and calls `claude-approval-queue-reminder` by name.
 
@@ -34,6 +34,7 @@ The hook's `settings.json` entry lives in the workstation repo and calls `claude
 | `approval-queue merge [--skip <owner/repo#n>]... [--premerge-done <owner/repo#n>]... <id>` | Merges each approved pull request at its pinned head. |
 | `approval-queue land <owner/repo#n> <claim>` | Merges a pull request that needs no packet and adds a digest line. |
 | `approval-queue digest <owner/repo#n> <claim>` | Records a merge already done as a digest line. |
+| `approval-queue restart` | Builds the app beside the running build, then swaps it in under `start.lock`. It exits 0 with a new server, and exits 1 with the old server answering again. |
 | `approval-queue reply <id \| digest> <replies.json>` | Stores the session's answers to Geoff's notes. |
 | `approval-queue design <repo> <title> <file>` and `approval-queue triage <repo> <title> <file>` | Queue a design brief or a triage list. |
 | `approval-queue withdraw <id>`, `pending`, `collect <id>` | Manage a queued item (see "After a hand-over"). |
@@ -85,7 +86,7 @@ The command writes `items/<id>/` under the state directory (`~/.local/state/appr
 | `facts.json`, `text.md` | command | Copies of the checked files. |
 | `snapshot/`, `heads.json` | command | The checked snapshot, and `[{ref, head}]`, the pinned heads that `merge` reads. |
 | `prs/<k>.json` | command | `{ref, title, body, checks, files}` for the k-th pull request, with each file's `rank` ordering held paths, workflows, and configuration first and tests and generated files last. |
-| `design.md`, `design.json` | command | A design packet: the copied design and its `{sha256}`. |
+| `design.md`, `design.json` | command | A design packet: the copied design and its `{sha256, path}`, where `path` is the design file's full path. |
 | `notes.json` | app | Geoff's notes, saved as he types. |
 | `decision.json` | app | The decision. |
 | `stale.json` | command | `{ref, queued, now}`, written when a head moved. |
@@ -100,7 +101,7 @@ The page has two buttons. Approve means "merge what was read," and Send back mea
 
 `decision.json` is `{decision, calls: [{call, choice, changed}], decidedForYou: [{call, choice, changed}], notes}`, where `call` counts from 1 in fact-file order. The command prints it with `parts` added: `[{ref, head}]` for pull requests, or `[{ref, sha256}]` for a design. It appends one line to `decisions.jsonl` for each decision, which holds `time`, `packet`, `initiative`, `kind`, `decision`, `calls`, `decidedForYou`, the number of notes, and `parts`.
 
-The server refuses an approve whose pinned heads moved (409), or when `gh` cannot read a head (503), and a design whose file hash changed. The waiting command also polls the heads every 60 seconds and writes `stale.json`, which the page shows as "Out of date." `merge` checks heads again, and `--match-head-commit` makes GitHub refuse a moved head in any case.
+The server refuses an approve whose pinned heads moved (409), or when `gh` cannot read a head (503), and a design whose file hash changed (409, "Out of date: the design changed since this packet was queued"). A design is read at the `path` its `design.json` records, whatever tree the server runs under; an unreadable or non-absolute path is a 503, "Could not read the design at <path>; nothing was recorded". A `design.json` with no `path` (queued before this change) is read under `APPROVAL_QUEUE_PROJECTS`. The waiting command also polls the heads every 60 seconds and writes `stale.json`, which the page shows as "Out of date." `merge` checks heads again, and `--match-head-commit` makes GitHub refuse a moved head in any case.
 
 ### Merge
 
@@ -151,7 +152,7 @@ The app appends `{time, item, fold}` to `folds.jsonl` each time a fold opens, fo
 
 ## Cutover
 
-The new build refuses the old packet format, so it goes live only with an empty queue: `approval-queue pending` prints nothing, and every `items/*/item.json` has a `decision.json` beside it. After the merge and the pull, run `npm ci --prefix approval-queue`, `npm run build --prefix approval-queue`, and `pkill -f 'approval-queue/[b]uild'`. The check is that `approval-queue/build/index.js` is newer than the merge commit, and that `approval-queue merge 00000000T000000-1` exits 2.
+The new build refuses the old packet format, so it goes live only with an empty queue: `approval-queue pending` prints nothing, and every `items/*/item.json` has a `decision.json` beside it. After the merge and the pull, run `approval-queue restart`. For about a second during the swap no server answers, and the new server takes the caller's environment. The check is that `approval-queue/build/index.js` is newer than the merge commit, and that `approval-queue merge 00000000T000000-1` exits 2.
 
 ## Gate
 

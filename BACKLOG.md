@@ -12,6 +12,14 @@
 
 ## Medium
 
+- [ ] **#63** `restart`'s rollback can leave a slow new server running and infers what the swap moved `#improvement` `#approval-queue` *(2026-11-11)*
+  `r_rollback` stops the new server only when it already listens, and `setsid -f` records no pid, so a server slower than the 10-second wait survives the rollback and can race the restored build for the port. It also decides whether to remove a failed new `build` by whether `.stage` still holds it, which is sound only while the adapter's output directory stays `build`.
+  Have `r_swap` record which directories it moved and key the removal on that record; find a slow new server by its command line and state root under `/proc` and stop it before the rollback restarts the old build.
+
+- [ ] **#62** A design item whose `design.json` is missing approves with no check `#bug` `#approval-queue` *(2026-11-11)*
+  `checkDesign` returns at `heads.ts:58` before it hashes anything when `readFactPacket` finds no `design.json`, so the approve goes through with no out-of-date check. It predates pass Q1, which checks a recorded path and refuses a bad one.
+  Refuse the approve (503) when a design item has no `design.json`.
+
 - [x] **#61** A PR whose diff touches an escape-bearing file can't be queued `#bug` `#approval-queue` *(2026-11-01)*
   `gh pr diff` now refuses a diff with terminal escape sequences unless passed `--allow-escape-sequences`, so `approval-queue packet` and `--check` exit 1 on such a PR. glw907/cairn-cms#180 hit this by deleting 30 `.ansi` reference frames, with no added line carrying an escape. The session wrote the packet to its state dir and merged under the hand-over's queue-down rule. The queue should render the neutralized diff, or fall back to `git diff`, since passing raw escapes to a browser page needs its own thought.
   Done in pass 2a (PR #14): `snapshot` retries `gh pr diff` with `--allow-escape-sequences` and stores the patch with the C0 control bytes other than tab and newline removed.
