@@ -144,7 +144,7 @@ The app appends `{time, item, fold}` to `folds.jsonl` each time a fold opens, fo
 
 ## After a hand-over
 
-**The pid.** Every `item.json` carries `pid` and `pidStart`: the command's process id and its start time in clock ticks since boot (field 22 of `/proc/<pid>/stat`). A pid counts as the waiting session only when `/proc/<pid>/stat` exists, its start time equals `pidStart`, and its state is not `Z`.
+**The pid.** Every `item.json` of a design, triage list, or packet carries `pid` and `pidStart` (a round report carries neither): the command's process id and its start time in clock ticks since boot (field 22 of `/proc/<pid>/stat`). A pid counts as the waiting session only when `/proc/<pid>/stat` exists, its start time equals `pidStart`, and its state is not `Z`.
 
 **Stop signals.** A TERM, HUP, or INT to a waiting command ends the wait and leaves `item.json` in place, so `collect` can recover a decision after a reboot. Only `withdraw` retires a waiting item.
 

@@ -205,7 +205,7 @@ describe('a round report', () => {
 		}
 	});
 
-	it('does not move a round ahead of another because of its report', () => {
+	it('does not move a round ahead of another because of its report under the asks sort', () => {
 		const list = [rrow('a', 'Init', '2026-11-12T07:00:00Z', 'ur-a', 1), rrow('b', 'Init', '2026-11-12T08:00:00Z', 'ur-b', 1), rep('rep', '2026-11-12T06:00:00Z', 'ur-b')];
 		const [group] = boardGroups(list, 'asks');
 		expect(group.sections.map((s) => s.round)).toEqual(['ur-a', 'ur-b']);

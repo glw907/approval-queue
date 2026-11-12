@@ -8,7 +8,7 @@ const cells = (line: string): string[] =>
 		.split('|')
 		.map((c) => c.trim());
 
-const isRule = (line: string) => /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)*\|?\s*$/.test(line);
+const isRule = (line: string) => /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/.test(line);
 
 /** The states of the first table whose header row has a `State` cell, one per row, in row order; undefined when none has. */
 function passStates(text: string): string[] | undefined {
@@ -33,7 +33,7 @@ export function reportHeadline(text: string): string {
 	const states = passStates(text);
 	if (!states) return '';
 	const others = new Map<string, number>();
-	for (const s of states) if (s !== 'merged') others.set(s, (others.get(s) ?? 0) + 1);
+	for (const s of states) if (s.toLowerCase() !== 'merged') others.set(s, (others.get(s) ?? 0) + 1);
 	const merged = states.length - [...others.values()].reduce((a, b) => a + b, 0);
 	return [`${merged} of ${states.length} passes merged`, ...[...others].map(([s, n]) => `${n} ${s}`)].join(', ');
 }

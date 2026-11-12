@@ -79,7 +79,7 @@ describe('the read action', () => {
 });
 
 describe('every other action on a report', () => {
-	it.each(['approve', 'reject', 'notes', 'submit'] as const)('answers 400 for %s', async (action) => {
+	it.each(['approve', 'reject', 'notes', 'submit', 'fold'] as const)('answers 400 for %s', async (action) => {
 		await write('r1', meta, { 'report.md': FIXTURE });
 		expect(await post(action, 'r1')).toMatchObject({ status: 400 });
 	});

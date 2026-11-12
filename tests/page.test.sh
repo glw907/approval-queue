@@ -209,12 +209,14 @@ has "history" "$root/history.html" "Old design title"
 has "history" "$root/history.html" "Old round title"
 has "history" "$root/history.html" "Old triage title"
 has "history" "$root/history.html" "Read report title"
-has "history" "$root/history.html" "Round report"
 tr '\n\t' '  ' <"$root/history.html" | grep -o '<main id="main".*</main>' >"$root/history.main"
+has "history" "$root/history.main" "Round report"
+has "history" "$root/history.main" "Read"
 lacks "history" "$root/history.main" "Queue round report title"
 
 # Round reports. The board holds one report row, and the rail leads its round with the report and its words.
-assert_eq "$(jq '[.nodes[1].data[] | select(. == "Round report")] | length' "$root/board.json")" 1 "board data: one Round report row"
+ridx=$(jq '.nodes[1].data | index("Round report")' "$root/board.json")
+assert_eq "$(jq --argjson i "$ridx" '[.nodes[1].data[] | select(type == "object" and .single == $i)] | length' "$root/board.json")" 1 "board data: one Round report row"
 has "board data" "$root/board-node.json" "$wreport"
 has "board data" "$root/board-node.json" "2 of 3 passes merged, 1 parked"
 lacks "board data" "$root/board-node.json" "$oreport"

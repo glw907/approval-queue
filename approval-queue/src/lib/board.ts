@@ -77,7 +77,7 @@ export function boardGroups(rows: BoardRow[], sort: Sort): BoardGroup[] {
 		const rounds = [...byRound]
 			.map(([round, rs]) => ({ round, heading: roundHeading(round, rs), rows: rs }))
 			.sort((a, b) => (sort === 'asks' ? total(b.rows) - total(a.rows) : 0) || byOldest(a.rows[0], b.rows[0]))
-			// The report leads its round, and moves only after the sections are ranked, so it never reorders the board.
+			// The report leads its round, and moves only after the sections are ranked, so a report never changes how its round ranks against the packets it sits with.
 			.map((r) => ({ ...r, rows: [...r.rows.filter((x) => x.single === ROUND_REPORT), ...r.rows.filter((x) => x.single !== ROUND_REPORT)] }));
 		return [...(loose.length ? [{ rows: loose }] : []), ...rounds];
 	};

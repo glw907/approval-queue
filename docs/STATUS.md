@@ -52,7 +52,7 @@ Geoff and return his decision as JSON. `README.md` holds the interfaces and the 
 thinkpad-x1 has not taken the cutover. Its first session there runs, before any hand-over:
 
 1. `approval-queue pending` (empty, or collect what it lists with the old build first).
-2. `approval-queue restart`, which also serves the round report page.
+2. `approval-queue restart` rebuilds the app; the build before Q4 cannot show a round report.
 3. `systemctl --user disable --now decision-review.timer`.
 4. Check that `approval-queue merge` with no id exits 2.
 

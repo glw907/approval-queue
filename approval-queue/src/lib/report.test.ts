@@ -6,6 +6,10 @@ const table = (...states: string[]) =>
 	`# T\n\n| Pass | State |\n| --- | --- |\n${states.map((s, i) => `| Q${i + 1} | ${s} |`).join('\n')}\n`;
 
 describe('reportHeadline', () => {
+	it('counts a capitalised Merged and reads a two-dash rule', () => {
+		expect(reportHeadline('| Pass | State |\n| -- | -- |\n| Q1 | Merged |\n| Q2 | parked |\n')).toBe('1 of 2 passes merged, 1 parked');
+	});
+
 	it('counts the merged passes and the one parked', () => {
 		expect(reportHeadline(FIXTURE)).toBe('3 of 4 passes merged, 1 parked');
 	});
