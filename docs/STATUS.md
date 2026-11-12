@@ -10,7 +10,7 @@ Queue live through: Q1
 | Pass | State | PR | Planned min | Actual min | Usage before (week / Fable) | Usage after |
 | --- | --- | --- | --- | --- | --- | --- |
 | Q1 | merged | #15 | 60 | ~60 | 68% / 15% | 73% / 24% |
-| Q2 | not started | none | 90 | | | |
+| Q2 | planning | none | 90 | | 73% / 24% | |
 | Q3 | not started | none | 120 | | | |
 | Q4 | not started | none | 120 | | | |
 
