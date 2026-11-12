@@ -30,9 +30,9 @@ The hook's `settings.json` entry lives in the workstation repo and calls `claude
 | Form | What it does |
 | --- | --- |
 | `approval-queue snapshot <facts.json>` | Writes `snapshot/` beside the fact file: one `<owner>-<repo>-<n>.patch` per pull request at its current head, and `heads.json`. |
-| `approval-queue packet [--check] [--replies <replies.json>] <initiative> <facts.json> <text.md>` | Checks both files against the snapshot, queues the packet, and waits for the decision. |
-| `approval-queue merge [--skip <owner/repo#n>]... [--premerge-done <owner/repo#n>]... <id>` | Merges each approved pull request at its pinned head. |
-| `approval-queue land <owner/repo#n> <claim>` | Merges a pull request that needs no packet and adds a digest line. |
+| `approval-queue packet [--check] [--replies <replies.json>] <initiative> <facts.json> <text.md>` | Checks both files against the snapshot, queues the packet, and waits for the decision. It refuses a pull request whose base is not the repo's default branch. |
+| `approval-queue merge [--skip <owner/repo#n>]... [--premerge-done <owner/repo#n>]... <id>` | Merges each approved pull request at its pinned head. It refuses a stop packet, and a pull request not based on the default branch. |
+| `approval-queue land <owner/repo#n> <claim>` | Merges a pull request that needs no packet and adds a digest line. It refuses a pull request not based on the default branch. |
 | `approval-queue digest <owner/repo#n> <claim>` | Records a merge already done as a digest line. |
 | `approval-queue restart` | Builds the app beside the running build, then swaps it in under `start.lock`. It exits 0 with a new server, and exits 1 with the old server answering again. |
 | `approval-queue reply <id \| digest> <replies.json>` | Stores the session's answers to Geoff's notes. |
@@ -72,7 +72,7 @@ A fresh writer writes `text.md` from the fact file, the initiative record, and t
 4. `## Not checked`.
 5. `## What changed`, which a design packet omits. A lead paragraph, then one bullet per claim. Each bullet ends with a citation, `[owner/repo#n path:a-b]`, where `a-b` are new-side line numbers in the snapshot.
 
-The command takes the status line, options, steps, files, and checks from the fact file and from GitHub, never from the text. `packet --check` refuses a claim whose line range is not in the snapshot, and refuses a pull request with a failing check. It reports pending checks and does not wait. `packet` and `land` wait for pending checks: they poll every 30 seconds for up to 15 minutes, then refuse. `APPROVAL_QUEUE_POLL_S` and `APPROVAL_QUEUE_POLL_MAX_S` override the two figures, for tests only.
+The command takes the status line, options, steps, files, and checks from the fact file and from GitHub, never from the text. `packet --check` refuses a claim whose line range is not in the snapshot, refuses a pull request with a failing check, and refuses a pull request whose base is not the repo's default branch (a read of the default branch that fails exits 1). It reports pending checks and does not wait. `packet` and `land` wait for pending checks: they poll every 30 seconds for up to 15 minutes, then refuse. `APPROVAL_QUEUE_POLL_S` and `APPROVAL_QUEUE_POLL_MAX_S` override the two figures, for tests only.
 
 When `gh pr diff` refuses a diff that contains terminal escape sequences, the command retries with `--allow-escape-sequences` and stores the patch with the C0 control bytes (other than tab and newline) removed.
 
@@ -97,7 +97,7 @@ A design or triage item keeps its own layout. An item stored in an older shape o
 
 ## The decision
 
-The page has two buttons. Approve means "merge what was read," and Send back means "merge nothing." Each carries the notes Geoff wrote. A send-back with no note is refused. Approve holds for 5 seconds with an Undo toast before it posts, and Ctrl+Enter approves.
+The page has two buttons. Approve means "merge what was read," and Send back means "merge nothing." Each carries the notes Geoff wrote. A send-back with no note is refused. Approve holds for 5 seconds with an Undo toast before it posts, and Ctrl+Enter approves. On a stop packet the primary button reads "Answer and resume" and the page says "Pass parked until you answer." The decision is stored as `approve`, and answering merges nothing.
 
 `decision.json` is `{decision, calls: [{call, choice, changed}], decidedForYou: [{call, choice, changed}], notes}`, where `call` counts from 1 in fact-file order. The command prints it with `parts` added: `[{ref, head}]` for pull requests, or `[{ref, sha256}]` for a design. It appends one line to `decisions.jsonl` for each decision, which holds `time`, `packet`, `initiative`, `kind`, `decision`, `calls`, `decidedForYou`, the number of notes, and `parts`.
 
@@ -105,11 +105,11 @@ The server refuses an approve whose pinned heads moved (409), or when `gh` canno
 
 ### Merge
 
-`merge` refuses (exit 2) an item that is not decided, is not an approve, is marked out of date, or is a design packet. For each pull request in `heads.json` order, it reads `gh pr view`. A pull request already merged at its pinned head counts as merged. A body with a `## Before merge` section needs the pull request in `--premerge-done`, or the command stops with exit 2 and prints the section. Otherwise it runs `gh pr merge <n> --repo <r> --merge --match-head-commit <head>`. It stops at the first failure with exit 1 and prints one JSON line listing the pull requests merged, failed, skipped, and not reached. A second run prints each merged pull request as merged and calls no merge.
+`merge` refuses (exit 2) an item that is not decided, is not an approve, is marked out of date, is a design packet, or is a stop packet ("a stop packet is answered and never merged"). Before it merges anything, it reads each pull request's base branch against the repo's default branch (`gh repo view`) and refuses with exit 2 at any pull request based elsewhere, naming it, its base, and the default branch; `--skip` exempts a pull request from the check. A failed read exits 1 with no JSON line. For each pull request in `heads.json` order, it reads `gh pr view`. A pull request already merged at its pinned head counts as merged. A body with a `## Before merge` section needs the pull request in `--premerge-done`, or the command stops with exit 2 and prints the section. Otherwise it runs `gh pr merge <n> --repo <r> --merge --match-head-commit <head>`. It stops at the first failure with exit 1 and prints one JSON line listing the pull requests merged, failed, skipped, and not reached. A second run prints each merged pull request as merged and calls no merge.
 
 ### Land and digest
 
-`land` refuses a pull request that sits in a waiting item, is closed, has a `## Before merge` section, or has a failing check. It merges at the head it read, and appends `{time, ref, head, claim, lane: "land"}` to `digest.jsonl` in the state directory. `digest` refuses an open pull request and appends the same line with `lane: "record"`. Neither command judges a pull request's class: the session does.
+`land` refuses a pull request that sits in a waiting item, is closed, is not based on the repo's default branch (exit 2; a failed read of the default branch exits 1), has a `## Before merge` section, or has a failing check. It merges at the head it read, and appends `{time, ref, head, claim, lane: "land"}` to `digest.jsonl` in the state directory. `digest` refuses an open pull request and appends the same line with `lane: "record"`. Neither command judges a pull request's class: the session does.
 
 ## Notes and replies
 
@@ -160,7 +160,7 @@ The new build refuses the old packet format, so it goes live only with an empty 
 bash scripts/gate.sh
 ```
 
-The gate runs the app's `check` and `test`, then every `tests/*.test.sh`, including the install test (which uses a temp `HOME`).
+The gate runs the app's `check` and `test`, then every `tests/*.test.sh`, including the install test (which uses a temp `HOME`) and `tests/page.test.sh`, which builds a copy of the app on a random port and reads the stop, close, design, and out-of-date pages.
 
 ## History
 

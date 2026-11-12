@@ -37,6 +37,10 @@ Geoff and return his decision as JSON. `README.md` holds the interfaces and the 
   `collect`, `design`, `triage`, and `restart`. The docs and single-`pr` kinds, Defer, per-part verdicts, and
   the contents rail are gone.
 - A tab closed inside the 5-second approve hold now sends the held decision on `pagehide`.
+- Pass Q2 (branch `ur-q2`): `merge` refuses a stop packet; `merge`, `land`, and `packet` refuse a pull
+  request not based on the repo's default branch; a stop packet's page says "Pass parked until you
+  answer." with an "Answer and resume" button. `tests/page.test.sh` serves a built copy and reads the
+  pages. Backlog #64 holds the rest of the stop page's "approve" wording.
 - pavilion runs the new build: the cutover ran on 2026-11-11 with `glw907/workstation#227` and
   Survey 1.6.0.
 
