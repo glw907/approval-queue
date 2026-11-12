@@ -72,8 +72,8 @@ export interface Facts {
 	header: { keys: Record<string, { value: string; line: number }> } | null;
 	/** Each list item under `prs`, with its parsed form or null when it isn't one. */
 	prs: { text: string; line: number; pr: PullRequest | null }[];
-	/** The first non-blank line after the header, or null when the body is blank. */
-	title: { line: number; ok: boolean } | null;
+	/** The first non-blank line after the header, or the line after the header when the body is blank. */
+	title: { line: number; ok: boolean };
 	/** The first block after a well-formed title, or null when nothing follows it. */
 	firstBlock: { line: number; paragraph: boolean } | null;
 	questions: { label: string; line: number; closed: boolean; options: number; recommended: number }[];

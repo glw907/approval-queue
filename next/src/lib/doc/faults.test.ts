@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest';
-import { CHECKS } from '#lib/doc/faults.ts';
 import { parse } from '#lib/doc/parse.ts';
 import type { Fault } from '#lib/doc/types.ts';
 
@@ -24,10 +23,6 @@ function only(source: string): Fault {
 describe('a clean document', () => {
 	it('has no fault', () => {
 		expect(parse(doc(DECIDE, `${BODY}\n${question('A label')}`)).faults).toEqual([]);
-	});
-
-	it('runs one check per entry of CHECKS', () => {
-		expect(CHECKS.length).toBe(14);
 	});
 });
 
@@ -54,6 +49,7 @@ describe('the header', () => {
 		expect(f.code).toBe('missing-key');
 		expect(f.message).toContain('"prs"');
 		expect(f.message).toContain('a merge document');
+		expect(f.lines).toEqual([1]);
 	});
 
 	it('missing-key for approve in a design document', () => {
@@ -61,6 +57,7 @@ describe('the header', () => {
 		expect(f.code).toBe('missing-key');
 		expect(f.message).toContain('"approve"');
 		expect(f.message).toContain('a design document');
+		expect(f.lines).toEqual([1]);
 	});
 
 	it('missing-key for sendback in a decide document', () => {
@@ -68,6 +65,7 @@ describe('the header', () => {
 		expect(f.code).toBe('missing-key');
 		expect(f.message).toContain('"sendback"');
 		expect(f.message).toContain('a decide document');
+		expect(f.lines).toEqual([1]);
 	});
 
 	it('bad-kind', () => {
@@ -102,6 +100,12 @@ describe('the title and the first paragraph', () => {
 		expect(f.code).toBe('no-title');
 		expect(f.message).toContain('no title');
 		expect(f.message).toContain('"# "');
+		expect(f.lines).toEqual([6]);
+	});
+
+	it('no-title at the line after the header when the body is blank', () => {
+		const f = only(doc(DECIDE, '\n'));
+		expect(f.code).toBe('no-title');
 		expect(f.lines).toEqual([6]);
 	});
 
@@ -151,6 +155,7 @@ describe('question blocks', () => {
 		const f = only(doc(DECIDE, `${BODY}\n${question('Too many', 7)}`));
 		expect(f.code).toBe('option-count');
 		expect(f.message).toContain('has 7 options');
+		expect(f.lines).toEqual([10]);
 	});
 
 	it('takes six options', () => {

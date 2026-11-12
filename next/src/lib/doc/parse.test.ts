@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import { CHECKS } from '#lib/doc/faults.ts';
 import { parse } from '#lib/doc/parse.ts';
 import type { Doc, Question } from '#lib/doc/types.ts';
 
@@ -208,6 +209,11 @@ describe('the decide mark', () => {
 	});
 });
 
+// Kept out of faults.test.ts, so that removing a check in check-mutations.sh fails only that check's own test.
+it('runs one check per entry of CHECKS', () => {
+	expect(CHECKS.length).toBe(14);
+});
+
 describe('the header', () => {
 	it('reads the pull requests of a merge document in order', () => {
 		const { doc } = parse(read('content/10-merge-gaps.md'));
@@ -216,6 +222,13 @@ describe('the header', () => {
 			{ repo: 'glw907/workstation', number: 231, words: 'the planning-miss count in the pass report', line: 5 },
 			{ repo: 'glw907/workstation', number: 232, words: 'the round rules', line: 6 }
 		]);
+	});
+
+	it('reads a pull request item written without an indent', () => {
+		const src = '---\nkind: merge\nprs:\n- glw907/workstation#7 | a fix\napprove: I merge it.\nsendback: Nothing merges.\n---\n# A title\n\nA first paragraph.\n';
+		const { doc, faults } = parse(src);
+		expect(faults).toEqual([]);
+		expect(doc.prs).toEqual([{ repo: 'glw907/workstation', number: 7, words: 'a fix', line: 4 }]);
 	});
 
 	it('gives approve and sendback as text and inline HTML', () => {

@@ -53,10 +53,10 @@ const badPr: Check = (f) =>
 		);
 
 const noTitle: Check = (f) =>
-	f.title?.ok ? [] : [fault('no-title', 'no title. The first line after the header is "# " and the title.', f.title ? [f.title.line] : [])];
+	f.title.ok ? [] : [fault('no-title', 'no title. The first line after the header is "# " and the title.', [f.title.line])];
 
 const noParagraph: Check = (f) => {
-	if (!f.title?.ok || f.firstBlock?.paragraph) return [];
+	if (!f.title.ok || f.firstBlock?.paragraph) return [];
 	return [fault('no-paragraph', 'no first paragraph. A paragraph follows the title.', [f.firstBlock?.line ?? f.title.line])];
 };
 

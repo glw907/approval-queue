@@ -23,7 +23,7 @@ function readHeader(lines: string[]): Header | null {
 	const prs: Header['prs'] = [];
 	let key = '';
 	for (let i = 1; i < close; i++) {
-		const item = /^\s+-\s+(.*)$/.exec(lines[i]);
+		const item = /^\s*-\s+(.*)$/.exec(lines[i]);
 		if (item) {
 			if (key !== 'prs') continue;
 			const text = item[1].trim();
@@ -61,9 +61,9 @@ export function parse(source: string, opts: { changes?: boolean } = {}): { doc: 
 
 	let at = bodyAt;
 	while (at < lines.length && !lines[at].trim()) at++;
-	const title: Facts['title'] = at < lines.length ? { line: at + 1, ok: lines[at].startsWith('# ') } : null;
-	const titleText = title?.ok ? lines[at].slice(2).trim() : '';
-	if (title?.ok) at++;
+	const title: Facts['title'] = at < lines.length ? { line: at + 1, ok: lines[at].startsWith('# ') } : { line: bodyAt + 1, ok: false };
+	const titleText = title.ok ? lines[at].slice(2).trim() : '';
+	if (title.ok) at++;
 	else at = bodyAt;
 
 	const segments: Segment[] = [];
@@ -131,7 +131,7 @@ export function parse(source: string, opts: { changes?: boolean } = {}): { doc: 
 
 	let firstBlock: Facts['firstBlock'] = null;
 	let summary = '';
-	if (title?.ok && firstLine >= 0) {
+	if (title.ok && firstLine >= 0) {
 		const first = firstHtmlAt === firstLine ? lex(firstHtmlSrc).find((t) => t.type !== 'space') : undefined;
 		firstBlock = { line: firstLine + 1, paragraph: first?.type === 'paragraph' };
 		if (first?.type === 'paragraph') summary = plain(renderInline(first.text, changes));
@@ -141,8 +141,8 @@ export function parse(source: string, opts: { changes?: boolean } = {}): { doc: 
 	const titleHtml = renderInline(titleText, changes);
 	const titlePlain = plain(titleHtml);
 	const headings: Heading[] = [];
-	const titleId = title?.ok ? address(titlePlain) : '';
-	if (title?.ok) headings.push({ id: titleId, level: 1, text: titlePlain });
+	const titleId = title.ok ? address(titlePlain) : '';
+	if (title.ok) headings.push({ id: titleId, level: 1, text: titlePlain });
 	// The ids go on after rendering, so a raw-HTML heading inside a <summary> gets one too.
 	for (const s of segments) {
 		if (s.type !== 'html') continue;

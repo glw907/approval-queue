@@ -1,4 +1,4 @@
-import type { Fault } from './types.ts';
+import type { Fault } from '#lib/doc/types.ts';
 
 /** One `prs` line of a merge document, as the checks need it. */
 export type PrLine = { repo: string; number: number; words: string; line: number };
