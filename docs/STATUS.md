@@ -11,7 +11,7 @@ Queue live through: Q2
 | --- | --- | --- | --- | --- | --- | --- |
 | Q1 | merged | #15 | 60 | ~60 | 68% / 15% | 73% / 24% |
 | Q2 | merged | #16 | 90 | ~49 | 73% / 24% | 75% / 28% |
-| Q3 | not started | none | 120 | | | |
+| Q3 | planning | none | 120 | | 75% / 28% | |
 | Q4 | not started | none | 120 | | | |
 
 Stops: 0
