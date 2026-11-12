@@ -150,6 +150,31 @@ view_pr() {
   printf '%s\n' "$out"
 }
 
+# default_branch <owner/repo>: prints the repo's default branch. A gh failure prints gh's error and returns 1, as
+# does an empty or null name. No cache: this runs in a command substitution, so each caller keeps its own names.
+default_branch() {
+  local errf out name rc=0
+  errf=$(mktemp)
+  out=$(gh repo view "$1" --json defaultBranchRef 2>"$errf" </dev/null) || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    cat "$errf" >&2
+    rm -f "$errf"
+    return 1
+  fi
+  rm -f "$errf"
+  name=$(jq -r '.defaultBranchRef.name // empty' <<<"$out" 2>/dev/null) || name=""
+  if [ -z "$name" ]; then
+    echo "approval-queue: $1 has no default branch" >&2
+    return 1
+  fi
+  printf '%s\n' "$name"
+}
+
+# off_base <ref> <base> <default>: the one sentence every command uses for a PR that is not based on the default branch.
+off_base() {
+  printf '%s is based on %s, which is not the default branch %s' "$1" "$2" "$3"
+}
+
 # merge_pr <ref> <head>: merges at the head; a gh failure prints gh's error and returns 1.
 merge_pr() {
   gh pr merge "${1##*#}" --repo "${1%#*}" --merge --match-head-commit "$2" </dev/null
@@ -280,7 +305,9 @@ if [ "${1:-}" = reply ]; then
   exit 0
 fi
 
-# merge <id>: merges each PR of a decided approve, in heads.json order, and records each success in merged.json.
+# merge <id>: merges each PR of a decided approve, in heads.json order, and records each success in merged.json. It
+# refuses a stop packet whatever its decision, and a PR whose base is not the repo's default branch (checked for
+# every PR before the first merge, so none is merged ahead of a bad one).
 if [ "${1:-}" = merge ]; then
   shift
   skips=() dones=()
@@ -297,10 +324,20 @@ if [ "${1:-}" = merge ]; then
   [[ $1 =~ $id_pattern ]] || refuse "$1 is not an item id"
   mdir="$root/items/$1"
   [ -e "$mdir/item.json" ] || refuse "no item $1 is queued"
+  [ "$(jq -r '.kind // empty' "$mdir/facts.json" 2>/dev/null)" != stop ] || refuse "$1 is a stop packet; a stop packet is answered and never merged"
   if [ -e "$mdir/design.json" ] || [ ! -e "$mdir/heads.json" ]; then refuse "$1 has no pull requests to merge"; fi
   [ -e "$mdir/decision.json" ] || refuse "$1 is not decided yet"
   [ "$(jq -r '.decision' "$mdir/decision.json")" = approve ] || refuse "$1 was not approved"
   [ ! -e "$mdir/stale.json" ] || refuse "$1 is out of date: a head moved since it was queued"
+  declare -A mdefaults=()
+  while IFS= read -r bref; do
+    if printf '%s\n' "${skips[@]}" | grep -qxF -- "$bref"; then continue; fi
+    brepo=${bref%#*}
+    if [[ ! -v mdefaults[$brepo] ]]; then mdefaults[$brepo]=$(default_branch "$brepo") || exit 1; fi
+    bview=$(view_pr "$bref" baseRefName) || exit 1
+    bbase=$(jq -r '.baseRefName' <<<"$bview")
+    [ "$bbase" = "${mdefaults[$brepo]}" ] || refuse "$(off_base "$bref" "$bbase" "${mdefaults[$brepo]}")"
+  done < <(jq -r '.[].ref' "$mdir/heads.json")
   [ -e "$mdir/merged.json" ] || echo '[]' >"$mdir/merged.json"
   merged=() failed=() skipped=() notreached=()
   mapfile -t mrefs < <(jq -r '.[].ref' "$mdir/heads.json")
@@ -345,7 +382,8 @@ digest_line() {
     '{time: $t, ref: $r, head: $h, claim: $c, lane: $l}' >>"$root/digest.jsonl"
 }
 
-# land <ref> <claim>: merges a small PR the session judged, once its checks are not failing, at the head it read.
+# land <ref> <claim>: merges a small PR the session judged, once its checks are not failing, at the head it read. It
+# refuses a PR whose base is not the repo's default branch.
 if [ "${1:-}" = land ]; then
   shift
   if [ $# -ne 2 ] || [[ ! $1 =~ $ref_pattern ]]; then echo "$usage" >&2; exit 2; fi
@@ -357,10 +395,12 @@ if [ "${1:-}" = land ]; then
       refuse "$lref is in the waiting item $(basename "$(dirname "$lf")"); decide it first"
     fi
   done
+  ldefault=$(default_branch "${lref%#*}") || exit 1
   waited=0
   while :; do
-    lview=$(view_pr "$lref" state,headRefOid,body,statusCheckRollup)
+    lview=$(view_pr "$lref" state,headRefOid,body,statusCheckRollup,baseRefName)
     [ "$(jq -r '.state' <<<"$lview")" = OPEN ] || refuse "$lref is $(jq -r '.state' <<<"$lview"), not open"
+    [ "$(jq -r '.baseRefName' <<<"$lview")" = "$ldefault" ] || refuse "$(off_base "$lref" "$(jq -r '.baseRefName' <<<"$lview")" "$ldefault")"
     has_before_merge "$(jq -r '.body // ""' <<<"$lview")" && refuse "$lref has a Before merge section; send it in a packet"
     ! rollup_failing "$lview" || refuse "$lref has a failing check"
     rollup_pending "$lview" || break
@@ -699,11 +739,12 @@ rank_of() {
 }
 
 # queue_packet: checks the fact file and text against the snapshot, reads each PR (waiting for pending checks),
-# and writes the item directory, item.json last. With --check it stops before writing anything. Leaves the lock
+# and writes the item directory, item.json last. A PR whose base is not the repo's default branch is a defect, and
+# a failed read of the default branch exits 1. With --check it stops before writing anything. Leaves the lock
 # released.
 queue_packet() {
   local rc=0 k ref pinned view st waited ranks prev="" have ids missing rdefects dkey="" dsrc="" snapdir checked="$fetch/checked.json"
-  local revises prs=() held=() defects=()
+  local revises prs=() held=() defects=() prepo
   if [ "$initiative" != none ]; then
     [[ $initiative =~ ^[a-z0-9-]+$ && -e "$projects/initiatives/$initiative/initiative.yaml" ]] \
       || refuse_packet "the initiative is none or the id of a record: no initiatives/$initiative/initiative.yaml under $projects (the approval-packet skill)"
@@ -755,14 +796,21 @@ queue_packet() {
   fi
 
   mapfile -t defects < <(check_waiting "${prs[@]}")
+  declare -A pdefaults=()
   for k in "${!prs[@]}"; do
     ref=${prs[k]}
     pinned=$(jq -r --arg r "$ref" '.[] | select(.ref == $r) | .head' "$snapdir/heads.json")
     waited=0
     while :; do
-      view=$(view_pr "$ref" state,headRefOid,title,body,statusCheckRollup,files)
+      view=$(view_pr "$ref" state,headRefOid,title,body,statusCheckRollup,files,baseRefName)
       if [ "$(jq -r '.state' <<<"$view")" != OPEN ]; then
         defects+=("$ref is $(jq -r '.state' <<<"$view"); a merged or closed pull request cannot be queued")
+        continue 2
+      fi
+      prepo=${ref%#*}
+      if [[ ! -v pdefaults[$prepo] ]]; then pdefaults[$prepo]=$(default_branch "$prepo") || exit 1; fi
+      if [ "$(jq -r '.baseRefName' <<<"$view")" != "${pdefaults[$prepo]}" ]; then
+        defects+=("$(off_base "$ref" "$(jq -r '.baseRefName' <<<"$view")" "${pdefaults[$prepo]}"); a pull request must target the default branch")
         continue 2
       fi
       if [ "$(jq -r '.headRefOid' <<<"$view")" != "$pinned" ]; then

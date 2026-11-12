@@ -15,7 +15,8 @@ assert_eq() {
 stubs="$root/stubs"
 mkdir -p "$stubs" "$root/gh/pr"
 # The stub logs argv, answers `pr view` from $STUB_DIR/pr/<n>.json (a <n>.then file replaces it after one view),
-# and answers `pr merge` by failing when $STUB_DIR/fail-<n> exists, else marking the PR MERGED.
+# answers `pr merge` by failing when $STUB_DIR/fail-<n> exists, else marking the PR MERGED, and answers `repo view`
+# with the default branch named in $STUB_DIR/default (main when absent), or fails when $STUB_DIR/repofail exists.
 cat >"$stubs/gh" <<'STUB'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >>"$STUB_DIR/log"
@@ -24,6 +25,10 @@ case "$sub" in
   "pr view")
     cat "$STUB_DIR/pr/$n.json"
     [ ! -e "$STUB_DIR/pr/$n.then" ] || mv "$STUB_DIR/pr/$n.then" "$STUB_DIR/pr/$n.json"
+    ;;
+  "repo view")
+    if [ -e "$STUB_DIR/repofail" ]; then echo "gh: could not resolve repository $n" >&2; exit 1; fi
+    jq -nc --arg b "$(cat "$STUB_DIR/default" 2>/dev/null || echo main)" '{defaultBranchRef: {name: $b}}'
     ;;
   "pr merge")
     if [ -e "$STUB_DIR/fail-$n" ]; then echo "gh: merge of $n refused" >&2; exit 1; fi
@@ -43,13 +48,14 @@ mkdir -p "$state/items"
 A=aq-fixture/app#1 B=aq-fixture/app#2
 HA=aaaa111 HB=bbbb222
 
-# pr <n> <state> <head> [body] [rollup json]: writes the stub's answer for PR n.
+# pr <n> <state> <head> [body] [rollup json] [base]: writes the stub's answer for PR n.
 pr() {
-  jq -n --arg s "$2" --arg h "$3" --arg b "${4:-All good.}" --argjson r "${5:-[]}" \
-    '{state: $s, headRefOid: $h, body: $b, statusCheckRollup: $r}' >"$STUB_DIR/pr/$1.json"
+  jq -n --arg s "$2" --arg h "$3" --arg b "${4:-All good.}" --argjson r "${5:-[]}" --arg base "${6:-main}" \
+    '{state: $s, headRefOid: $h, body: $b, statusCheckRollup: $r, baseRefName: $base}' >"$STUB_DIR/pr/$1.json"
 }
 
-# item <id> <kind>: writes a decided packet item. kind: approve | reject | undecided | stale | design.
+# item <id> <kind> [packet kind]: writes a decided packet item. kind: approve | reject | undecided | stale | design.
+# A packet kind (close or stop) also writes a facts.json that holds it.
 item() {
   local d="$state/items/$1"
   rm -rf "$d"
@@ -61,6 +67,7 @@ item() {
   else
     jq -n --arg a "$A" --arg b "$B" --arg ha "$HA" --arg hb "$HB" '[{ref: $a, head: $ha}, {ref: $b, head: $hb}]' >"$d/heads.json"
   fi
+  [ -z "${3:-}" ] || jq -n --arg k "$3" '{kind: $k}' >"$d/facts.json"
   case "$2" in
     approve | stale | design) echo '{"decision":"approve","calls":[],"decidedForYou":[],"notes":[]}' >"$d/decision.json" ;;
     reject) echo '{"decision":"reject","calls":[],"decidedForYou":[],"notes":[]}' >"$d/decision.json" ;;
@@ -76,7 +83,8 @@ run() {
 }
 
 merges() { grep -c '^pr merge' "$glog" 2>/dev/null || true; }
-reset() { rm -f "$glog" "$STUB_DIR"/fail-* "$STUB_DIR"/pr/*; : >"$glog"; }
+reset() { rm -f "$glog" "$STUB_DIR"/fail-* "$STUB_DIR"/pr/* "$STUB_DIR/default" "$STUB_DIR/repofail"; : >"$glog"; }
+repoviews() { grep -c "^repo view" "$glog" 2>/dev/null || true; }
 
 id=20261110T120000-1
 
@@ -137,6 +145,57 @@ for kind in reject undecided stale design; do
 done
 grep -q 'no pull requests to merge' "$err" || { echo "FAIL: design message"; fail=1; }
 
+# A stop packet is answered and never merged, whatever its decision, and no gh call is made.
+for k in approve undecided; do
+  reset; item $id $k stop; pr 1 OPEN $HA; pr 2 OPEN $HB
+  run merge $id
+  assert_eq "$rc" 2 "stop $k exit"
+  grep -q 'a stop packet is answered and never merged' "$err" || { echo "FAIL: stop $k message"; fail=1; }
+  assert_eq "$(wc -c <"$glog" | tr -d ' ')" 0 "stop $k makes no gh call"
+  [ ! -e "$state/items/$id/merged.json" ] || { echo "FAIL: stop $k wrote merged.json"; fail=1; }
+done
+
+# A close packet merges as an item with no fact file does.
+reset; item $id approve close; pr 1 OPEN $HA; pr 2 OPEN $HB
+run merge $id
+assert_eq "$rc" 0 "close exit"
+assert_eq "$(merges)" 2 "close merges both"
+
+# A PR based on another branch refuses before anything merges, naming the PR, its base, and the default.
+reset; item $id approve close; pr 1 OPEN $HA; pr 2 OPEN $HB "" "[]" release
+run merge $id
+assert_eq "$rc" 2 "off base exit"
+assert_eq "$(merges)" 0 "off base merges nothing"
+assert_eq "$out" "" "off base stdout"
+[ ! -e "$state/items/$id/merged.json" ] || { echo "FAIL: off base wrote merged.json"; fail=1; }
+for w in "$B" release main; do grep -q -- "$w" "$err" || { echo "FAIL: off base message lacks $w"; fail=1; }; done
+assert_eq "$(repoviews)" 1 "one repo view for one repo"
+
+# --skip leaves an off-base PR out of the check.
+reset; item $id approve close; pr 1 OPEN $HA; pr 2 OPEN $HB "" "[]" release
+run merge --skip $B $id
+assert_eq "$rc" 0 "off base skipped exit"
+assert_eq "$(merges)" 1 "off base skipped merges A"
+
+# The default branch is read, never assumed: trunk passes, and a PR on main then refuses.
+reset; echo trunk >"$STUB_DIR/default"; item $id approve close; pr 1 OPEN $HA "" "[]" trunk; pr 2 OPEN $HB "" "[]" trunk
+run merge $id
+assert_eq "$rc" 0 "trunk exit"
+assert_eq "$(merges)" 2 "trunk merges both"
+reset; echo trunk >"$STUB_DIR/default"; item $id approve close; pr 1 OPEN $HA "" "[]" trunk; pr 2 OPEN $HB
+run merge $id
+assert_eq "$rc" 2 "trunk off base exit"
+grep -q trunk "$err" || { echo "FAIL: trunk not named"; fail=1; }
+
+# A failed default-branch read exits 1 before anything merges.
+reset; : >"$STUB_DIR/repofail"; item $id approve close; pr 1 OPEN $HA; pr 2 OPEN $HB
+run merge $id
+assert_eq "$rc" 1 "repo view failure exit"
+assert_eq "$out" "" "repo view failure stdout"
+assert_eq "$(merges)" 0 "repo view failure merges nothing"
+grep -q 'could not resolve repository' "$err" || { echo "FAIL: repo view error not printed"; fail=1; }
+[ ! -e "$state/items/$id/merged.json" ] || { echo "FAIL: repo view failure wrote merged.json"; fail=1; }
+
 # land: a PR in a waiting item refuses.
 reset; item $id undecided; pr 1 OPEN $HA
 run land $A "small fix"
@@ -169,6 +228,19 @@ reset; pr 1 OPEN $HA "ok" '[{"status":"COMPLETED","conclusion":"STALE"}]'
 run land $A c; assert_eq "$rc" 2 "land stale check exit"
 assert_eq "$(merges)" 0 "land refusals make no call"
 [ ! -e "$state/digest.jsonl" ] || { echo "FAIL: a refusal logged a digest line"; fail=1; }
+
+# land refuses a PR based on another branch, and a failed default-branch read, before any merge or digest line.
+rm -f "$state/digest.jsonl"
+reset; pr 1 OPEN $HA "ok" "[]" release
+run land $A c
+assert_eq "$rc" 2 "land off base exit"
+assert_eq "$(merges)" 0 "land off base makes no call"
+for w in "$A" release main; do grep -q -- "$w" "$err" || { echo "FAIL: land off base message lacks $w"; fail=1; }; done
+reset; : >"$STUB_DIR/repofail"; pr 1 OPEN $HA
+run land $A c
+assert_eq "$rc" 1 "land repo view failure exit"
+assert_eq "$(merges)" 0 "land repo view failure makes no call"
+[ ! -e "$state/digest.jsonl" ] || { echo "FAIL: a land refusal logged a digest line"; fail=1; }
 
 # land: pending checks poll, then pass; a check that stays pending refuses at the cap.
 reset; pr 1 OPEN $HA "ok" '[{"status":"IN_PROGRESS","conclusion":""}]'

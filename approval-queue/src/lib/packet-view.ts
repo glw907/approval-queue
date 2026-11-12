@@ -24,10 +24,17 @@ function list(items: string[]): string {
 }
 
 const LEAD = {
-	stop: 'Pass paused until you decide.',
+	stop: 'Pass parked until you answer.',
 	close: 'Pass finished; its pull requests wait for you.',
 	design: 'A design for your approval.'
 } as const;
+
+/** The label on the primary button: a stop packet is answered, a close or a design is approved. */
+export const primaryLabel = (kind: Facts['kind']): string => (kind === 'stop' ? 'Answer and resume' : 'Approve');
+
+/** The sentence a stop packet's page adds under its status line; a close or a design has none. */
+export const stopSentence = (kind: Facts['kind']): string | undefined =>
+	kind === 'stop' ? 'Answering merges nothing. The session runs the steps below, then relaunches the pass.' : undefined;
 
 /** The repos a packet names: its pull requests' and its design's, in order of first appearance. */
 export function packetRepos(facts: Facts): string[] {

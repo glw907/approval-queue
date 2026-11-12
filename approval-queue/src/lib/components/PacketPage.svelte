@@ -6,7 +6,7 @@ queue rail the layout's on its left, and `#margin`, the notes margin, on its rig
 
 A decision never posts from here: like `ItemPanel`, it hands the form data to the layout's `held`
 store, which posts after five seconds unless Undo opens the item again, and opens the next item at
-once. Approve posts `calls`, `decidedForYou`, and `notes` to the `approve` action; Send back posts the
+once. The primary button ("Approve", or "Answer and resume" on a stop packet) posts `calls`, `decidedForYou`, and `notes` to the `approve` action; Send back posts the
 same to `reject`, and with no note it posts nothing and says so. An out-of-date packet disables
 Approve. A decided packet shows its picks, notes, and replies as stored and no controls.
 
@@ -23,7 +23,7 @@ the claims a diff note needs open.
 	import { anchorAt } from '#lib/anchors.ts';
 	import { isDiff } from '#lib/note-dom.ts';
 	import { Notes, postNotes } from '#lib/notes.svelte.ts';
-	import { patchFiles, plural, prLabel, statusLine } from '#lib/packet-view.ts';
+	import { patchFiles, plural, prLabel, primaryLabel, statusLine, stopSentence } from '#lib/packet-view.ts';
 	import { nextItem } from '#lib/queue.ts';
 	import type { CallPick, Note } from '#lib/server/items.ts';
 	import type { PageData } from '../../routes/item/[id=id]/$types';
@@ -208,11 +208,12 @@ the claims a diff note needs open.
 	<main id="main" tabindex="-1" class="packet-main">
 		<div class="packet-body" id="packet-body">
 			<p class="kicker"><b>{status.lead}</b> {status.rest}</p>
+			{#if !decided && stopSentence(facts.kind)}<p class="stop-note">{stopSentence(facts.kind)}</p>{/if}
 			{#if stale && !decided}
 				<div role="note" class="alert alert-warning" id="stale">
 					<p>
 						<strong>Out of date.</strong>
-						{prLabel(stale.ref)} moved from <code>{stale.queued.slice(0, 9)}</code> to <code>{stale.now.slice(0, 9)}</code> after the session wrote this packet. Approve is off. Send it back, or ask the session to send it again.
+						{prLabel(stale.ref)} moved from <code>{stale.queued.slice(0, 9)}</code> to <code>{stale.now.slice(0, 9)}</code> after the session wrote this packet. {primaryLabel(facts.kind)} is off. Send it back, or ask the session to send it again.
 					</p>
 				</div>
 			{/if}
@@ -299,7 +300,7 @@ the claims a diff note needs open.
 						aria-describedby="bar-state"
 						onclick={() => void submit('approve')}
 					>
-						{label('Approve', notes.count)} <kbd class="kbd kbd-xs desk-kbd" aria-hidden="true">Ctrl ↵</kbd>
+						{label(primaryLabel(facts.kind), notes.count)} <kbd class="kbd kbd-xs desk-kbd" aria-hidden="true">Ctrl ↵</kbd>
 					</button>
 				{/if}
 			</form>

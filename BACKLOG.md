@@ -12,6 +12,10 @@
 
 ## Medium
 
+- [ ] **#64** A stop packet's page still says "approve" after the answer `#improvement` `#approval-queue` *(2026-11-11)*
+  After "Answer and resume" the page shows the "Approved the packet." toast, "Approved" on the decided page, an "If you approve" fold, and "Approve the packet" in the shortcut sheet. Pass Q2 reworded the lead, the status line, and the button only.
+  Word each of the four by kind, through `primaryLabel` in `packet-view.ts`.
+
 - [ ] **#63** `restart`'s rollback can leave a slow new server running and infers what the swap moved `#improvement` `#approval-queue` *(2026-11-11)*
   `r_rollback` stops the new server only when it already listens, and `setsid -f` records no pid, so a server slower than the 10-second wait survives the rollback and can race the restored build for the port. It also decides whether to remove a failed new `build` by whether `.stage` still holds it, which is sound only while the adapter's output directory stays `build`.
   Have `r_swap` record which directories it moved and key the removal on that record; find a slow new server by its command line and state root under `/proc` and stop it before the rollback restarts the old build.
