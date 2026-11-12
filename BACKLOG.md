@@ -12,6 +12,10 @@
 
 ## Medium
 
+- [ ] **#69** A round report's page reads as a wall of raw fields `#improvement` `#approval-queue` `#initiative:unattended-rounds` *(2026-11-12)*
+  `ReportPage.svelte:36` prints the conductor's Markdown as written, through `renderReport` (`markdown.ts:51`, `breaks: true`). That file is a session's bookkeeping. One line holds stops, refusals, and calls, another holds every pass's planning misses, and the busy check note, the STATUS copy line, and the resume path sit beside the line that says what waits for Geoff. Geoff read the `ur-ws` report of 2026-11-12 on the page and called it very poorly formatted. Left alone, every round's report is a slow read that buries the one line he has to act on.
+  Lay the fields out on the page: what waits and what landed first, then the pass table, then the counts, with the bookkeeping lines folded away. The field names come from `pass-core/references/round-run.md:135` (workstation#232), so a change to what the conductor writes is a workstation change.
+
 - [ ] **#68** A round report's landed list misses a pull request landed without a round `#improvement` `#approval-queue` *(2026-11-11)*
   The page lists the digest lines that carry the report's round. A pull request merged by `digest` (see #66) or by `land` with no `--round` has no round, so it never shows.
   Fix #66 first, then have the conductor's land and record steps pass `--round`.
