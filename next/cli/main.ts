@@ -1,5 +1,6 @@
 import { storeRoot } from '#lib/store/store.ts';
 import { check } from './check.ts';
+import { land } from './land.ts';
 import { ghView } from './pr.ts';
 import { send } from './send.ts';
 import { USAGE, waitForDecision } from './wait.ts';
@@ -25,10 +26,12 @@ async function dispatch(arg: string): Promise<number> {
 			return waitForDecision(storeRoot(), arg);
 		case 'withdraw':
 			return withdraw(arg);
+		case 'land':
+			return land(arg, rest[0] ?? '');
 		default:
 			return usage();
 	}
 }
 
-if (!arg || rest.length) usage();
+if (!arg || rest.length > (command === 'land' ? 1 : 0)) usage();
 process.exit(await dispatch(arg));
