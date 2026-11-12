@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Claim, Facts } from './facts.ts';
-import { claimFor, claimHunks, deepDiveBody, patchFiles, prLabel, ruleLabel, statusLine } from './packet-view.ts';
+import { claimFor, claimHunks, deepDiveBody, patchFiles, primaryLabel, prLabel, ruleLabel, statusLine, stopSentence } from './packet-view.ts';
 
 const claim = (pr: string, path: string, from: number, to: number): Claim => ({ text: 't', pr, path, from, to });
 const facts = (over: Partial<Facts>): Facts => ({ kind: 'stop', title: 't', prs: [], held: [], calls: [], decidedForYou: [], steps: [], notChecked: [], reviews: [], ...over });
@@ -13,8 +13,17 @@ describe('packet-view', () => {
 
 	it('builds the status line from the kind, the initiative, and the repos', () => {
 		const stop = facts({ prs: ['o/a#1', 'o/b#2', 'o/a#3'] });
-		expect(statusLine(stop, 'Setup tooling')).toEqual({ lead: 'Pass paused until you decide.', rest: 'Setup tooling in a and b.' });
+		expect(statusLine(stop, 'Setup tooling')).toEqual({ lead: 'Pass parked until you answer.', rest: 'Setup tooling in a and b.' });
 		expect(statusLine(facts({ kind: 'design', design: { repo: 'sample', path: 'd.md' } }), '')).toEqual({ lead: 'A design for your approval.', rest: 'in sample.' });
+	});
+
+	it('words the primary button and the stop sentence by kind', () => {
+		expect(primaryLabel('stop')).toBe('Answer and resume');
+		expect(primaryLabel('close')).toBe('Approve');
+		expect(primaryLabel('design')).toBe('Approve');
+		expect(stopSentence('stop')).toBe('Answering merges nothing. The session runs the steps below, then relaunches the pass.');
+		expect(stopSentence('close')).toBeUndefined();
+		expect(stopSentence('design')).toBeUndefined();
 	});
 
 	it('takes the deep dive body past its closed line', () => {

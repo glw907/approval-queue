@@ -3,7 +3,8 @@
 # $CT_STUB_DIR and logs every argv line to $CT_STUB_DIR/gh.log. For PR <n> of <owner>/<repo> the
 # files are pr-<owner>-<repo>-<n>.json (the `gh pr view` object), .patch (the diff), .files.json
 # (the `gh api` files list), and the flags .escape (the diff refuses without
-# --allow-escape-sequences, as cli/cli does) and .mergefail (a merge fails).
+# --allow-escape-sequences, as cli/cli does) and .mergefail (a merge fails). `repo view` answers the default
+# branch `main` for any repo.
 set -u
 dir=${CT_STUB_DIR:?CT_STUB_DIR is not set}
 printf '%s\n' "gh $*" >>"$dir/gh.log"
@@ -40,6 +41,10 @@ if [ "$sub" = api ]; then
   done
   echo "stub: unsupported gh api call" >&2
   exit 1
+fi
+if [ "$sub" = repo ] && [ "$verb" = view ]; then
+  jq -nc '{defaultBranchRef: {name: "main"}}'
+  exit 0
 fi
 [ "$sub" = pr ] || { echo "stub: unsupported gh command: $sub" >&2; exit 1; }
 [ -e "$base.json" ] || { echo "no pull requests found for $repo#$n" >&2; exit 1; }

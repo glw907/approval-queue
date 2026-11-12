@@ -56,7 +56,7 @@ try {
 	// The decision bar's two buttons.
 	await page.getByRole('button', { name: /^Send back/ }).focus();
 	await wait();
-	await page.getByRole('button', { name: /^Approve/ }).focus();
+	await page.getByRole('button', { name: /^(Approve|Answer and resume)/ }).focus();
 	await wait();
 	console.log('orca-check: done');
 } finally {
