@@ -12,6 +12,10 @@
 
 ## Medium
 
+- [ ] **#63** `restart`'s rollback can leave a slow new server running and infers what the swap moved `#improvement` `#approval-queue` *(2026-11-11)*
+  `r_rollback` stops the new server only when it already listens, and `setsid -f` records no pid, so a server slower than the 10-second wait survives the rollback and can race the restored build for the port. It also decides whether to remove a failed new `build` by whether `.stage` still holds it, which is sound only while the adapter's output directory stays `build`.
+  Have `r_swap` record which directories it moved and key the removal on that record; find a slow new server by its command line and state root under `/proc` and stop it before the rollback restarts the old build.
+
 - [ ] **#62** A design item whose `design.json` is missing approves with no check `#bug` `#approval-queue` *(2026-11-11)*
   `checkDesign` returns at `heads.ts:58` before it hashes anything when `readFactPacket` finds no `design.json`, so the approve goes through with no out-of-date check. It predates pass Q1, which checks a recorded path and refuses a bad one.
   Refuse the approve (503) when a design item has no `design.json`.
