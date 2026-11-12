@@ -7,7 +7,7 @@ import { parseFacts, parseText, patchName, type Facts, type Text } from '#lib/fa
 export type Disposition = Proposed;
 
 /** The kinds the queue reads; an item of any other kind stays on disk unlisted and unserved. */
-const KINDS: readonly string[] = ['design', 'triage', 'packet'];
+const KINDS: readonly string[] = ['design', 'triage', 'packet', 'report'];
 
 /** One row of a submitted triage: the session's action and Geoff's call. */
 export interface SubmittedRow {
@@ -17,7 +17,7 @@ export interface SubmittedRow {
 
 export interface ItemMeta {
 	id: string;
-	kind: 'design' | 'triage' | 'packet';
+	kind: 'design' | 'triage' | 'packet' | 'report';
 	repo: string;
 	title: string;
 	/** The brief's headline, written by the command; absent on an item it wrote before briefs. */
@@ -141,6 +141,8 @@ export interface Earlier {
 
 export type ItemContent =
 	| { kind: 'design'; doc: string }
+	/** A round report: the text of its `report.md`, empty when the file is missing. */
+	| { kind: 'report'; text: string }
 	| { kind: 'facts'; packet: FactPacket }
 	/** A packet stored before the fact file: its `packet.md`, shown read-only. */
 	| { kind: 'legacy'; text: string }
@@ -150,6 +152,8 @@ export type Decision =
 	| { decision: 'approve'; choices?: Array<{ title: string; choice: string }> }
 	| { decision: 'reject'; note: string }
 	| { decision: 'submit'; rows: SubmittedRow[] }
+	/** A round report's only decision: Geoff marked it read. */
+	| { decision: 'read' }
 	/** A packet's decision: the calls as answered and the notes the post carried. */
 	| { decision: 'approve' | 'reject'; calls: CallPick[]; decidedForYou: CallPick[]; notes: Note[] };
 
@@ -261,6 +265,8 @@ export async function readItem(root: string, id: string): Promise<Item | undefin
 	let content: ItemContent;
 	if (meta.kind === 'design') {
 		content = { kind: 'design', doc: await readFile(join(dir, 'doc.md'), 'utf8') };
+	} else if (meta.kind === 'report') {
+		content = { kind: 'report', text: await readFile(join(dir, 'report.md'), 'utf8').catch(() => '') };
 	} else if (meta.kind === 'packet') {
 		try {
 			content = (await exists(join(dir, 'facts.json')))

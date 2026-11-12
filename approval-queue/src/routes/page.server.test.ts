@@ -38,7 +38,7 @@ const board = (sort?: string) =>
 	load({ depends() {}, isDataRequest: true, cookies: { get: () => sort } } as never) as Promise<{
 		empty: false;
 		sort: string;
-		rows: Array<{ id: string; group: string; asks: number; rules: string[]; repos: number; irreversible: boolean; single?: string; orphaned: boolean }>;
+		rows: Array<{ id: string; headline: string; group: string; asks: number; rules: string[]; repos: number; irreversible: boolean; single?: string; orphaned: boolean }>;
 	}>;
 
 describe('/', () => {
@@ -211,5 +211,36 @@ describe('layout', () => {
 			expect(await poll(TOKEN, false)).toEqual([]);
 			await expect(access(seen())).rejects.toThrow();
 		});
+	});
+});
+
+describe('a round report', () => {
+	const REPORT = '# Round ur-queue\n\n| Pass | State |\n| --- | --- |\n| Q1 | merged |\n| Q2 | parked |\n';
+
+	async function seedReport(id: string, files: Record<string, string> = { 'report.md': REPORT }) {
+		const dir = join(state.root, 'items', id);
+		await mkdir(dir, { recursive: true });
+		await writeFile(
+			join(dir, 'item.json'),
+			JSON.stringify({ id, kind: 'report', title: 'Round ur-queue', initiative: 'ur', initiativeTitle: 'Unattended rounds', round: 'ur-queue', created: '2026-11-12T06:00:00Z' })
+		);
+		for (const [name, text] of Object.entries(files)) await writeFile(join(dir, name), text);
+	}
+
+	it('rows as a single "Round report" in its round, headed by the pass count', async () => {
+		await seedReport('rep');
+		const { rows } = await board();
+		expect(rows).toMatchObject([{ id: 'rep', group: 'Unattended rounds', round: 'ur-queue', single: 'Round report', headline: '1 of 2 passes merged, 1 parked', asks: 0 }]);
+	});
+
+	it('shows its title when the report holds no pass table', async () => {
+		await seedReport('rep', { 'report.md': '# Round ur-queue\n\nStops: 0\n' });
+		expect((await board()).rows[0].headline).toBe('Round ur-queue');
+	});
+
+	it('carries the computed headline into the rail queue', async () => {
+		await seedReport('rep');
+		const { queue } = (await layoutLoad({ depends() {}, isDataRequest: false } as never)) as unknown as { queue: Array<{ id: string; headline?: string }> };
+		expect(queue).toMatchObject([{ id: 'rep', headline: '1 of 2 passes merged, 1 parked' }]);
 	});
 });

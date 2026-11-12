@@ -44,7 +44,8 @@ pointer moves over it or while focus is on it. A held or posting item leaves the
 		if (!currentId) return [{ title: 'Anywhere', rows: anywhere }];
 		const sendBack: SheetRow = { keys: ['r'], text: 'Send back, with the note field focused', single: true };
 		const approveOr = (what: string): SheetRow => ({ keys: CTRL_ENTER, text: `${what}, or send back once the note is open` });
-		const screens: Record<typeof desk.page, { title: string; rows: SheetRow[] }> = {
+		if (desk.page === 'report') return [{ title: 'Anywhere', rows: anywhere }];
+		const screens: Record<Exclude<typeof desk.page, 'report'>, { title: string; rows: SheetRow[] }> = {
 			packet: {
 				title: 'On a packet',
 				rows: [

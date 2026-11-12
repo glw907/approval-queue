@@ -17,7 +17,7 @@ async function decided(id: string, title: string, at: number, extra: Record<stri
 	const dir = join(state.root, 'items', id);
 	await mkdir(dir, { recursive: true });
 	await writeFile(join(dir, 'item.json'), JSON.stringify({ id, kind, title, created: '2026-11-09T10:00:00Z' }));
-	await writeFile(join(dir, 'decision.json'), JSON.stringify({ decision: 'approve' }));
+	await writeFile(join(dir, 'decision.json'), JSON.stringify({ decision: kind === 'report' ? 'read' : 'approve' }));
 	await utimes(join(dir, 'decision.json'), at, at);
 	for (const [name, text] of Object.entries(extra)) await writeFile(join(dir, name), text);
 }
@@ -63,5 +63,10 @@ describe('/history', () => {
 	it('lists an item of a retired kind', async () => {
 		await decided('d', 'An old docs item', 1_000_000_000, {}, 'docs');
 		expect((await history()).rows.map((r) => r.id)).toEqual(['d']);
+	});
+
+	it('lists a read round report', async () => {
+		await decided('rep', 'Round ur-queue', 1_000_000_000, {}, 'report');
+		expect((await history()).rows).toMatchObject([{ id: 'rep', title: 'Round ur-queue', kind: 'report', decision: 'read' }]);
 	});
 });

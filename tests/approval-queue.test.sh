@@ -219,5 +219,148 @@ assert_eq "$?" "2" "bad kind: exit code"
 bash "$SCRIPT" design owner/repo T >/dev/null 2>&1
 assert_eq "$?" "2" "missing argument: exit code"
 
+# report: stores a round's report as an item of kind report, replaces a waiting one, and never waits.
+rp="$root/rprojects"
+mkdir -p "$rp/initiatives/unattended-rounds" "$rp/initiatives/other"
+printf 'title: Unattended rounds\nstatus: active\n' >"$rp/initiatives/unattended-rounds/initiative.yaml"
+printf 'title: Other\nstatus: active\n' >"$rp/initiatives/other/initiative.yaml"
+cat >"$root/report1.md" <<'REPORT'
+# Round ur-queue, aq-fixture/sample, written 2026-11-12 06:14
+Round state: running
+
+| Pass | State | PR | Planned min | Actual min |
+| --- | --- | --- | --- | --- |
+| Q1 | merged | #51 | 60 | 31 |
+| Q2 | merged | #52 | 90 | 44 |
+| Q3 | merged | #53 | 120 | 70 |
+| Q4 | parked | #54 | 120 | 38 |
+
+Stops: 1
+Refusals: 0
+Waiting for Geoff: one stop packet
+REPORT
+sed 's/| 38 |/| 39 |/' "$root/report1.md" >"$root/report2.md"
+rep() { APPROVAL_QUEUE_PROJECTS="$rp" timeout 10 bash "$SCRIPT" report "$@"; }
+rcount() { find "$state/items" -mindepth 1 -maxdepth 1 -type d | wc -l; }
+rwaiting() {
+  local d n=0
+  for d in "$state"/items/*/; do
+    [ -e "$d/item.json" ] && [ ! -e "$d/decision.json" ] && [ "$(jq -r .kind "$d/item.json")" = report ] \
+      && [ "$(jq -r .round "$d/item.json")" = "$1" ] && [ "$(jq -r .initiative "$d/item.json")" = unattended-rounds ] && n=$((n + 1))
+  done
+  echo "$n"
+}
+rm -rf "$state/items"
+mkdir -p "$state"
+: >"$root/open.record"
+opens=$(wc -l <"$root/open.record")
+
+# 1: the stored item
+r1=$(rep unattended-rounds ur-queue "$root/report1.md" 2>"$root/err")
+assert_eq "$?" "0" "report: exit code"
+[[ $r1 =~ ^[0-9]{8}T[0-9]{6}-[0-9]+$ ]] || { echo "FAIL: report: id '$r1'"; fail=1; }
+assert_eq "$(jq -r 'keys | join(" ")' "$state/items/$r1/item.json" 2>/dev/null)" "created id initiative kind round title" "report: item.json keys"
+assert_eq "$(jq -r '[.kind, .round, .initiative, .title] | join("|")' "$state/items/$r1/item.json" 2>/dev/null)" "report|ur-queue|unattended-rounds|Round ur-queue, aq-fixture/sample, written 2026-11-12 06:14" "report: item.json values"
+cmp -s "$state/items/$r1/report.md" "$root/report1.md" || { echo "FAIL: report: report.md is not a byte copy"; fail=1; }
+assert_eq "$(wc -l <"$root/open.record")" "$opens" "report: opens no tab"
+
+# 2: the title when the first line is no heading
+printf 'Round state: running\n' >"$root/report-nohead.md"
+rn=$(rep unattended-rounds ur-ws "$root/report-nohead.md" 2>"$root/err")
+assert_eq "$(jq -r .title "$state/items/$rn/item.json" 2>/dev/null)" "Round ur-ws" "report: title with no heading"
+
+# 3: a second report replaces the waiting one
+r2=$(rep unattended-rounds ur-queue "$root/report2.md" 2>"$root/err")
+assert_eq "$?" "0" "report: second exit code"
+[ -n "$r2" ] && [ "$r2" != "$r1" ] || { echo "FAIL: report: second id '$r2' equals the first '$r1'"; fail=1; }
+[ ! -e "$state/items/$r1/item.json" ] || { echo "FAIL: report: the replaced report keeps item.json"; fail=1; }
+assert_eq "$(rwaiting ur-queue)" "1" "report: one waiting report for the round"
+cmp -s "$state/items/$r2/report.md" "$root/report2.md" || { echo "FAIL: report: the waiting report is not the second file"; fail=1; }
+
+# 4: another round, and another initiative, leave it in place
+rep unattended-rounds ur-ws "$root/report1.md" >/dev/null 2>&1
+rep other ur-queue "$root/report1.md" >/dev/null 2>&1
+[ -e "$state/items/$r2/item.json" ] || { echo "FAIL: report: another round or initiative retired the waiting report"; fail=1; }
+assert_eq "$(rwaiting ur-queue)" "1" "report: still one waiting report for the round"
+
+# 5: a read report stays, and a new one queues beside it
+printf '{"decision":"read"}\n' >"$state/items/$r2/decision.json"
+r3=$(rep unattended-rounds ur-queue "$root/report1.md" 2>"$root/err")
+[ -e "$state/items/$r2/item.json" ] && [ -e "$state/items/$r2/decision.json" ] || { echo "FAIL: report: a read report was retired"; fail=1; }
+assert_eq "$(rwaiting ur-queue)" "1" "report: a new report queues beside a read one"
+[ -e "$state/items/$r3/item.json" ] || { echo "FAIL: report: the new report is not queued"; fail=1; }
+
+# 6: refusals write nothing
+before=$(rcount)
+for bad in Ur-queue ur-queue-long; do
+  rep unattended-rounds "$bad" "$root/report1.md" >/dev/null 2>"$root/err"
+  assert_eq "$?" "2" "report: round $bad exit code"
+  grep -q 'lowercase letters, digits, and hyphens, starting with a letter, 12 characters at most' "$root/err" || { echo "FAIL: report: round $bad message '$(cat "$root/err")'"; fail=1; }
+done
+rep nope ur-queue "$root/report1.md" >/dev/null 2>"$root/err"
+assert_eq "$?" "2" "report: bad initiative exit code"
+grep -q 'initiative.yaml' "$root/err" || { echo "FAIL: report: bad initiative message '$(cat "$root/err")'"; fail=1; }
+rep unattended-rounds ur-queue >/dev/null 2>"$root/err"
+assert_eq "$?" "2" "report: two arguments exit code"
+grep -q 'approval-queue report <initiative> <round> <report.md>' "$root/err" || { echo "FAIL: report: usage line missing on two arguments"; fail=1; }
+rep unattended-rounds ur-queue "$root/report1.md" extra >/dev/null 2>"$root/err"
+assert_eq "$?" "2" "report: four arguments exit code"
+rep unattended-rounds ur-queue "$root/nonexistent.md" >/dev/null 2>"$root/err"
+assert_eq "$?" "1" "report: unreadable file exit code"
+grep -q 'cannot read' "$root/err" || { echo "FAIL: report: unreadable message '$(cat "$root/err")'"; fail=1; }
+: >"$root/report-empty.md"
+rep unattended-rounds ur-queue "$root/report-empty.md" >/dev/null 2>"$root/err"
+assert_eq "$?" "2" "report: empty file exit code"
+printf '\n  \n' >"$root/report-blank.md"
+rep unattended-rounds ur-queue "$root/report-blank.md" >/dev/null 2>"$root/err"
+assert_eq "$?" "2" "report: blank file exit code"
+assert_eq "$(rcount)" "$before" "report: refusals leave the item count alone"
+assert_eq "$(rwaiting ur-queue)" "1" "report: refusals leave the waiting report"
+
+# 7, 8: merge, collect, and withdraw refuse a report, waiting or read
+for id in "$r3" "$r2"; do
+  bash "$SCRIPT" merge "$id" >/dev/null 2>"$root/err"
+  assert_eq "$?" "2" "report: merge $id exit code"
+  grep -q 'a report is never merged' "$root/err" || { echo "FAIL: report: merge message '$(cat "$root/err")'"; fail=1; }
+  bash "$SCRIPT" collect "$id" >/dev/null 2>"$root/err"
+  assert_eq "$?" "2" "report: collect $id exit code"
+  grep -q 'a report holds no decision to collect' "$root/err" || { echo "FAIL: report: collect message '$(cat "$root/err")'"; fail=1; }
+  bash "$SCRIPT" withdraw "$id" >/dev/null 2>"$root/err"
+  assert_eq "$?" "2" "report: withdraw $id exit code"
+  grep -q 'replaces it' "$root/err" || { echo "FAIL: report: withdraw message '$(cat "$root/err")'"; fail=1; }
+  [ -e "$state/items/$id/item.json" ] || { echo "FAIL: report: withdraw removed item.json of $id"; fail=1; }
+done
+
+# 9: nothing above wrote a decision line for a report
+if [ -e "$log" ]; then
+  for id in "$r1" "$r2" "$r3" "$rn"; do
+    ! grep -qF -- "$id" "$log" || { echo "FAIL: report: decisions.jsonl names $id"; fail=1; }
+  done
+fi
+
+# 10: the usage text lists the form
+bash "$SCRIPT" bogus >"$root/usage.out" 2>&1
+grep -q 'approval-queue report <initiative> <round> <report.md>' "$root/usage.out" || { echo "FAIL: report: usage text lacks the report form"; fail=1; }
+
+# 11: an empty state directory
+emptyx="$root/emptyxdg"
+mkdir -p "$emptyx"
+re=$(XDG_STATE_HOME="$emptyx" rep unattended-rounds ur-queue "$root/report1.md" 2>"$root/err")
+assert_eq "$?" "0" "report: empty state exit code"
+[ -e "$emptyx/approval-queue/items/$re/item.json" ] || { echo "FAIL: report: empty state wrote no item"; fail=1; }
+
+# 12: two waiting reports for a round collapse to one
+for n in 1 2; do
+  d="$state/items/20261112T00000$n-1$n"
+  mkdir -p "$d"
+  printf 'x\n' >"$d/report.md"
+  jq -n --arg id "20261112T00000$n-1$n" '{id: $id, kind: "report", title: "t", initiative: "unattended-rounds", round: "ur-std", created: "2026-11-12T00:00:00Z"}' >"$d/item.json"
+done
+rep unattended-rounds ur-std "$root/report1.md" >/dev/null 2>&1
+assert_eq "$(rwaiting ur-std)" "1" "report: two waiting reports collapse to one"
+for n in 1 2; do
+  [ ! -e "$state/items/20261112T00000$n-1$n/item.json" ] || { echo "FAIL: report: hand-made report $n kept item.json"; fail=1; }
+done
+
 [ "$fail" = 0 ] && echo "approval-queue: ok"
 exit "$fail"

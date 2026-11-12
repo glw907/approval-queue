@@ -80,6 +80,29 @@ await writeFile(join(dir, 'decision.json'), JSON.stringify({ decision: 'approve'
 await seedFacts(state, hround, 'close', { round: 'ur-queue', title: 'Old round title', created: '2026-11-09T11:00:00Z' });
 await writeFile(join(state, 'items', hround, 'decision.json'), JSON.stringify({ decision: 'approve' }));
 " "$state" "$rstop" "$rclose" "$wclose" "$hdesign" "$hround") || { echo "FAIL: the round items did not seed"; exit 1; }
+# Round report items: a waiting design, a waiting triage, a waiting report in round ur-queue (newer than its
+# packets), a replaced report (a directory with no item.json), a decided triage, and a read report in round ur-ws.
+wdesign=20261111T000010-1 wtriage=20261111T000011-1 wreport=20261111T000012-1 oreport=20261111T000013-1 htriage=20261110T000014-1 hreport=20261110T000015-1
+(cd "$app" && node --input-type=module -e "
+import { mkdir, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
+const [state, wdesign, wtriage, wreport, oreport, htriage, hreport] = process.argv.slice(1);
+const put = async (id, meta, files = {}) => {
+  const dir = join(state, 'items', id);
+  await mkdir(dir, { recursive: true });
+  for (const [name, text] of Object.entries(files)) await writeFile(join(dir, name), text);
+  if (meta) await writeFile(join(dir, 'item.json'), JSON.stringify({ id, repo: 'aq-fixture/sample', ...meta }));
+};
+const table = '| Pass | State |\n| --- | --- |\n| Q1 | merged |\n| Q2 | merged |\n| Q3 | parked |\n';
+await put(wdesign, { kind: 'design', title: 'Waiting design title', created: '2026-11-11T08:00:00Z' }, { 'doc.md': '# d\n' });
+await put(wtriage, { kind: 'triage', title: 'Waiting triage title', created: '2026-11-11T08:30:00Z' });
+await put(wreport, { kind: 'report', title: 'Queue round report title', initiative: 'unattended-rounds', round: 'ur-queue', created: '2026-11-11T13:00:00Z' },
+  { 'report.md': '# Queue round report title\n\nRound state: running\n\n' + table });
+await put(oreport, null, { 'report.md': '# Replaced report\n\n' + table });
+await put(htriage, { kind: 'triage', title: 'Old triage title', created: '2026-11-09T12:00:00Z' }, { 'decision.json': JSON.stringify({ decision: 'submit', rows: [] }) });
+await put(hreport, { kind: 'report', title: 'Read report title', initiative: 'unattended-rounds', round: 'ur-ws', created: '2026-11-09T13:00:00Z' },
+  { 'report.md': '# Read report title\n\n' + table, 'decision.json': '{\"decision\":\"read\"}' });
+" "$state" "$wdesign" "$wtriage" "$wreport" "$oreport" "$htriage" "$hreport") || { echo "FAIL: the report items did not seed"; exit 1; }
 dline() { jq -nc --arg r "$1" --arg c "$2" --arg t "$3" --arg round "${4:-}" \
   '{time: $t, ref: $r, head: "abc", claim: $c, lane: "land"} + (if $round == "" then {} else {round: $round} end)'; }
 {
@@ -148,7 +171,7 @@ pos() { tr '\n\t' '  ' <"$1" | awk -v t="$2" '{print index($0, t)}'; }
 tr '\n\t' '  ' <"$root/stop.html" | grep -o '<nav id="rail".*</nav>' >"$root/rail.html"
 assert_eq "$(grep -o 'Round ur-queue' "$root/rail.html" | wc -l)" 1 "rail: Round ur-queue once"
 assert_eq "$(grep -o 'Round ur-ws' "$root/rail.html" | wc -l)" 1 "rail: Round ur-ws once"
-assert_eq "$(grep -o 'data-q' "$root/rail.html" | wc -l)" 7 "rail: seven entries"
+assert_eq "$(grep -o 'data-q' "$root/rail.html" | wc -l)" 10 "rail: ten entries"
 first=$(pos "$root/rail.html" "Round ur-queue")
 for id in "$stop" "$close" "$design" "$stale"; do
   at=$(pos "$root/rail.html" "/item/$id")
@@ -184,16 +207,96 @@ assert_eq "$(grep -o 'No round' "$root/digest.main" | wc -l)" 1 "digest: No roun
 curl -sf --max-time 5 "$base/history" >"$root/history.html" || { echo "FAIL: /history did not answer 200"; fail=1; : >"$root/history.html"; }
 has "history" "$root/history.html" "Old design title"
 has "history" "$root/history.html" "Old round title"
+has "history" "$root/history.html" "Old triage title"
+has "history" "$root/history.html" "Read report title"
+tr '\n\t' '  ' <"$root/history.html" | grep -o '<main id="main".*</main>' >"$root/history.main"
+has "history" "$root/history.main" "Round report"
+has "history" "$root/history.main" "Read"
+lacks "history" "$root/history.main" "Queue round report title"
+
+# Round reports. The board holds one report row, and the rail leads its round with the report and its words.
+ridx=$(jq '.nodes[1].data | index("Round report")' "$root/board.json")
+assert_eq "$(jq --argjson i "$ridx" '[.nodes[1].data[] | select(type == "object" and .single == $i)] | length' "$root/board.json")" 1 "board data: one Round report row"
+has "board data" "$root/board-node.json" "$wreport"
+has "board data" "$root/board-node.json" "$wdesign"
+has "board data" "$root/board-node.json" "$wtriage"
+has "board data" "$root/board-node.json" "2 of 3 passes merged, 1 parked"
+lacks "board data" "$root/board-node.json" "$oreport"
+lacks "board data" "$root/board-node.json" "$hreport"
+has "rail" "$root/rail.html" "2 of 3 passes merged, 1 parked"
+has "rail" "$root/rail.html" "Round report, "
+{ [ "$(pos "$root/rail.html" "/item/$wreport")" -gt "$first" ] && [ "$(pos "$root/rail.html" "/item/$wreport")" -lt "$(pos "$root/rail.html" "/item/$rstop")" ]; } \
+  || { echo "FAIL: rail: the report does not lead its round"; fail=1; }
+
+# The report page: the title, the Markdown table, the waiting packets and landed pull requests of its round, and one button.
+page "$wreport" report
+tr '\n\t' '  ' <"$root/report.html" | grep -o '<main id="main".*</main>' >"$root/report.main"
+has "report page" "$root/report.main" "Queue round report title"
+has "report page" "$root/report.main" "Round report, "
+has "report page" "$root/report.main" "<table"
+has "report page" "$root/report.main" "Waiting in this round"
+has "report page" "$root/report.main" "/item/$rstop"
+has "report page" "$root/report.main" "/item/$rclose"
+lacks "report page" "$root/report.main" "/item/$wclose"
+has "report page" "$root/report.main" "Landed in this round"
+has "report page" "$root/report.main" "https://github.com/aq-fixture/sample/pull/14"
+has "report page" "$root/report.main" "https://github.com/aq-fixture/sample/pull/15"
+for n in sample/pull/11 sample/pull/12 other/pull/13; do lacks "report page" "$root/report.main" "$n"; done
+assert_eq "$(grep -o 'Mark read' "$root/report.main" | wc -l)" 1 "report page: one Mark read button"
+
+# A read report's page says Read and offers no button.
+page "$hreport" hreport
+tr '\n\t' '  ' <"$root/hreport.html" | grep -o '<main id="main".*</main>' >"$root/hreport.main"
+has "read report page" "$root/hreport.main" "Read report title"
+has "read report page" "$root/hreport.main" "Read, "
+lacks "read report page" "$root/hreport.main" "Mark read"
 
 # Screenshots of the board and the digest page, when the caller asks for them.
 if [ -n "${PAGE_TEST_ROUND_SHOTS:-}" ]; then
-  node "$SRC/tests/fixtures/ct/round-shot.mjs" "$base" "$stop" "$PAGE_TEST_ROUND_SHOTS" || { echo "FAIL: the round screenshots failed"; fail=1; }
+  node "$SRC/tests/fixtures/ct/round-shot.mjs" "$base" "$stop" "$PAGE_TEST_ROUND_SHOTS" "$wreport" || { echo "FAIL: the round screenshots failed"; fail=1; }
 fi
 
 # A screenshot of the stop page, when the caller asks for one.
 if [ -n "${PAGE_TEST_SHOT:-}" ]; then
   node "$SRC/tests/fixtures/ct/shot.mjs" "$base/item/$stop" "$PAGE_TEST_SHOT" || { echo "FAIL: the screenshot failed"; fail=1; }
 fi
+
+# The command and the app joined: the worktree's report command stores a report into the served state through a
+# symlinked state home, and a second report for the same round replaces the first on the board.
+mkdir -p "$root/xdg" "$root/projects/initiatives/unattended-rounds"
+ln -s "$state" "$root/xdg/approval-queue"
+: >"$root/projects/initiatives/unattended-rounds/initiative.yaml"
+printf '# Std round report\n\nRound state: running\n\n| Pass | State |\n| --- | --- |\n| Q1 | merged |\n' >"$root/joined1.md"
+printf '# Std round report, second\n\nRound state: running\n\n| Pass | State |\n| --- | --- |\n| Q1 | merged |\n| Q2 | merged |\n' >"$root/joined2.md"
+jr1=$(XDG_STATE_HOME="$root/xdg" APPROVAL_QUEUE_PROJECTS="$root/projects" APPROVAL_QUEUE_PORT=$PORT timeout 10 "$SRC/bin/.local/bin/approval-queue" report unattended-rounds ur-std "$root/joined1.md")
+sleep 1
+jr2=$(XDG_STATE_HOME="$root/xdg" APPROVAL_QUEUE_PROJECTS="$root/projects" APPROVAL_QUEUE_PORT=$PORT timeout 10 "$SRC/bin/.local/bin/approval-queue" report unattended-rounds ur-std "$root/joined2.md")
+{ [ -n "$jr1" ] && [ -n "$jr2" ] && [ "$jr1" != "$jr2" ]; } || { echo "FAIL: joined: the two report commands printed '$jr1' and '$jr2'"; fail=1; }
+curl -sf --max-time 5 "$base/__data.json" >"$root/board3.json" || { echo "FAIL: /__data.json did not answer 200 after report"; fail=1; : >"$root/board3.json"; }
+has "joined board" "$root/board3.json" "$jr2"
+lacks "joined board" "$root/board3.json" "$jr1"
+has "joined board" "$root/board3.json" "$wreport"
+page "$jr2" jreport
+has "joined report page" "$root/jreport.html" "Std round report, second"
+has "joined report page" "$root/jreport.html" "Mark read"
+tr '\n\t' '  ' <"$root/jreport.html" | grep -o '<nav id="rail".*</nav>' >"$root/jrail.html"
+tr '\n\t' '  ' <"$root/jreport.html" | grep -o '<main id="main".*</main>' >"$root/jreport.main"
+has "joined report page" "$root/jreport.main" "Q2"
+assert_eq "$(grep -o 'Round ur-std' "$root/jrail.html" | wc -l)" 1 "joined rail: Round ur-std once"
+has "joined rail" "$root/jrail.html" "/item/$jr2"
+lacks "joined rail" "$root/jrail.html" "/item/$jr1"
+
+# Mark read, last because it changes the state the checks above read. It stores only the read decision, merges
+# nothing, and moves the report from the board to the history.
+code=$(curl -s -o "$root/read.out" -w '%{http_code}' --max-time 5 -X POST --data '' -H "Origin: $base" "$base/item/$wreport?/read")
+{ [ "$code" -ge 200 ] && [ "$code" -lt 400 ]; } || { echo "FAIL: Mark read answered $code"; fail=1; }
+assert_eq "$(cat "$state/items/$wreport/decision.json" 2>/dev/null)" '{"decision":"read"}' "Mark read: decision.json"
+[ ! -e "$state/decisions.jsonl" ] || { echo "FAIL: Mark read wrote decisions.jsonl"; fail=1; }
+! grep -q 'pr merge' "$CT_STUB_DIR/gh.log" 2>/dev/null || { echo "FAIL: Mark read ran gh pr merge"; fail=1; }
+curl -sf --max-time 5 "$base/history" >"$root/history2.html" || { echo "FAIL: /history did not answer 200 after Mark read"; fail=1; : >"$root/history2.html"; }
+has "history after Mark read" "$root/history2.html" "Queue round report title"
+curl -sf --max-time 5 "$base/__data.json" >"$root/board2.json" || { echo "FAIL: /__data.json did not answer 200 after Mark read"; fail=1; : >"$root/board2.json"; }
+lacks "board data after Mark read" "$root/board2.json" "$wreport"
 
 [ "$fail" = 0 ] && echo "page: ok"
 exit "$fail"

@@ -37,6 +37,7 @@ The hook's `settings.json` entry lives in the workstation repo and calls `claude
 | `approval-queue restart` | Builds the app beside the running build, then swaps it in under `start.lock`. It exits 0 with a new server, and exits 1 with the old server answering again. |
 | `approval-queue reply <id \| digest> <replies.json>` | Stores the session's answers to Geoff's notes. |
 | `approval-queue design <repo> <title> <file>` and `approval-queue triage <repo> <title> <file>` | Queue a design brief or a triage list. |
+| `approval-queue report <initiative> <round> <report.md>` | Stores a conductor's round report as an item of kind `report`, prints its id, and exits without waiting. A newer report for the same initiative and round replaces the waiting one. |
 | `approval-queue withdraw <id>`, `pending`, `collect <id>` | Manage a queued item (see "After a hand-over"). |
 
 A retired form (`approval-queue docs`, `approval-queue notes`, `approval-queue pr`, or a packet file in the old grammar) exits 2 with one line naming its replacement in the `approval-packet` skill. A tool failure exits 1 and prints the `gh` error. A refusal of the input exits 2.
@@ -96,17 +97,21 @@ The command writes `items/<id>/` under the state directory (`~/.local/state/appr
 
 A design or triage item keeps its own layout. An item stored in an older shape opens read-only on the history page.
 
+A round report is a directory of two files. `item.json` is `{id, kind: "report", title, initiative, round, created}`, with the title taken from the first `# ` heading of the file (or "Round <id>"), and `report.md` is a byte copy of the file given. It has no `pid`, so `pending` skips it. The initiative is `none` or the id of a record with an `initiatives/<id>/initiative.yaml` under `APPROVAL_QUEUE_PROJECTS`.
+
 ## The decision
 
 The page has two buttons. Approve means "merge what was read," and Send back means "merge nothing." Each carries the notes Geoff wrote. A send-back with no note is refused. Approve holds for 5 seconds with an Undo toast before it posts, and Ctrl+Enter approves. On a stop packet the primary button reads "Answer and resume" and the page says "Pass parked until you answer." The decision is stored as `approve`, and answering merges nothing.
 
 `decision.json` is `{decision, calls: [{call, choice, changed}], decidedForYou: [{call, choice, changed}], notes}`, where `call` counts from 1 in fact-file order. The command prints it with `parts` added: `[{ref, head}]` for pull requests, or `[{ref, sha256}]` for a design. It appends one line to `decisions.jsonl` for each decision, which holds `time`, `packet`, `initiative`, `kind`, `decision`, `calls`, `decidedForYou`, the number of notes, and `parts`.
 
+A round report has one decision, and Geoff's only action is "Mark read", which stores `{"decision":"read"}` and writes nothing to `decisions.jsonl`. The page shows the report's Markdown, then the waiting items of its round and the pull requests that landed in it (digest lines with that round, linked to GitHub). The board and the sidebar list the report first in its round, with the pass counts from its State table as the headline; the keys that decide an item are off on its page. A report is never merged, collected, or withdrawn: those forms exit 2 on one.
+
 The server refuses an approve whose pinned heads moved (409), or when `gh` cannot read a head (503), and a design whose file hash changed (409, "Out of date: the design changed since this packet was queued"). A design is read at the `path` its `design.json` records, whatever tree the server runs under; an unreadable or non-absolute path is a 503, "Could not read the design at <path>; nothing was recorded". A `design.json` with no `path` (queued before this change) is read under `APPROVAL_QUEUE_PROJECTS`. The waiting command also polls the heads every 60 seconds and writes `stale.json`, which the page shows as "Out of date." `merge` checks heads again, and `--match-head-commit` makes GitHub refuse a moved head in any case.
 
 ### Merge
 
-`merge` refuses (exit 2) an item that is not decided, is not an approve, is marked out of date, is a design packet, or is a stop packet ("a stop packet is answered and never merged"). Before it merges anything, it reads each pull request's base branch against the repo's default branch (`gh repo view`) and refuses with exit 2 at any pull request based elsewhere, naming it, its base, and the default branch; `--skip` exempts a pull request from the check. A failed read exits 1 with no JSON line. For each pull request in `heads.json` order, it reads `gh pr view`. A pull request already merged at its pinned head counts as merged. A body with a `## Before merge` section needs the pull request in `--premerge-done`, or the command stops with exit 2 and prints the section. Otherwise it runs `gh pr merge <n> --repo <r> --merge --match-head-commit <head>`. It stops at the first failure with exit 1 and prints one JSON line listing the pull requests merged, failed, skipped, and not reached. A second run prints each merged pull request as merged and calls no merge.
+`merge` refuses (exit 2) an item that is not decided, is not an approve, is marked out of date, is a design packet, is a round report, or is a stop packet ("a stop packet is answered and never merged"). Before it merges anything, it reads each pull request's base branch against the repo's default branch (`gh repo view`) and refuses with exit 2 at any pull request based elsewhere, naming it, its base, and the default branch; `--skip` exempts a pull request from the check. A failed read exits 1 with no JSON line. For each pull request in `heads.json` order, it reads `gh pr view`. A pull request already merged at its pinned head counts as merged. A body with a `## Before merge` section needs the pull request in `--premerge-done`, or the command stops with exit 2 and prints the section. Otherwise it runs `gh pr merge <n> --repo <r> --merge --match-head-commit <head>`. It stops at the first failure with exit 1 and prints one JSON line listing the pull requests merged, failed, skipped, and not reached. A second run prints each merged pull request as merged and calls no merge.
 
 ### Land and digest
 
@@ -133,17 +138,17 @@ After an approve, the session merges, then answers each note with `approval-queu
 
 ## The digest and history
 
-The digest page groups `digest.jsonl` lines by repo, one claim each. Within a repo that has any round line, a round's lines sit under a `Round <id>` heading and the rest under `No round`; a repo with no round line shows no heading. The board and the sidebar group a round's waiting items under a round heading inside their initiative, after the initiative's items that have no round (on the sidebar, the items with no round stay in the flat list above every initiative title), and the status line of a round's packet names the round. Each line shows its replies and takes a note. The page shows no badge and no count. Digest notes save in `digest-notes.json` with ids `D1`, `D2`, and so on, and `approval-queue reply digest <replies.json>` answers them. The history page lists decided items newest first and has a search over titles. Each decided item opens with its notes and replies. A damaged sidecar file never hides a row.
+The digest page groups `digest.jsonl` lines by repo, one claim each. Within a repo that has any round line, a round's lines sit under a `Round <id>` heading and the rest under `No round`; a repo with no round line shows no heading. The board and the sidebar group a round's waiting items under a round heading inside their initiative, after the initiative's items that have no round (on the sidebar, the items with no round stay in the flat list above every initiative title), and the status line of a round's packet names the round. Each line shows its replies and takes a note. The page shows no badge and no count. Digest notes save in `digest-notes.json` with ids `D1`, `D2`, and so on, and `approval-queue reply digest <replies.json>` answers them. The history page lists decided items newest first, a read round report among them, and has a search over titles. Each decided item opens with its notes and replies. A damaged sidecar file never hides a row.
 
 The app appends `{time, item, fold}` to `folds.jsonl` each time a fold opens, for the monthly review of what Geoff reads.
 
 ## After a hand-over
 
-**The pid.** Every `item.json` carries `pid` and `pidStart`: the command's process id and its start time in clock ticks since boot (field 22 of `/proc/<pid>/stat`). A pid counts as the waiting session only when `/proc/<pid>/stat` exists, its start time equals `pidStart`, and its state is not `Z`.
+**The pid.** Every `item.json` of a design, triage list, or packet carries `pid` and `pidStart` (a round report carries neither): the command's process id and its start time in clock ticks since boot (field 22 of `/proc/<pid>/stat`). A pid counts as the waiting session only when `/proc/<pid>/stat` exists, its start time equals `pidStart`, and its state is not `Z`.
 
 **Stop signals.** A TERM, HUP, or INT to a waiting command ends the wait and leaves `item.json` in place, so `collect` can recover a decision after a reboot. Only `withdraw` retires a waiting item.
 
-**withdraw.** `approval-queue withdraw <id>` writes a `withdrawn` marker, sends TERM to the waiting command, and waits up to 5 seconds. The command's exit trap retires `item.json` when it finds the marker. When the waiter is already gone, `withdraw` retires the item itself. Retiring renames `item.json` away and then looks for a `decision.json`: if one landed first, the file is renamed back and the decision stands. `withdraw` exits 2 for an id that is not `YYYYMMDDTHHMMSS-<pid>`, an id with no `item.json`, a decided item, and an item with no `pid`.
+**withdraw.** `approval-queue withdraw <id>` exits 2 on a round report, whose next report replaces it. Otherwise it writes a `withdrawn` marker, sends TERM to the waiting command, and waits up to 5 seconds. The command's exit trap retires `item.json` when it finds the marker. When the waiter is already gone, `withdraw` retires the item itself. Retiring renames `item.json` away and then looks for a `decision.json`: if one landed first, the file is renamed back and the decision stands. `withdraw` exits 2 for an id that is not `YYYYMMDDTHHMMSS-<pid>`, an id with no `item.json`, a decided item, and an item with no `pid`.
 
 **collect.** `approval-queue collect <id>` prints and logs the decision of an item whose queuing command is gone. It waits for `decision.json` when there is none yet. If the item is withdrawn while it waits, it prints `approval-queue: <id> was withdrawn; nothing to collect` on stderr and exits 1. The decision is logged once, however many commands print it.
 
@@ -161,7 +166,7 @@ The new build refuses the old packet format, so it goes live only with an empty 
 bash scripts/gate.sh
 ```
 
-The gate runs the app's `check` and `test`, then every `tests/*.test.sh`, including the install test (which uses a temp `HOME`) and `tests/page.test.sh`, which builds a copy of the app on a random port and reads the stop, close, design, and out-of-date pages, the sidebar's round headings, `/digest`, and `/history`. `PAGE_TEST_ROUND_SHOTS=<directory>` also writes a screenshot of the board and of the digest page there.
+The gate runs the app's `check` and `test`, then every `tests/*.test.sh`, including the install test (which uses a temp `HOME`) and `tests/page.test.sh`, which builds a copy of the app on a random port and reads the stop, close, design, and out-of-date pages, the sidebar's round headings, the round report's board row, rail entry, and page, `/digest`, and `/history`, then runs the `report` command against the served state and posts Mark read. `PAGE_TEST_ROUND_SHOTS=<directory>` also writes a screenshot of the board, the digest page, and a report page there.
 
 ## History
 

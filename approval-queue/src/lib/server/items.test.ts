@@ -198,6 +198,25 @@ describe('orphaned', () => {
 	});
 });
 
+describe('a round report', () => {
+	const meta = { kind: 'report', title: 'R', initiative: 'ur', round: 'ur-queue', created: '2026-11-12T07:00:00Z' };
+
+	it('has no pid, so it is never orphaned, and reads its text', async () => {
+		await seed('r1', meta, { 'report.md': '# R\n' });
+		expect(await readItem(root, 'r1')).toMatchObject({ meta: { orphaned: false }, content: { kind: 'report', text: '# R\n' } });
+	});
+
+	it('reads as empty text when report.md is missing', async () => {
+		await seed('r2', meta);
+		expect((await readItem(root, 'r2'))?.content).toEqual({ kind: 'report', text: '' });
+	});
+
+	it('reads a read decision', async () => {
+		await seed('r3', meta, { 'report.md': '# R\n', 'decision.json': '{"decision":"read"}' });
+		expect(await readItem(root, 'r3')).toMatchObject({ decision: { decision: 'read' } });
+	});
+});
+
 describe('an item of a kind the queue no longer reads', () => {
 	it.each(['blueprint', 'page', 'change', 'pr', 'docs'])('stays on disk but is not listed, decided or waiting, nor served (%s)', async (kind) => {
 		await seed('old', { kind, repo: 'r', title: 't', created: 'c' }, { 'doc.md': '# doc' });
