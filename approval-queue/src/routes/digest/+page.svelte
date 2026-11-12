@@ -3,6 +3,7 @@ The digest: every change that merged with no call for the reader, one claim a li
 with the newest first. It shows no badge and no count. A line opens (stock daisyUI `collapse`) to the
 reader's note on it, the session's reply to that note, and a link to the pull request; saving a note
 posts to the `note` action, and blank text removes it. The form works without script as a plain post.
+A line stays open or closed as the reader left it while the layout polls the queue.
 -->
 <script lang="ts">
 	import { enhance } from '$app/forms';
@@ -12,6 +13,8 @@ posts to the `note` action, and blank text removes it. The form works without sc
 	let { data, form } = $props();
 
 	const REPLIES = { fixed: 'Fixed', filed: 'Filed', answered: 'Answered' };
+	/** Each line as the reader last left it, open or closed, so the queue poll's re-render never shuts one. */
+	const opened = $state<Record<number, boolean>>({});
 	const when = (time: string) =>
 		new Date(time).toLocaleString('en-GB', { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' });
 	/** `owner/repo#12` as its repo, its number, and the pull request's address. */
@@ -42,7 +45,7 @@ posts to the `note` action, and blank text removes it. The form works without sc
 					{#if section.heading}<h3 class="round-heading">{section.heading}</h3>{/if}
 					{#each section.lines as line (line.line)}
 						{@const note = line.notes[0]}
-						<details class="collapse collapse-arrow" open={form?.saved === line.line || undefined}>
+						<details class="collapse collapse-arrow" bind:open={() => opened[line.line] ?? form?.saved === line.line, (open) => (opened[line.line] = open)}>
 							<summary class="collapse-title claim">
 								{line.claim}
 								<span class="sub">#{pr(line.ref).n}, {line.lane === 'land' ? 'merged' : 'recorded'}, {when(line.time)}{note ? ', you left a note' : ''}</span>
