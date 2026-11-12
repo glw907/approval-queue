@@ -35,15 +35,15 @@ Geoff and return his decision as JSON. `README.md` holds the interfaces and the 
   PR #14, `1d2cbee`, on 2026-11-11). A packet is a fact file the session writes and a text file a
   writer writes, and the page is one reading column with a notes margin.
 - The command has `snapshot`, `packet`, `merge`, `land`, `digest`, `reply`, `withdraw`, `pending`,
-  `collect`, `design`, `triage`, and `restart`. The docs and single-`pr` kinds, Defer, per-part verdicts, and
+  `collect`, `design`, `triage`, `report`, and `restart`. The docs and single-`pr` kinds, Defer, per-part verdicts, and
   the contents rail are gone.
-- A tab closed inside the 5-second approve hold now sends the held decision on `pagehide`.
-- Pass Q2 (branch `ur-q2`): `merge` refuses a stop packet; `merge`, `land`, and `packet` refuse a pull
-  request not based on the repo's default branch; a stop packet's page says "Pass parked until you
-  answer." with an "Answer and resume" button. `tests/page.test.sh` serves a built copy and reads the
-  pages. Backlog #64 holds the rest of the stop page's "approve" wording.
-- Pass Q3 (branch `ur-q3`): a fact file, a queued item, and a `land --round <id>` digest line carry a
-  round; the board, the sidebar, the digest page, and the status line show it. Backlog #65, #66.
+- Pass Q2: `merge` refuses a stop packet; `merge`, `land`, and `packet` refuse a pull request not
+  based on the default branch; a stop page says "Pass parked until you answer." Backlog #64.
+- Pass Q3: a packet, a queued item, and a `land --round <id>` digest line carry a round that the
+  board, sidebar, digest page, and status line show. Backlog #65, #66.
+- Pass Q4: `report <initiative> <round> <report.md>` stores a round report, a fourth item kind that
+  leads its round on the board and sidebar. Its page lists the round's waiting packets and landed
+  pull requests, with "Mark read". Backlog #67, #68.
 - pavilion runs the new build: the cutover ran on 2026-11-11 with `glw907/workstation#227` and
   Survey 1.6.0.
 
@@ -52,7 +52,7 @@ Geoff and return his decision as JSON. `README.md` holds the interfaces and the 
 thinkpad-x1 has not taken the cutover. Its first session there runs, before any hand-over:
 
 1. `approval-queue pending` (empty, or collect what it lists with the old build first).
-2. `approval-queue restart`.
+2. `approval-queue restart`, which also serves the round report page.
 3. `systemctl --user disable --now decision-review.timer`.
 4. Check that `approval-queue merge` with no id exits 2.
 

@@ -12,6 +12,14 @@
 
 ## Medium
 
+- [ ] **#68** A round report's landed list misses a pull request landed without a round `#improvement` `#approval-queue` *(2026-11-11)*
+  The page lists the digest lines that carry the report's round. A pull request merged by `digest` (see #66) or by `land` with no `--round` has no round, so it never shows.
+  Fix #66 first, then have the conductor's land and record steps pass `--round`.
+
+- [ ] **#67** `reply <id>` on a round report says it was "queued in an old shape" `#improvement` `#approval-queue` *(2026-11-11)*
+  A report holds no notes, so `reply` has nothing to answer, but its message names the wrong cause.
+  Refuse a report with "a round report takes no replies", as `merge`, `collect`, and `withdraw` do.
+
 - [ ] **#66** `digest` takes no `--round` `#improvement` `#approval-queue` *(2026-11-11)*
   Pass Q3 added `land --round <id>`. `digest`, which records a merge already done, still writes a line with no round, so a recorded merge shows under "No round".
   Give `digest` the same first-argument flag and id rule.

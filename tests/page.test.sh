@@ -256,6 +256,28 @@ if [ -n "${PAGE_TEST_SHOT:-}" ]; then
   node "$SRC/tests/fixtures/ct/shot.mjs" "$base/item/$stop" "$PAGE_TEST_SHOT" || { echo "FAIL: the screenshot failed"; fail=1; }
 fi
 
+# The command and the app joined: the worktree's report command stores a report into the served state through a
+# symlinked state home, and a second report for the same round replaces the first on the board.
+mkdir -p "$root/xdg" "$root/projects/initiatives/unattended-rounds"
+ln -s "$state" "$root/xdg/approval-queue"
+: >"$root/projects/initiatives/unattended-rounds/initiative.yaml"
+printf '# Std round report\n\nRound state: running\n\n| Pass | State |\n| --- | --- |\n| Q1 | merged |\n' >"$root/joined1.md"
+printf '# Std round report, second\n\nRound state: running\n\n| Pass | State |\n| --- | --- |\n| Q1 | merged |\n| Q2 | merged |\n' >"$root/joined2.md"
+jr1=$(XDG_STATE_HOME="$root/xdg" APPROVAL_QUEUE_PROJECTS="$root/projects" APPROVAL_QUEUE_PORT=$PORT timeout 10 "$SRC/bin/.local/bin/approval-queue" report unattended-rounds ur-std "$root/joined1.md")
+sleep 1
+jr2=$(XDG_STATE_HOME="$root/xdg" APPROVAL_QUEUE_PROJECTS="$root/projects" APPROVAL_QUEUE_PORT=$PORT timeout 10 "$SRC/bin/.local/bin/approval-queue" report unattended-rounds ur-std "$root/joined2.md")
+{ [ -n "$jr1" ] && [ -n "$jr2" ] && [ "$jr1" != "$jr2" ]; } || { echo "FAIL: joined: the two report commands printed '$jr1' and '$jr2'"; fail=1; }
+curl -sf --max-time 5 "$base/__data.json" >"$root/board3.json" || { echo "FAIL: /__data.json did not answer 200 after report"; fail=1; : >"$root/board3.json"; }
+has "joined board" "$root/board3.json" "$jr2"
+lacks "joined board" "$root/board3.json" "$jr1"
+has "joined board" "$root/board3.json" "$wreport"
+page "$jr2" jreport
+has "joined report page" "$root/jreport.html" "Std round report, second"
+has "joined report page" "$root/jreport.html" "Mark read"
+tr '\n\t' '  ' <"$root/jreport.html" | grep -o '<nav id="rail".*</nav>' >"$root/jrail.html"
+has "joined rail" "$root/jrail.html" "/item/$jr2"
+lacks "joined rail" "$root/jrail.html" "/item/$jr1"
+
 # Mark read, last because it changes the state the checks above read. It stores only the read decision, merges
 # nothing, and moves the report from the board to the history.
 code=$(curl -s -o "$root/read.out" -w '%{http_code}' --max-time 5 -X POST --data '' -H "Origin: $base" "$base/item/$wreport?/read")
