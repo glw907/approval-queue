@@ -311,6 +311,31 @@ rm -rf "$state/items"
 assert_eq "$(bash "$SCRIPT" pending; echo "rc $?")" "rc 0" "pending: no items"
 bash "$SCRIPT" pending extra >/dev/null 2>&1
 assert_eq "$?" "2" "pending: takes no arguments"
+
+# pending with all four kinds: a waiting design, a decided triage list, a decided packet (dead pid, no logged
+# decision), a waiting report, and a read report. It prints the packet's line alone and stays quiet.
+rm -rf "$state/items"
+rm -f "$state/decisions.jsonl"
+fake_item 20260103T000001-$dead "$dead" 1
+fake_item 20260103T000002-$dead "$dead" 1
+jq '.kind = "triage"' "$state/items/20260103T000002-$dead/item.json" >"$root/t.json"
+mv "$root/t.json" "$state/items/20260103T000002-$dead/item.json"
+printf '{"decision":"submit","rows":[]}\n' >"$state/items/20260103T000002-$dead/decision.json"
+fake_item 20260103T000003-$dead "$dead" 1
+jq '.kind = "packet" | .title = "Packet"' "$state/items/20260103T000003-$dead/item.json" >"$root/t.json"
+mv "$root/t.json" "$state/items/20260103T000003-$dead/item.json"
+printf '{"decision":"approve"}\n' >"$state/items/20260103T000003-$dead/decision.json"
+for n in 4 5; do
+  mkdir -p "$state/items/20260103T00000$n-$n"
+  printf 'x\n' >"$state/items/20260103T00000$n-$n/report.md"
+  jq -nc --arg id "20260103T00000$n-$n" '{id: $id, kind: "report", title: "Round r", initiative: "none", round: "ur-queue", created: "2026-01-03T00:00:00Z"}' \
+    >"$state/items/20260103T00000$n-$n/item.json"
+done
+printf '{"decision":"read"}\n' >"$state/items/20260103T000005-5/decision.json"
+bash "$SCRIPT" pending >"$root/p.out" 2>"$root/p.err"
+assert_eq "$?" "0" "pending with four kinds: exit code"
+assert_eq "$(cat "$root/p.out")" "$(printf '20260103T000003-%s\tpacket\tapprove\tPacket' "$dead")" "pending with four kinds: the lines"
+assert_eq "$(wc -c <"$root/p.err")" "0" "pending with four kinds: stderr"
 kill "$sleeper"; wait "$sleeper" 2>/dev/null; sleeper=""
 
 [ "$fail" = 0 ] && echo "lifecycle: ok"

@@ -8,6 +8,7 @@ usage="usage: approval-queue <design|triage> <repo> <title> <source>
        approval-queue packet [--check] [--replies <replies.json>] <initiative> <facts.json> <text.md>
        approval-queue reply <id|digest> <replies.json>
        approval-queue withdraw <id>
+       approval-queue report <initiative> <round> <report.md>
        approval-queue pending
        approval-queue collect <id>
        approval-queue merge [--skip <owner/repo#n>]... [--premerge-done <owner/repo#n>]... <id>
@@ -57,6 +58,10 @@ if [ "${1:-}" = withdraw ]; then
   wdir="$root/items/$1"
   if [[ ! $1 =~ $id_pattern ]]; then echo "approval-queue: $1 is not an item id" >&2; exit 2; fi
   if [ ! -e "$wdir/item.json" ]; then echo "approval-queue: no item $1 is queued" >&2; exit 2; fi
+  if [ "$(jq -r '.kind // empty' "$wdir/item.json")" = report ]; then
+    echo "approval-queue: $1 is a round report; a report isn't withdrawn, and the next report for its round replaces it" >&2
+    exit 2
+  fi
   if [ -e "$wdir/decision.json" ]; then echo "approval-queue: $1 is decided; collect it instead" >&2; exit 2; fi
   wpid=$(jq -r '.pid // empty' "$wdir/item.json")
   wstart=$(jq -r '.pidStart // empty' "$wdir/item.json")
@@ -94,7 +99,7 @@ unanswered() {
 # oldest first, for a session to `collect`; then `<id>\tnotes\t<count>\t<title>` for each decided packet with notes
 # no reply answers, and `digest\tdigest-notes\t<count>\t-` for digest notes no reply answers. Skipped: an item with a live waiter, a logged decision (a log line
 # whose `packet` is the item's id), a triage item (its decision is never logged), a kind this queue no longer
-# reads, and an item queued before pids existed, which cannot be told from a handled one.
+# reads, a round report (it has no pid, so the loop skips it), and an item queued before pids existed, which cannot be told from a handled one.
 if [ "${1:-}" = pending ]; then
   shift
   if [ $# -ne 0 ]; then echo "$usage" >&2; exit 2; fi
@@ -305,6 +310,43 @@ if [ "${1:-}" = reply ]; then
   exit 0
 fi
 
+# report <initiative> <round> <report.md>: stores a round's report as an item of kind report, prints its id, and
+# exits without waiting. It retires every waiting report of the same initiative and round first, so the board keeps
+# one. A report Geoff already read stays in history. The item has no pid: nothing waits on it.
+if [ "${1:-}" = report ]; then
+  shift
+  if [ $# -ne 3 ]; then echo "$usage" >&2; exit 2; fi
+  (LC_ALL=C; [[ $2 =~ ^[a-z][a-z0-9-]{0,11}$ ]]) || refuse "the round id is lowercase letters, digits, and hyphens, starting with a letter, 12 characters at most"
+  rprojects="${APPROVAL_QUEUE_PROJECTS:-$HOME/Projects}"
+  if [ "$1" != none ]; then
+    [[ $1 =~ ^[a-z0-9-]+$ && -e "$rprojects/initiatives/$1/initiative.yaml" ]] \
+      || refuse "the initiative is none or the id of a record: no initiatives/$1/initiative.yaml under $rprojects (the approval-packet skill)"
+  fi
+  [ -r "$3" ] || { echo "approval-queue: cannot read $3" >&2; exit 1; }
+  grep -q '[^[:space:]]' "$3" || refuse "$3 holds no text; a report with nothing in it would replace one Geoff has not read"
+  rtitle=$(head -n 1 "$3")
+  case "$rtitle" in "# "*) rtitle=${rtitle#\# } ;; *) rtitle="Round $2" ;; esac
+  mkdir -p "$root/items"
+  rid="$(date +%Y%m%dT%H%M%S)-$$"
+  exec 8>"$root/queue.lock"
+  flock 8
+  for rdir in "$root"/items/*/; do
+    rdir=${rdir%/}
+    [ -e "$rdir/item.json" ] && [ ! -e "$rdir/decision.json" ] || continue
+    [ "$(jq -r '[.kind, .initiative, .round] | join("|")' "$rdir/item.json" 2>/dev/null)" = "report|$1|$2" ] || continue
+    # A 1 means Geoff's decision landed first. The app may take it back, so look once more before giving up.
+    retire_item "$rdir" || { [ -e "$rdir/decision.json" ] || retire_item "$rdir" || true; }
+  done
+  mkdir -p "$root/items/$rid"
+  cp "$3" "$root/items/$rid/report.md"
+  jq -n --arg id "$rid" --arg title "$rtitle" --arg initiative "$1" --arg round "$2" --arg created "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    '{id: $id, kind: "report", title: $title, initiative: $initiative, round: $round, created: $created}' >"$root/items/$rid/item.json.tmp"
+  mv "$root/items/$rid/item.json.tmp" "$root/items/$rid/item.json"
+  exec 8>&-
+  echo "$rid"
+  exit 0
+fi
+
 # merge <id>: merges each PR of a decided approve, in heads.json order, and records each success in merged.json. It
 # refuses a stop packet whatever its decision, and a PR whose base is not the repo's default branch (checked for
 # every PR before the first merge, so none is merged ahead of a bad one).
@@ -324,6 +366,7 @@ if [ "${1:-}" = merge ]; then
   [[ $1 =~ $id_pattern ]] || refuse "$1 is not an item id"
   mdir="$root/items/$1"
   [ -e "$mdir/item.json" ] || refuse "no item $1 is queued"
+  [ "$(jq -r '.kind // empty' "$mdir/item.json")" != report ] || refuse "$1 is a round report; a report is never merged"
   [ "$(jq -r '.kind // empty' "$mdir/facts.json" 2>/dev/null)" != stop ] || refuse "$1 is a stop packet; a stop packet is answered and never merged"
   if [ -e "$mdir/design.json" ] || [ ! -e "$mdir/heads.json" ]; then refuse "$1 has no pull requests to merge"; fi
   [ -e "$mdir/decision.json" ] || refuse "$1 is not decided yet"
@@ -602,6 +645,7 @@ if [ "${1:-}" = collect ]; then
   if [[ ! $1 =~ $id_pattern ]]; then echo "approval-queue: $1 is not an item id" >&2; exit 2; fi
   if [ ! -e "$root/items/$1/item.json" ]; then echo "approval-queue: no item $1 is queued" >&2; exit 2; fi
   ckind=$(jq -r '.kind' "$root/items/$1/item.json")
+  if [ "$ckind" = report ]; then echo "approval-queue: $1 is a round report; a report holds no decision to collect" >&2; exit 2; fi
   case "$ckind" in design | triage | packet) ;; *) echo "approval-queue: $1 is a $ckind item, which this queue no longer reads" >&2; exit 2 ;; esac
   if [ "$ckind" = packet ] && [ ! -e "$root/items/$1/facts.json" ]; then
     echo "approval-queue: $1 was queued in an old shape, which this queue no longer reads" >&2
