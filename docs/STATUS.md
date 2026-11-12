@@ -3,25 +3,26 @@
 <!-- round-report ur-queue -->
 Report: ~/Projects/initiatives/.claude/worktrees/unattended-rounds/unattended-rounds/reports/ur-queue-report.md
 
-# Round ur-queue, glw907/approval-queue, written 2026-11-11 19:52
+# Round ur-queue, glw907/approval-queue, written 2026-11-11 20:42
 Round state: running
-Queue live through: Q1
+Queue live through: Q2
 
 | Pass | State | PR | Planned min | Actual min | Usage before (week / Fable) | Usage after |
 | --- | --- | --- | --- | --- | --- | --- |
 | Q1 | merged | #15 | 60 | ~60 | 68% / 15% | 73% / 24% |
-| Q2 | running | none | 90 | | 73% / 24% | |
+| Q2 | merged | #16 | 90 | ~49 | 73% / 24% | 75% / 28% |
 | Q3 | not started | none | 120 | | | |
 | Q4 | not started | none | 120 | | | |
 
 Stops: 0
+Note: Q2's PR first paraphrased its acceptance items; the conductor asked the executor by message to quote them verbatim before landing.
 Refusals: 0
 Calls sent to Geoff: 0
-Planning misses: [file-list] 1, [stale-fact] 1 (Q1)
+Planning misses: [file-list] 1, [stale-fact] 1 (Q1); [file-list] 1, [stale-fact] 1 (Q2)
 Trials: Fable 5.2 planned 2 passes; 2 sessions ran under /goal; 0 went idle before an end line.
 Opus seats under rule 6: none
 Waiting for Geoff: nothing
-Landed: Q1 (#15)
+Landed: Q1 (#15), Q2 (#16)
 Resume from: /var/home/glw907/Projects/initiatives/.claude/worktrees/unattended-rounds/unattended-rounds/plans/ur-queue-conductor-prompt.txt
 <!-- /round-report -->
 
