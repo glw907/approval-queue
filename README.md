@@ -65,7 +65,7 @@ For a `merge` document, `check` also reads each pull request through `gh` and re
 | Form | What it does | Exit |
 | --- | --- | --- |
 | `check <doc.md>` | Prints the document's faults, or nothing but the closing line. | 0 clean, 1 a fault |
-| `send <doc.md>` | Checks the document, stores it, and waits. Prints the decision as one JSON line that starts with the document's `id`, then the decision record. A `report` prints its id and exits at once. A `merge` document also stores each pull request's head, so `merge` can merge only what the reader saw. | 0 decided, 1 a fault or a check still running |
+| `send <doc.md>` | Checks the document, stores it, opens its page, and waits. Prints the decision as one JSON line that starts with the document's `id`, then the decision record. A `report` prints its id and exits at once. A `merge` document also stores each pull request's head, so `merge` can merge only what the reader saw. | 0 decided, 1 a fault or a check still running |
 | `send --returns <id> <doc.md>` | Returns a revised document for a send-back that was handed over, then waits for the next decision. It refuses a changed `kind`, and it empties the stored answers because question ids can move. | 0 decided, 1 refused |
 | `collect <id>` | Prints the decision of a document whose `send` is gone, once the decision is handed over. | 0 printed, 1 a report, a withdrawn document, or an unknown id |
 | `withdraw <id>` | Takes back a document nobody has decided. | 0 withdrawn or already withdrawn, 1 an unknown id or a store failure, 2 already decided (the decision prints on stdout) |
@@ -77,7 +77,7 @@ For a `merge` document, `check` also reads each pull request through `gh` and re
 
 `merge` refuses with exit 2, naming the pull request, a head other than the one the reader approved, a base other than the default branch, or a check that failed or that's still running. It doesn't read or run a `## Before merge` section in a pull request body (backlog #73). `land` refuses a pull request that sits in a waiting document, is closed, is a draft, is off the default branch, has a failing check, or has a `## Before merge` section. A check that's still running is polled every 30 seconds for up to 15 minutes (`APPROVAL_QUEUE_POLL_S` and `APPROVAL_QUEUE_POLL_MAX_S`).
 
-`send` waits on files. It reads the store once a second and never asks the server. A decision is handed over 20 seconds after the reader records it, so the reader can still undo it.
+`send` and `send --returns` open the document's page at `/d/<id>` with `xdg-open`, one tab for each document. When nothing answers on the port, they first start this checkout's build the way `restart` does. If there's no build or `xdg-open`, they print the page's address and the document still waits. Then `send` waits on files. It reads the store once a second and never asks the server. A decision is handed over 20 seconds after the reader records it, so the reader can still undo it.
 
 ### Retired subcommands
 

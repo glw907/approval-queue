@@ -1,5 +1,6 @@
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { createServer, type Server } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -39,8 +40,19 @@ let dir: string;
 let state: string;
 let root: string;
 const children: ChildProcess[] = [];
+let page: Server;
+let port: number;
 
-const env = () => ({ ...process.env, APPROVAL_QUEUE_STATE: state, PATH: `${dir}:${process.env.PATH}` });
+const env = () => ({ ...process.env, APPROVAL_QUEUE_STATE: state, APPROVAL_QUEUE_PORT: String(port), PATH: `${dir}:${process.env.PATH}` });
+
+/** The pages the stubbed `xdg-open` was asked to open, one per line. */
+const opened = () => {
+	try {
+		return readFileSync(join(dir, 'open.log'), 'utf8').split('\n').filter(Boolean);
+	} catch {
+		return [];
+	}
+};
 
 function serve(number: number, view: object) {
 	writeFileSync(join(dir, `pr-glw907-workstation-${number}.json`), JSON.stringify(view));
@@ -83,17 +95,24 @@ function stored(path: string, kind: string) {
 	return createDocument(root, source, { kind, title: parse(source).doc.title }).id;
 }
 
-beforeEach(() => {
+beforeEach(async () => {
+	// A stand-in page server, so `send` finds one answering and never starts the real build.
+	page = createServer((_req, res) => res.end('ok'));
+	await new Promise<void>((resolve) => page.listen(0, '127.0.0.1', resolve));
+	port = (page.address() as { port: number }).port;
 	dir = mkdtempSync(join(tmpdir(), 'aq-send-'));
 	state = join(dir, 'state');
 	root = join(state, 'store');
 	mkdirSync(state);
 	writeFileSync(join(dir, 'gh'), STUB);
 	chmodSync(join(dir, 'gh'), 0o755);
+	writeFileSync(join(dir, 'xdg-open'), '#!/usr/bin/env bash\nprintf \'%s\\n\' "$1" >>"$(dirname "$0")/open.log"\n');
+	chmodSync(join(dir, 'xdg-open'), 0o755);
 	for (const n of ALL_PRS) serve(n, { state: 'OPEN', isDraft: false, headRefOid: `head${n}`, statusCheckRollup: PASSED });
 });
 
 afterEach(() => {
+	page.close();
 	for (const child of children.splice(0)) child.kill('SIGKILL');
 	rmSync(dir, { recursive: true, force: true });
 });
@@ -109,10 +128,19 @@ describe('send', () => {
 		expect(readDocument(root, id).source).toBe(readFileSync(REPORT, 'utf8'));
 	});
 
+	it('opens the stored document on the page server', async () => {
+		// Run without blocking, so the stand-in server in this process can answer.
+		const sent = start('send', REPORT);
+		expect(await sent.done).toBe(0);
+		const id = sent.seen.out.trim();
+		expect(await until(() => opened().length > 0, 5000)).toBe(true);
+		expect(opened()).toEqual([`http://127.0.0.1:${port}/d/${id}`]);
+	});
+
 	it('exits with the decision once it is handed over, and collect prints the same line', async () => {
 		const sent = start('send', MERGE);
 		expect(await until(() => /stored \d{8}-\d{6}-[0-9a-f]{6}/.test(sent.seen.err), 10000)).toBe(true);
-		const id = /stored (\S+?);/.exec(sent.seen.err)![1];
+		const id = /stored (\S+)/.exec(sent.seen.err)![1];
 		writeDecision(root, id, { action: 'approve', at: ago(25) });
 		expect(await Promise.race([sent.done, sleep(5000).then(() => 'late')])).toBe(0);
 		const line = sent.seen.out;
@@ -126,7 +154,7 @@ describe('send', () => {
 	it('is recovered by collect after send is killed, with no server running', async () => {
 		const sent = start('send', MERGE);
 		expect(await until(() => sent.seen.err.includes('stored '), 10000)).toBe(true);
-		const id = /stored (\S+?);/.exec(sent.seen.err)![1];
+		const id = /stored (\S+)/.exec(sent.seen.err)![1];
 		sent.child.kill('SIGKILL');
 		await sent.done;
 		writeDecision(root, id, { action: 'sendback', at: ago(25) });
@@ -160,7 +188,7 @@ describe('send', () => {
 	it('stores each pull request head it checked, in the document order', async () => {
 		const sent = start('send', MERGE);
 		expect(await until(() => sent.seen.err.includes('stored '), 10000)).toBe(true);
-		const id = /stored (\S+?);/.exec(sent.seen.err)![1];
+		const id = /stored (\S+)/.exec(sent.seen.err)![1];
 		expect(readNamed(root, id, 'heads.json')).toEqual(
 			[230, 231, 232].map((number) => ({ repo: 'glw907/workstation', number, head: `head${number}` }))
 		);
@@ -221,6 +249,8 @@ describe('send --returns', () => {
 		const sent = start('send', '--returns', id, revision());
 		expect(await until(() => sent.seen.err.includes('waiting for a decision'), 10000)).toBe(true);
 		expect(sent.seen.err).toContain(`returned ${id} as version 2`);
+		expect(await until(() => opened().length > 0, 5000)).toBe(true);
+		expect(opened()).toEqual([`http://127.0.0.1:${port}/d/${id}`]);
 		expect(readDocument(root, id).meta.versions).toBe(2);
 		expect(readDocument(root, id).source).toContain('Revised after the send-back.');
 		expect(readNamed(root, id, 'heads.json')).toEqual(
