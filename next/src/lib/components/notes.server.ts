@@ -12,6 +12,7 @@ import { compare } from '#lib/doc/compare.ts';
 import { parse } from '#lib/doc/parse.ts';
 import { plain, renderInline } from '#lib/doc/render.ts';
 import { appendRecord, readDocument, readRecords } from '#lib/store/store.ts';
+import type { Entry, Thread, Who } from './types.ts';
 import { curly } from './typeset.ts';
 
 /** The most characters a note or a reply can hold, counted as code points. */
@@ -20,23 +21,7 @@ export const NOTE_LIMIT = 4000;
 /** A note's length as the page, the server, and the command all count it: its code points. */
 export const noteLength = (text: string) => [...text].length;
 
-export type Who = 'geoff' | 'claude';
-
-export type Entry = { who: Who; text: string; at: string };
-
-export type Thread = {
-	id: number;
-	/** The passage the thread is about, as plain text. */
-	quote: string;
-	/** Where the quote starts in the page's text index, when the page that wrote it knew. */
-	start?: number;
-	/** The passage's words before a later version changed them. */
-	was?: string;
-	/** True when the passage is no longer in the document. */
-	orphan?: boolean;
-	resolved: boolean;
-	entries: Entry[];
-};
+export type { Entry, Thread, Who };
 
 /** A note operation as it is stored. */
 export type NoteRecord =

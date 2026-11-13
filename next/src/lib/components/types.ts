@@ -96,6 +96,27 @@ export interface DocStanding {
 	decision: DecisionView | null;
 }
 
+/** Who wrote a note entry: Geoff on the page, or a session through `reply`. */
+export type Who = 'geoff' | 'claude';
+
+export type Entry = { who: Who; text: string; at: string };
+
+/** A note thread as the fold of a document's note records gives it. */
+export type Thread = {
+	/** The number of the record that opened it, which the page posts and never shows. */
+	id: number;
+	/** The passage the thread is about, as plain text. */
+	quote: string;
+	/** Where the quote starts in the page's text index, when the page that wrote it knew. */
+	start?: number;
+	/** The passage's words before a later version changed them. */
+	was?: string;
+	/** True when the passage is no longer in the document. */
+	orphan?: boolean;
+	resolved: boolean;
+	entries: Entry[];
+};
+
 /**
  * The server's answer to a decision post: the standing after the write, and on a refusal the
  * sentence the page shows as its reason. `standing` is null when the document can't be read.
@@ -103,4 +124,6 @@ export interface DocStanding {
 export interface DecideAnswer {
 	standing: DocStanding | null;
 	message?: string;
+	/** The document's threads after a note operation. */
+	threads?: Thread[];
 }

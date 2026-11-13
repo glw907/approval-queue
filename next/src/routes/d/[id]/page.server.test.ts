@@ -5,7 +5,8 @@ import { fileURLToPath } from 'node:url';
 import { isHttpError } from '@sveltejs/kit';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { seed } from '../../../../scripts/page-checks.mjs';
-import type { DocStanding, PageDoc } from '#lib/components/types.ts';
+import type { DocStanding, PageDoc, Thread } from '#lib/components/types.ts';
+import { writeNote } from '#lib/components/notes.server.ts';
 import { writeDecision, writeNamed } from '#lib/store/store.ts';
 import { load } from './+page.server.ts';
 
@@ -23,7 +24,7 @@ afterAll(() => {
 	rmSync(state, { recursive: true, force: true });
 });
 
-type Data = { doc: PageDoc; standing: DocStanding; answers: Record<string, number> };
+type Data = { doc: PageDoc; standing: DocStanding; answers: Record<string, number>; threads: Thread[] };
 
 const loaded = async (id: string) => (await load({ params: { id } } as Parameters<typeof load>[0])) as Data;
 const open = async (id: string) => (await loaded(id)).doc;
@@ -85,6 +86,14 @@ describe('the document page', () => {
 		const data = await loaded('markdown');
 		expect(data.standing).toEqual({ state: 'waiting', n: null, seq: 0, decision: null });
 		expect(data.answers).toEqual({});
+		expect(data.threads).toEqual([]);
+	});
+
+	it('gives a stored document its folded note threads', async () => {
+		const id = ids['40-queue-design'];
+		expect((await loaded(id)).threads).toEqual([]);
+		writeNote(join(state, 'store'), id, { op: 'open', who: 'geoff', quote: 'one document', version: 1, text: 'Why one?', at: new Date().toISOString() });
+		expect((await loaded(id)).threads.map((t) => [t.id, t.quote, t.entries[0].text])).toEqual([[1, 'one document', 'Why one?']]);
 	});
 
 	it("gives a stored document its folded state and the answers picked before a decision", async () => {

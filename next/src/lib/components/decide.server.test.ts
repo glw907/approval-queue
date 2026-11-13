@@ -6,9 +6,10 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { parse } from '#lib/doc/parse.ts';
 import type { Question } from '#lib/doc/types.ts';
-import { createDocument, readDecisions, readNamed, writeDecision, writeNamed } from '#lib/store/store.ts';
-import { DOC } from '#lib/strings.ts';
+import { createDocument, readDecisions, readNamed, readRecords, writeDecision, writeNamed } from '#lib/store/store.ts';
+import { DOC, NOTES } from '#lib/strings.ts';
 import { answersOf, post, standingOf } from './decide.server.ts';
+import { readThreads, writeNote } from './notes.server.ts';
 
 // The race case: a `handed` record lands just before the Undo's own write.
 const race = vi.hoisted(() => ({ handBefore: null as null | { root: string; id: string; n: number } }));
@@ -65,6 +66,10 @@ function send(id: string, body: unknown, over: { origin?: string | null; type?: 
 }
 
 const records = (id: string) => readDecisions(root, id);
+
+/** Opens a thread of Geoff's on document `id`, the note a send-back explains itself with. */
+const geoffNote = (id: string) =>
+	writeNote(root, id, { op: 'open', who: 'geoff', quote: 'the four rules', version: 1, text: 'Why later?', at: new Date().toISOString() });
 
 beforeEach(() => {
 	root = mkdtempSync(join(tmpdir(), 'aq-decide-'));
@@ -164,8 +169,9 @@ describe('the request checks', () => {
 		expect(records(id)).toEqual([]);
 	});
 
-	it('takes a send-back with questions unanswered', () => {
+	it('takes a send-back with questions unanswered when a note of Geoff’s waits', () => {
 		const { id } = mergeDoc();
+		geoffNote(id);
 		expect(send(id, { op: 'decide', action: 'sendback', answers: {} }).status).toBe(200);
 	});
 
@@ -238,7 +244,7 @@ describe('the records', () => {
 
 	it('refuses an answer once the document is decided', () => {
 		const { id } = mergeDoc();
-		send(id, { op: 'decide', action: 'sendback', answers: {} });
+		send(id, { op: 'decide', action: 'sendback', answers: { q1: 1 } });
 		const res = send(id, { op: 'answer', question: 'q1', pick: 0 });
 		expect(res.status).toBe(409);
 		expect(res.body.standing?.state).toBe('decided');
@@ -279,6 +285,7 @@ describe('repeats and late arrivals', () => {
 
 	it('refuses a different decision while decided', () => {
 		const { id, questions } = mergeDoc();
+		geoffNote(id);
 		send(id, { op: 'decide', action: 'sendback', answers: {} });
 		const res = send(id, { op: 'decide', action: 'approve', answers: recommended(questions) });
 		expect(res.status).toBe(409);
@@ -360,5 +367,145 @@ describe('the standing a page reads', () => {
 		expect(standing).toMatchObject({ state: 'decided', n: 1, decision: { action: 'approve' } });
 		expect(Object.keys(standing.decision?.answers ?? {})).toEqual(['q1', 'q2']);
 		expect(standing.decision).not.toHaveProperty('heads');
+	});
+});
+
+describe('notes from the page', () => {
+	const notes = (id: string) => readRecords(root, id, 'note').length;
+	const note = (text = 'Why later?', extra: object = {}) => ({ op: 'note', quote: 'the four rules', start: 12, version: 1, text, ...extra });
+	const claudeThread = (id: string) =>
+		writeNote(root, id, { op: 'open', who: 'claude', quote: 'Survey', version: 1, text: 'A reason.', at: new Date().toISOString() });
+
+	it('opens a thread signed geoff and answers the folded threads', () => {
+		const { id } = mergeDoc();
+		const res = send(id, note());
+		expect(res.status).toBe(200);
+		expect(res.body.threads).toEqual([
+			{ id: 1, quote: 'the four rules', start: 12, resolved: false, entries: [{ who: 'geoff', text: 'Why later?', at: expect.any(String) }] }
+		]);
+		expect(res.body.standing?.state).toBe('waiting');
+	});
+
+	it('replies, resolves, reopens, and deletes', () => {
+		const { id } = mergeDoc();
+		claudeThread(id);
+		expect(send(id, { op: 'reply', thread: 1, text: 'Fine.' }).body.threads?.[0].entries.map((e) => e.who)).toEqual(['claude', 'geoff']);
+		expect(send(id, { op: 'resolve', thread: 1, resolved: true }).body.threads?.[0].resolved).toBe(true);
+		expect(send(id, { op: 'resolve', thread: 1, resolved: false }).body.threads?.[0].resolved).toBe(false);
+		// A thread's id is the number of the record that opened it, here the fifth.
+		expect(send(id, note()).body.threads?.map((t) => t.id)).toEqual([1, 5]);
+		const res = send(id, { op: 'delete', thread: 5 });
+		expect(res.status).toBe(200);
+		expect(res.body.threads?.map((t) => t.id)).toEqual([1]);
+		expect(readThreads(root, id).deleted).toEqual([5]);
+	});
+
+	it('takes a note while the document is decided', () => {
+		const { id } = mergeDoc();
+		geoffNote(id);
+		send(id, { op: 'decide', action: 'sendback', answers: {} });
+		expect(send(id, note()).status).toBe(200);
+	});
+
+	const refusals: [string, (id: string) => object, number, string][] = [
+		[
+			'a handed document',
+			(id) => {
+				writeDecision(root, id, { action: 'read', at: new Date().toISOString() });
+				writeDecision(root, id, { action: 'handed', at: new Date().toISOString(), decision: 1 });
+				return note();
+			},
+			409,
+			NOTES.closed
+		],
+		[
+			'a withdrawn document',
+			(id) => {
+				writeDecision(root, id, { action: 'withdraw', at: new Date().toISOString() });
+				return note();
+			},
+			409,
+			NOTES.closed
+		],
+		['a note over 4,000 code points', () => note('é'.repeat(4001)), 400, NOTES.tooLong(4001)],
+		['a reply over 4,000 code points', () => ({ op: 'reply', thread: 1, text: 'x'.repeat(4002) }), 400, NOTES.tooLong(4002)],
+		['an empty note', () => note('  \n '), 400, DOC.badRequest],
+		['a version above the newest', () => note('Why?', { version: 2 }), 400, DOC.badRequest],
+		['a note with no quote', () => note('Why?', { quote: '' }), 400, DOC.badRequest],
+		['a reply to an unknown thread', () => ({ op: 'reply', thread: 7, text: 'x' }), 400, DOC.badRequest],
+		[
+			'a reply to a deleted thread',
+			(id) => {
+				writeNote(root, id, { op: 'delete', thread: 1, at: new Date().toISOString() });
+				return { op: 'reply', thread: 1, text: 'x' };
+			},
+			400,
+			DOC.badRequest
+		],
+		['a resolve of an unknown thread', () => ({ op: 'resolve', thread: 7, resolved: true }), 400, DOC.badRequest],
+		['a delete of a thread with an entry not Geoff’s', (id) => (claudeThread(id), { op: 'delete', thread: 2 }), 400, DOC.badRequest]
+	];
+	for (const [label, make, status, message] of refusals) {
+		it(`refuses ${label} with ${status}, writing nothing`, () => {
+			const { id } = mergeDoc();
+			geoffNote(id);
+			const body = make(id);
+			const before = notes(id);
+			const res = send(id, body);
+			expect([res.status, res.body.message]).toEqual([status, message]);
+			expect(notes(id)).toBe(before);
+		});
+	}
+
+	it('answers a note on a specimen with 404', () => {
+		const res = send('markdown', note());
+		expect([res.status, res.body.message]).toEqual([404, DOC.specimen]);
+	});
+});
+
+describe('a send-back with nothing to act on', () => {
+	const sendback = (id: string, answers: Record<string, number>) => send(id, { op: 'decide', action: 'sendback', answers });
+
+	it('is refused with 400 when no note waits and every pick is the recommended one', () => {
+		const { id, questions } = mergeDoc();
+		for (const answers of [recommended(questions), {}, { q1: 0 }]) {
+			const res = sendback(id, answers);
+			expect([res.status, res.body.message]).toEqual([400, DOC.nothingToSendBack]);
+		}
+		expect(records(id)).toEqual([]);
+	});
+
+	it('is refused when the only threads are resolved or end with a session’s entry', () => {
+		const { id, questions } = mergeDoc();
+		geoffNote(id);
+		writeNote(root, id, { op: 'reply', thread: 1, who: 'claude', text: 'Because.', at: new Date().toISOString() });
+		geoffNote(id);
+		writeNote(root, id, { op: 'resolve', thread: 3, resolved: true, who: 'geoff', at: new Date().toISOString() });
+		expect(sendback(id, recommended(questions)).status).toBe(400);
+		expect(records(id)).toEqual([]);
+	});
+
+	it('is recorded once a note of Geoff’s waits, or with one answer moved', () => {
+		const noted = mergeDoc();
+		geoffNote(noted.id);
+		expect(sendback(noted.id, recommended(noted.questions)).status).toBe(200);
+		const moved = mergeDoc();
+		expect(sendback(moved.id, { ...recommended(moved.questions), q1: 1 }).status).toBe(200);
+		expect(records(moved.id).map((r) => r.action)).toEqual(['sendback']);
+	});
+
+	it('counts any pick on a question with no recommended option as a change', () => {
+		const source = '---\nkind: design\n---\n# Pick a name\n\nTwo names are left.\n\n:::question The name\n- **Cairn**\n- **Survey**\n:::\n';
+		const id = createDocument(root, source, { kind: 'design', title: 'Pick a name' }).id;
+		expect(sendback(id, {}).status).toBe(400);
+		expect(sendback(id, { q1: 0 }).status).toBe(200);
+	});
+
+	it('still answers 409 handoffAfter on a handed approve', () => {
+		const { id, questions } = mergeDoc();
+		send(id, { op: 'decide', action: 'approve', answers: recommended(questions) });
+		writeDecision(root, id, { action: 'handed', at: new Date().toISOString(), decision: 1 });
+		const res = sendback(id, recommended(questions));
+		expect([res.status, res.body.message]).toEqual([409, DOC.handoffAfter]);
 	});
 });
