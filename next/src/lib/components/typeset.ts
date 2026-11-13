@@ -3,12 +3,13 @@
  * in the prose, and no address for an image the queue doesn't serve.
  */
 
-const TAG = /<[^>]*>/g;
+/** A tag, read past a `>` inside a quoted attribute value. */
+const TAG = /<(?:[^>"']|"[^"]*"|'[^']*')*>/g;
 const CODE = new Set(['code', 'pre', 'kbd', 'samp']);
 /** Tags a sentence runs through, so a quote after one keeps the text before it in view. */
 const INLINE = new Set(['a', 'abbr', 'b', 'del', 'em', 'i', 'ins', 'mark', 's', 'small', 'span', 'strong', 'sub', 'sup']);
 const PIECE = /&quot;|&#34;|&#39;|&#x27;|&[a-z0-9#]+;|[\s\S]/gi;
-const OPENS_AFTER = /[\s([{\-–—]/;
+const OPENS_AFTER = /[\s([{\-–—“‘]/;
 const WORD = /[\p{L}\p{N}]/u;
 
 function quotes(text: string, before: string): { text: string; last: string } {
@@ -19,10 +20,11 @@ function quotes(text: string, before: string): { text: string; last: string } {
 		const double = piece === '"' || p === '&quot;' || p === '&#34;';
 		const single = piece === "'" || p === '&#39;' || p === '&#x27;';
 		const opens = prev === '' || OPENS_AFTER.test(prev);
-		if (double) out += opens ? '“' : '”';
-		else if (single) out += WORD.test(prev) || !opens ? '’' : '‘';
-		else out += piece;
-		prev = piece.length === 1 ? piece : double || single ? (double ? '"' : "'") : ';';
+		let glyph = piece;
+		if (double) glyph = opens ? '“' : '”';
+		else if (single) glyph = WORD.test(prev) || !opens ? '’' : '‘';
+		out += glyph;
+		prev = glyph.length === 1 ? glyph : ';';
 	}
 	return { text: out, last: prev };
 }
@@ -67,22 +69,35 @@ export function curly(html: string): string {
 	return out;
 }
 
-const IMG = /<img\b[^>]*>/gi;
-const SRC = /\s+src\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]*))/i;
+const IMAGE = /<(img|source)\b((?:[^>"']|"[^"]*"|'[^']*')*)>/gi;
+const ATTR = /(\s+)([^\s"'>/=]+)(?:(\s*=\s*)("[^"]*"|'[^']*'|[^\s"'=<>`]+))?/g;
 const OUTSIDE = /^(?:[a-z][a-z0-9+.-]*:|[/\\]{2})/i;
 
+/** Whether `address` points outside the queue: any scheme but `data:`, or a `//host` path. */
+function outside(address: string): boolean {
+	const a = address.replace(/[\s\u0000-\u001f]/g, '');
+	return !/^data:/i.test(a) && OUTSIDE.test(a);
+}
+
+/** An attribute value without its quotes. */
+const unquote = (value: string) => (/^["']/.test(value) ? value.slice(1, -1) : value);
+
 /**
- * Removes the `src` of every `<img>` in `html` whose address is outside the queue, so the page
- * never asks another host for an image. A path on the queue and a `data:` address are kept, as is
- * every `alt`.
+ * Removes every `src` and `srcset` of an `<img>` or `<source>` in `html` that names an address
+ * outside the queue. The page then never asks another host for an image. A path on the queue, a
+ * `data:` address, and every `alt` stay. Attributes are read one by one: a `src=` inside another
+ * attribute's value is text.
  */
 export function localImages(html: string): string {
-	return html.replace(IMG, (img) => {
-		const m = SRC.exec(img);
-		if (!m) return img;
-		const address = (m[1] ?? m[2] ?? m[3] ?? '').replace(/[\s\u0000-\u001f]/g, '');
-		if (/^data:/i.test(address) || !OUTSIDE.test(address)) return img;
-		return img.slice(0, m.index) + img.slice(m.index + m[0].length);
+	return html.replace(IMAGE, (whole, name: string, attrs: string) => {
+		const kept = attrs.replace(ATTR, (attr: string, _space: string, key: string, _eq?: string, value?: string) => {
+			const k = key.toLowerCase();
+			if (value === undefined || (k !== 'src' && k !== 'srcset')) return attr;
+			const v = unquote(value);
+			const addresses = k === 'src' ? [v] : v.split(',').map((c) => c.trim().split(/\s+/)[0] ?? '');
+			return addresses.some(outside) ? '' : attr;
+		});
+		return kept === attrs ? whole : `<${name}${kept}>`;
 	});
 }
 

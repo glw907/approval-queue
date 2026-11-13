@@ -52,7 +52,7 @@ week, grouped by tool.
 				<h3 class="mt-7 font-semibold">{group.tool}</h3>
 				<div class="site-contour-rule mt-1"></div>
 				<ul class="mt-3 grid gap-3">
-					{#each group.lines as line (line.number)}
+					{#each group.lines as line (`${line.number} ${line.at}`)}
 						<li class="prose-doc">
 							{@html line.html}
 							<a

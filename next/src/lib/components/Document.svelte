@@ -43,7 +43,7 @@ recommended one. The decide buttons are drawn and record nothing; pass A4 makes 
 				<div class="doc-meta mt-4" data-no-notes>
 					<p>{DOC.merges(doc.prs.length, doc.tool)}</p>
 					<ol class="mt-1 grid gap-0.5">
-						{#each doc.prs as pr, i (pr.number)}
+						{#each doc.prs as pr, i (pr.url)}
 							<li class="flex flex-wrap items-baseline gap-x-3">
 								<span class="text-base-content">{DOC.prLine(i + 1, pr.words, pr.number)}</span>
 								<a href={pr.url} target="_blank" rel="noreferrer" class="inline-flex items-center gap-1">

@@ -40,6 +40,15 @@ describe('curly', () => {
 	it('takes up text again after a code element closes', () => {
 		expect(curly('<p><code>"a"</code> then "b"</p>')).toBe('<p><code>"a"</code> then “b”</p>');
 	});
+
+	it('reads a tag past a > inside a quoted attribute value', () => {
+		const html = '<img alt="x>y" src="/a.png">';
+		expect(curly(html)).toBe(html);
+	});
+
+	it('opens a quote straight after an opening quote', () => {
+		expect(curly(`<p>"'x'"</p>`)).toBe('<p>“‘x’”</p>');
+	});
 });
 
 describe('localImages', () => {
@@ -59,6 +68,21 @@ describe('localImages', () => {
 	it('removes an address in single quotes or with no quotes', () => {
 		expect(localImages("<img alt='c' src='http://x.test/y'>")).toBe("<img alt='c'>");
 		expect(localImages('<img src=http://x.test/y alt="e">')).toBe('<img alt="e">');
+	});
+
+	it('removes a srcset that names a remote address, on img and source', () => {
+		expect(localImages('<img srcset="/a.png 1x, https://example.com/b.png 2x" alt="s">')).toBe('<img alt="s">');
+		expect(localImages('<source srcset="https://example.com/b.webp" type="image/webp">')).toBe('<source type="image/webp">');
+		const local = '<img srcset="/a.png 1x, /b.png 2x" alt="l">';
+		expect(localImages(local)).toBe(local);
+	});
+
+	it('reads src= inside another attribute as text', () => {
+		expect(localImages('<img alt="a src=x" src="https://example.com/c.png">')).toBe('<img alt="a src=x">');
+	});
+
+	it('reads a tag past a > inside a quoted attribute value', () => {
+		expect(localImages('<img alt="x>y" src="https://example.com/d.png">')).toBe('<img alt="x>y">');
 	});
 });
 

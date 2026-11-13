@@ -58,7 +58,7 @@ export function merged(root: string, now = Date.now()): MergedGroup[] {
 		if (Date.parse(line.at) < since) continue;
 		let group = groups.get(line.repo);
 		if (!group) groups.set(line.repo, (group = { tool: toolName(line.repo), repo: line.repo, lines: [] }));
-		group.lines.push({ number: line.number, html: curly(renderInline(line.sentence)), at: line.at });
+		group.lines.push({ number: line.number, html: typeset(renderInline(line.sentence)), at: line.at });
 	}
 	return [...groups.values()];
 }
