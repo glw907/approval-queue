@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { parse } from '#lib/doc/parse.ts';
-import { createDocument, listDocuments, readDecisions, readDocument, readNamed, writeDecision } from '#lib/store/store.ts';
+import { createDocument, listDocuments, readDecisions, readDocument, readNamed, writeDecision, writeNamed } from '#lib/store/store.ts';
 
 const CLI = fileURLToPath(new URL('./index.js', import.meta.url));
 const MOCKUP = fileURLToPath(new URL('../../docs/mockup/', import.meta.url));
@@ -187,6 +187,91 @@ describe('send', () => {
 		expect(result.code).toBe(1);
 		expect(result.err).toContain('is merged.');
 		expect(listDocuments(root).documents).toEqual([]);
+	});
+});
+
+describe('send --returns', () => {
+	const OLD_HEADS = [{ repo: 'glw907/workstation', number: 230, head: 'old230' }];
+
+	/** A merge document sent back, its records ending as `tail` leaves them, with answers and old heads. */
+	function sentBack(tail: object[] = [{ action: 'sendback', at: ago(30) }, { action: 'handed', at: ago(5), decision: 1 }]) {
+		const id = stored(MERGE, 'merge');
+		writeNamed(root, id, 'heads.json', OLD_HEADS);
+		writeNamed(root, id, 'answers.json', { q1: 1 });
+		for (const record of tail) writeDecision(root, id, record as Parameters<typeof writeDecision>[2]);
+		return id;
+	}
+
+	function revision(): string {
+		const path = join(dir, 'revised.md');
+		writeFileSync(path, readFileSync(MERGE, 'utf8').replace(/\n\n/, '\n\nRevised after the send-back.\n\n'));
+		return path;
+	}
+
+	/** What a refusal must leave untouched. */
+	const snapshot = (id: string) => ({
+		versions: readDocument(root, id).meta.versions,
+		records: readDecisions(root, id),
+		heads: readNamed(root, id, 'heads.json'),
+		answers: readNamed(root, id, 'answers.json')
+	});
+
+	it('adds the version, rewrites heads, empties answers, and waits for the next decision', async () => {
+		const id = sentBack();
+		const sent = start('send', '--returns', id, revision());
+		expect(await until(() => sent.seen.err.includes('waiting for a decision'), 10000)).toBe(true);
+		expect(sent.seen.err).toContain(`returned ${id} as version 2`);
+		expect(readDocument(root, id).meta.versions).toBe(2);
+		expect(readDocument(root, id).source).toContain('Revised after the send-back.');
+		expect(readNamed(root, id, 'heads.json')).toEqual(
+			[230, 231, 232].map((number) => ({ repo: 'glw907/workstation', number, head: `head${number}` }))
+		);
+		expect(readNamed(root, id, 'answers.json')).toEqual({});
+		expect(readDecisions(root, id).at(-1)).toMatchObject({ action: 'returned', version: 2 });
+		writeDecision(root, id, { action: 'approve', at: ago(25) });
+		expect(await Promise.race([sent.done, sleep(5000).then(() => 'late')])).toBe(0);
+		expect(JSON.parse(sent.seen.out)).toMatchObject({ id, action: 'approve' });
+		expect(readDecisions(root, id).map((r) => r.action)).toEqual(['sendback', 'handed', 'returned', 'approve', 'handed']);
+	}, 20000);
+
+	const refusals: [string, () => string, string][] = [
+		['a waiting document', () => sentBack([]), 'is waiting for a decision'],
+		['a send-back not handed over', () => sentBack([{ action: 'sendback', at: ago(1) }]), 'not handed over yet'],
+		[
+			'a handed approve',
+			() => sentBack([{ action: 'approve', at: ago(30) }, { action: 'handed', at: ago(5), decision: 1 }]),
+			'handed over as approve'
+		],
+		['a withdrawn document', () => sentBack([{ action: 'withdraw', at: ago(5) }]), 'is withdrawn']
+	];
+	for (const [label, make, words] of refusals) {
+		it(`refuses ${label}, changing nothing`, () => {
+			const id = make();
+			const before = snapshot(id);
+			const { code, err } = run('send', '--returns', id, revision());
+			expect(code).toBe(1);
+			expect(err).toContain(words);
+			expect(snapshot(id)).toEqual(before);
+		});
+	}
+
+	it('refuses a changed kind and a failing check, changing nothing', () => {
+		const id = sentBack();
+		const before = snapshot(id);
+		let result = run('send', '--returns', id, REPORT);
+		expect(result.code).toBe(1);
+		expect(result.err).toContain('a return keeps the kind');
+		serve(231, { state: 'MERGED', isDraft: false, headRefOid: 'head231', statusCheckRollup: PASSED });
+		result = run('send', '--returns', id, revision());
+		expect(result.code).toBe(1);
+		expect(result.err).toContain('is merged.');
+		expect(snapshot(id)).toEqual(before);
+	});
+
+	it('refuses an unknown id, and takes exactly an id and a file', () => {
+		expect(run('send', '--returns', '20260101-000000-abcdef', revision())).toMatchObject({ code: 1 });
+		expect(run('send', '--returns', sentBack()).code).toBe(2);
+		expect(run('send', '--returns', sentBack(), revision(), 'extra').code).toBe(2);
 	});
 });
 

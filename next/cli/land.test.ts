@@ -139,6 +139,20 @@ describe('land', () => {
 		expect(merges()).toHaveLength(1);
 	});
 
+	it('holds a pull request in a document returned after a send-back', () => {
+		const source = readFileSync(join(MOCKUP, 'content/10-merge-gaps.md'), 'utf8');
+		const id = createDocument(root, source, { kind: 'merge', title: parse(source).doc.title }).id;
+		const at = new Date().toISOString();
+		writeDecision(root, id, { action: 'sendback', at });
+		writeDecision(root, id, { action: 'handed', at, decision: 1 });
+		writeDecision(root, id, { action: 'returned', at, version: 2 });
+		serve('pr-230.json', view());
+		const held = run(['land', 'glw907/workstation#230', 'Fixes it.']);
+		expect(held.code).toBe(2);
+		expect(held.err).toContain(id);
+		expect(ghLog()).toBe('');
+	});
+
 	it('exits 1 with the error from gh when the merge fails', () => {
 		writeFileSync(join(dir, 'merge-fails'), '');
 		const { code, err } = land();

@@ -6,6 +6,8 @@ const approve = { action: 'approve', at };
 const undo = { action: 'undo', at };
 const withdraw = { action: 'withdraw', at };
 const handed = (decision: number) => ({ action: 'handed', at, decision });
+const sendback = { action: 'sendback', at };
+const returned = { action: 'returned', at, version: 2 };
 
 describe('fold', () => {
 	const cases: [string, Parameters<typeof fold>[0], string, number?][] = [
@@ -21,7 +23,14 @@ describe('fold', () => {
 		['decision, undo, decision, stale handed', [approve, undo, approve, handed(1)], 'decided', 3],
 		['decision, handed, undo', [approve, handed(1), undo], 'handed', 1],
 		['decision, handed, withdraw', [approve, handed(1), withdraw], 'handed', 1],
-		['withdraw, undo', [withdraw, undo], 'withdrawn']
+		['withdraw, undo', [withdraw, undo], 'withdrawn'],
+		['send-back, handed, returned', [sendback, handed(1), returned], 'waiting'],
+		['send-back, handed, returned, decision', [sendback, handed(1), returned, approve], 'decided', 4],
+		['send-back, handed, returned, decision, handed', [sendback, handed(1), returned, approve, handed(4)], 'handed', 4],
+		['returned while waiting', [returned], 'waiting'],
+		['send-back, returned before the hand-off', [sendback, returned], 'decided', 1],
+		['approve, handed, returned', [approve, handed(1), returned], 'handed', 1],
+		['withdraw, returned', [withdraw, returned], 'withdrawn']
 	];
 	for (const [label, records, state, n] of cases) {
 		it(`reads ${label} as ${state}`, () => {
