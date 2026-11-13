@@ -90,8 +90,15 @@ export function merge(id: string): number {
 		const ref = `${pr.repo}#${pr.number}`;
 		const merged = gh(['pr', 'merge', String(pr.number), '--repo', pr.repo, '--merge', '--match-head-commit', pr.head]);
 		if (!merged.ok) return refuse(`GitHub refused to merge ${ref}: ${merged.error}`);
-		recordMerged(root, { repo: pr.repo, number: pr.number, sentence: words.get(ref) ?? '', at: new Date().toISOString() });
 		process.stdout.write(`merged ${ref} at ${pr.head}\n`);
+		try {
+			recordMerged(root, { repo: pr.repo, number: pr.number, sentence: words.get(ref) ?? '', at: new Date().toISOString() });
+		} catch (err) {
+			if (!(err instanceof StoreError)) throw err;
+			// A rerun skips a merged pull request, so the front page would never list this one.
+			process.stderr.write(`approval-queue: ${ref} is merged, but the queue couldn't record it: ${err.message}\n`);
+			return 1;
+		}
 	}
 	return 0;
 }

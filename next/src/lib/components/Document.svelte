@@ -123,11 +123,25 @@
 			busy = false;
 		}
 		await tick();
-		const target = failed?.retry ? '[data-retry]' : !failed && body.op === 'undo' ? 'button:not([disabled])' : '[data-decided]';
-		(decideEl?.querySelector<HTMLElement>(target) ?? decideEl)?.focus();
+		if (failed?.retry) land('[data-retry]');
+		else if (!failed && body.op === 'undo') land(ENABLED);
+		else land('[data-decided]', ENABLED);
+	}
+
+	/** A control a keyboard can use: neither disabled nor marked so. */
+	const ENABLED = 'button:not([disabled],[aria-disabled="true"])';
+
+	/** Focuses the first of `targets` the decide section draws, or the section itself. */
+	function land(...targets: string[]) {
+		for (const t of targets) {
+			const el = decideEl?.querySelector<HTMLElement>(t);
+			if (el) return el.focus();
+		}
+		decideEl?.focus();
 	}
 
 	function decide(action: Action) {
+		if (action === 'approve' && unanswered.length) return;
 		const given = Object.entries($state.snapshot(picks)).filter((e): e is [string, number] => e[1] !== undefined);
 		return act({ op: 'decide', action, answers: Object.fromEntries(given) });
 	}
@@ -139,9 +153,11 @@
 		if (seq !== answerSeq[body.question]) return;
 		answerBusy[body.question] = false;
 		answerFailures[body.question] = failed ?? undefined;
-		if (!failed || !retry) return;
+		if (!retry) return;
+		// A recorded retry takes its block, and the focused button, away; focus goes back to the pick.
 		await tick();
-		articleEl?.querySelector<HTMLElement>(`[data-retry-answer="${body.question}"]`)?.focus();
+		const target = failed ? `[data-retry-answer="${body.question}"]` : `input[name="${doc.id}-${body.question}"]:checked`;
+		articleEl?.querySelector<HTMLElement>(target)?.focus();
 	}
 
 	// While a decision waits for the hand-off, ask the queue where it stands every 2 seconds and
@@ -162,8 +178,8 @@
 				const held = !!decideEl?.contains(document.activeElement);
 				await invalidateAll();
 				await tick();
-				// The hand-off takes the Undo button away; focus that sat on it lands on the new line.
-				if (held && !decideEl?.contains(document.activeElement)) decideEl?.querySelector<HTMLElement>('[data-decided]')?.focus();
+				// The hand-off, or an Undo from another tab, takes the focused button away.
+				if (held && !decideEl?.contains(document.activeElement)) land('[data-decided]', ENABLED);
 			} catch {
 				// The queue is down or slow: the page keeps what it shows and asks again.
 			} finally {
@@ -250,7 +266,7 @@
 									class="radio radio-sm radio-primary"
 									name="{doc.id}-{seg.id}"
 									value={i}
-									disabled={busy || standing.state !== 'waiting'}
+									disabled={busy || !!shown?.retry || standing.state !== 'waiting'}
 									bind:group={picks[seg.id]}
 									onchange={() => answer({ op: 'answer', question: seg.id, pick: i })}
 								/>
@@ -365,8 +381,7 @@
 										<button
 											type="button"
 											class="btn btn-primary"
-											disabled={unanswered.length > 0}
-											aria-disabled={busy || undefined}
+											aria-disabled={busy || unanswered.length > 0 || undefined}
 											aria-describedby={unanswered.length ? `${doc.id}-unanswered` : undefined}
 											onclick={() => decide('approve')}
 										>
