@@ -1,6 +1,7 @@
 import { storeRoot } from '#lib/store/store.ts';
 import { check } from './check.ts';
 import { land } from './land.ts';
+import { merge } from './merge.ts';
 import { ghView } from './pr.ts';
 import { restart } from './restart.ts';
 import { send } from './send.ts';
@@ -29,6 +30,8 @@ async function dispatch(): Promise<number> {
 			return withdraw(arg);
 		case 'land':
 			return land(arg, rest[0] ?? '');
+		case 'merge':
+			return merge(arg);
 		case 'restart':
 			return restart();
 		default:

@@ -144,7 +144,7 @@ function check(ok, message) {
 	console.log(`${ok ? 'ok' : 'FAIL'}: ${message}`);
 }
 
-function chromium() {
+export function chromium() {
 	const home = process.env.HOME ?? '';
 	const core = process.env.PLAYWRIGHT_CORE ?? `${home}/.npm/_npx/9833c18b2d85bc59/node_modules/playwright-core`;
 	const executablePath = process.env.CHROMIUM ?? `${home}/.cache/ms-playwright/chromium-1254/chrome-linux64/chrome`;
@@ -157,7 +157,7 @@ function chromium() {
  *
  * @param {string} command @param {string[]} args @param {object} options @param {string} url
  */
-async function serve(command, args, options, url) {
+export async function serve(command, args, options, url) {
 	const child = spawn(command, args, { stdio: ['ignore', 'ignore', 'inherit'], ...options });
 	for (let i = 0; i < 300; i++) {
 		if (child.exitCode !== null) throw new Error(`${command} exited ${child.exitCode} at start`);
@@ -502,7 +502,7 @@ async function checkControls(browser, base, ids) {
 		const file = name === 'markdown' || name === 'long' ? join(MOCKUP, 'specimen', `${name}.md`) : join(MOCKUP, 'content', `${name}.md`);
 		const { doc } = parse(readFileSync(file, 'utf8'));
 		const options = doc.segments.reduce((n, s) => n + (s.type === 'question' ? s.options.length : 0), 0);
-		const buttons = doc.kind === 'report' ? 0 : 2;
+		const buttons = doc.kind === 'report' ? 1 : 2;
 		await page.goto(base + path);
 		await settle(page);
 		const r = await page.evaluate(() => ({

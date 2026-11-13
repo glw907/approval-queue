@@ -58,3 +58,17 @@ thinkpad-x1 has not taken the cutover. Its first session there runs, before any 
 
 `workstation-sync` never rebuilds the app, so this step stays here until it is done. Open items are
 in `BACKLOG.md`.
+
+## Stop
+
+**Pass A4, close, on `aq-a4` at 3617fa6 (PR #22, draft).** Acceptance item 6 is unmet, as Geoff's 2026-11-12 ruling allowed. The executor's launch goal accepts a ready finish only with evidence that every item is met, and round standing answer 12 parks a pass with an unmet item. So the pass parks here instead of landing.
+
+**What was done.** The ruling's rework landed in 2fc04c0. Its final `standards:daisyui-a11y-reviewer` read confirmed read 5's three warnings fixed, and returned "0 Blocker, 0 Major, 6 Minor (4 on the answer-refusal path)". The whole-branch `standards:diff-reviewer` returned accept with 0 blocking, and its Minor findings were folded in 3617fa6. The gate is green on 3617fa6. On a fresh build, the decide checks print 55 ok lines and the page checks 103. Items 1 to 5 are met. The PR body carries the ruling under Decisions, sets `Calls: none`, and lists the four answer-path findings for A5.
+
+**Question.** Should A4 land at 3617fa6 with item 6 unmet, as the ruling says?
+
+**Choices.**
+
+1. *(Recommended)* Land PR #22 as it stands, under the ruling. The four answer-path findings go to A5.
+2. Fold the four answer-path findings and run one more read first. This reopens the loop the ruling closed.
+3. Hold A4 until A5 and land the two together.

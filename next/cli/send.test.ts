@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { parse } from '#lib/doc/parse.ts';
-import { createDocument, listDocuments, readDecisions, readDocument, writeDecision } from '#lib/store/store.ts';
+import { createDocument, listDocuments, readDecisions, readDocument, readNamed, writeDecision } from '#lib/store/store.ts';
 
 const CLI = fileURLToPath(new URL('./index.js', import.meta.url));
 const MOCKUP = fileURLToPath(new URL('../../docs/mockup/', import.meta.url));
@@ -90,7 +90,7 @@ beforeEach(() => {
 	mkdirSync(state);
 	writeFileSync(join(dir, 'gh'), STUB);
 	chmodSync(join(dir, 'gh'), 0o755);
-	for (const n of ALL_PRS) serve(n, { state: 'OPEN', isDraft: false, statusCheckRollup: PASSED });
+	for (const n of ALL_PRS) serve(n, { state: 'OPEN', isDraft: false, headRefOid: `head${n}`, statusCheckRollup: PASSED });
 });
 
 afterEach(() => {
@@ -156,6 +156,24 @@ describe('send', () => {
 		expect(await until(() => collected.seen.out !== '', 5000)).toBe(true);
 		expect(JSON.parse(collected.seen.out)).toMatchObject({ id, action: 'approve', seq: 2 });
 	}, 20000);
+
+	it('stores each pull request head it checked, in the document order', async () => {
+		const sent = start('send', MERGE);
+		expect(await until(() => sent.seen.err.includes('stored '), 10000)).toBe(true);
+		const id = /stored (\S+?);/.exec(sent.seen.err)![1];
+		expect(readNamed(root, id, 'heads.json')).toEqual(
+			[230, 231, 232].map((number) => ({ repo: 'glw907/workstation', number, head: `head${number}` }))
+		);
+		expect(readFileSync(join(dir, 'gh.log'), 'utf8')).toContain('--json state,isDraft,headRefOid,statusCheckRollup');
+	}, 20000);
+
+	it('stores nothing when GitHub gives no head for a pull request', () => {
+		serve(231, { state: 'OPEN', isDraft: false, statusCheckRollup: PASSED });
+		const result = run('send', MERGE);
+		expect(result.code).toBe(1);
+		expect(result.err).toContain('GitHub gave no head commit for glw907/workstation#231, so nothing was stored');
+		expect(listDocuments(root).documents).toEqual([]);
+	});
 
 	it('refuses a pending check and a merged pull request, storing nothing', () => {
 		serve(231, { state: 'OPEN', isDraft: false, statusCheckRollup: [{ name: 'gate', status: 'IN_PROGRESS' }] });

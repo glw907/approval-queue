@@ -3,7 +3,7 @@ import { HANDOFF_MS, fold, type State } from './state.ts';
 
 /** The usage line, printed on stderr with exit 2 for an unknown subcommand or a wrong argument. */
 export const USAGE =
-	'usage: approval-queue check|send <doc.md> | collect|withdraw <id> | land <owner/repo#n> <sentence> | restart';
+	'usage: approval-queue check|send <doc.md> | collect|withdraw|merge <id> | land <owner/repo#n> <sentence> | restart';
 
 const POLL_MS = 1000;
 

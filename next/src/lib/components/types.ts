@@ -55,3 +55,48 @@ export interface PageDoc {
 	outline: OutlineHeading[];
 	questions: number;
 }
+
+/** A row of the rail's "Decided today": a document decided or handed today, and its decision. */
+export interface DecidedRow extends Row {
+	action: 'approve' | 'sendback' | 'read';
+	/** ISO time of the decision. */
+	at: string;
+}
+
+/** The four states a document's records fold to. */
+export type StateName = 'waiting' | 'decided' | 'handed' | 'withdrawn';
+
+/** One answer as a decision records it: the option's index and its label as the page shows it. */
+export interface RecordedAnswer {
+	pick: number;
+	label: string;
+}
+
+/** The decision a decided or handed document shows. */
+export interface DecisionView {
+	action: 'approve' | 'sendback' | 'read';
+	at: string;
+	answers?: Record<string, RecordedAnswer>;
+}
+
+/**
+ * Where a document stands, as the page reads it at load and the server answers it after a write:
+ * the folded state, the number of the decision record it rests on, and that decision.
+ */
+export interface DocStanding {
+	state: StateName;
+	/** The current decision's record number, or null while waiting or withdrawn. */
+	n: number | null;
+	/** How many records the document holds, so a waiting spell after an Undo differs from the one before. */
+	seq: number;
+	decision: DecisionView | null;
+}
+
+/**
+ * The server's answer to a decision post: the standing after the write, and on a refusal the
+ * sentence the page shows as its reason. `standing` is null when the document can't be read.
+ */
+export interface DecideAnswer {
+	standing: DocStanding | null;
+	message?: string;
+}
