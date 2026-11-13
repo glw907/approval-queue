@@ -1,6 +1,6 @@
 // The decision checks of pass A4.
 //
-// `node next/tests/decide-checks.mjs` runs six checks against `next/build`, which
+// `node next/tests/decide-checks.mjs` runs seven checks against `next/build`, which
 // `npm run build --prefix next` makes; it builds nothing. Each check clicks a decision on a
 // document page and reads the store from disk to see what the click recorded. It prints one `ok:`
 // or `FAIL:` line per assertion, screenshots each state to `.playwright-mcp/a4/`, and exits 1 on
@@ -15,7 +15,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium, seed, serve } from '../scripts/page-checks.mjs';
 import { parse } from '../src/lib/doc/parse.ts';
-import { createDocument, readDecisions, readNamed, writeNamed } from '../src/lib/store/store.ts';
+import { createDocument, readDecisions, readNamed, writeDecision, writeNamed } from '../src/lib/store/store.ts';
 import { DOC, FRONT, LAYOUT } from '../src/lib/strings.ts';
 
 /** The one port the decision checks use. */
@@ -406,6 +406,97 @@ async function check6(/** @type {Browser} */ browser, /** @type {string} */ name
 	await page.close();
 }
 
+/**
+ * Routes each answer post through `handle`, letting every other request pass.
+ *
+ * @param {Page} page @param {(route: Route) => Promise<void>} handle
+ */
+async function onAnswer(page, handle) {
+	await page.unroute('**/api/**');
+	await page.route('**/api/**', (/** @type {Route} */ route) => {
+		const body = route.request().postData() ?? '';
+		return route.request().method() === 'POST' && body.includes('"op":"answer"') ? handle(route) : route.continue();
+	});
+}
+
+/** @param {Page} page @param {string} test a function body over `el`, the focused element */
+const focusIs = (page, test) =>
+	page.evaluate((/** @type {string} */ body) => {
+		const el = document.activeElement;
+		return !!el && new Function('el', `return (${body});`)(el);
+	}, test);
+
+/**
+ * Check 7: an answer's failure is drawn against the document's standing, and focus moves only
+ * from where the user's focus is.
+ */
+async function check7(/** @type {Browser} */ browser, /** @type {string} */ name) {
+	const id = fresh(name);
+	const { doc } = parse(readFileSync(join(MOCKUP, 'content', `${name}.md`), 'utf8'));
+	const [q1, q2] = /** @type {any[]} */ (doc.segments.filter((s) => s.type === 'question'));
+	/** @param {any} q */
+	const offPick = (q) => (q.options.findIndex((/** @type {any} */ o) => o.recommended) === 0 ? 1 : 0);
+	/** @param {any} q */
+	const radio = (q, n = offPick(q)) => page.locator(`input[name="${id}-${q.id}"]`).nth(n);
+	/** @param {any} q */
+	const blockFor = (q) => page.locator(`[data-question="${q.id}"] [role=alert]`);
+	const page = await newPage(browser);
+	await open(page, id);
+
+	// An answer lost before an approve and an Undo doesn't come back after them.
+	await onAnswer(page, (r) => r.abort('failed'));
+	await radio(q2).check();
+	check(await visible(blockFor(q2).getByText(DOC.answerUnsent)), 'check 7: a lost answer shows answerUnsent under its question');
+	await page.unroute('**/api/**');
+	await approveButton(page).click();
+	await page.getByText(DOC.recorded).waitFor();
+	await undoButton(page).click();
+	await approveButton(page).waitFor();
+	check(!(await blockFor(q2).isVisible()), 'check 7: after an approve and an Undo, the old answer failure is gone');
+	await shot(page, '7-stale-gone');
+
+	// A retried answer refused with no standing leaves focus in its question, never on the body.
+	await onAnswer(page, (r) => r.abort('failed'));
+	await radio(q1).check();
+	await blockFor(q1).getByRole('button', { name: DOC.tryAgain }).waitFor();
+	await onAnswer(page, (r) =>
+		r.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ standing: null, message: DOC.badRequest }) })
+	);
+	await blockFor(q1).getByRole('button', { name: DOC.tryAgain }).focus();
+	await page.keyboard.press('Enter');
+	check(await visible(blockFor(q1).getByText(DOC.badRequest)), 'check 7: the retried answer shows the refusal under its question');
+	await pause(500);
+	check(
+		await focusIs(page, `el.matches('input[type=radio]') && el.name === ${JSON.stringify(`${id}-${q1.id}`)}`),
+		'check 7: after the refused retry, focus is on the question\'s radio'
+	);
+	await shot(page, '7-refused-retry');
+
+	// A refusal that moves the document on leaves focus where the user moved it.
+	/** @type {Route | null} */
+	let held = null;
+	await onAnswer(page, async (r) => {
+		held = r;
+	});
+	// Part one left q2 on its off pick, so this pick is a change, and posts.
+	await radio(q2, 1 - offPick(q2)).check();
+	for (let i = 0; i < 50 && !held; i++) await pause(100);
+	const away = page.locator(`nav.rail a[href^="/d/"]:not([href="/d/${id}"])`).first();
+	await away.focus();
+	const awayHref = await away.getAttribute('href');
+	writeDecision(root, id, { action: 'sendback', at: new Date().toISOString() });
+	check(!!held, 'check 7: the answer post reached the route and is held');
+	await /** @type {any} */ (held)?.continue();
+	check(await visible(decide(page).getByText(DOC.alreadyDecided)), 'check 7: the refusal shows in the decide section once the document moved on');
+	await pause(500);
+	check(
+		await focusIs(page, `el.tagName === 'A' && el.getAttribute('href') === ${JSON.stringify(awayHref)}`),
+		'check 7: focus stays on the link the user moved to'
+	);
+	await shot(page, '7-moved-on');
+	await page.close();
+}
+
 /** The seeded mockup document with the most questions, two or more. */
 function questioned() {
 	const content = join(MOCKUP, 'content');
@@ -436,6 +527,7 @@ async function main() {
 		await run('check 4', () => check4(browser));
 		await run('check 5', () => check5(browser, seeded.ids['30-round-report']));
 		await run('check 6', () => check6(browser, questioned()));
+		await run('check 7', () => check7(browser, questioned()));
 	} finally {
 		await browser?.close();
 		await stop();

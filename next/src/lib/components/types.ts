@@ -87,6 +87,8 @@ export interface DocStanding {
 	state: StateName;
 	/** The current decision's record number, or null while waiting or withdrawn. */
 	n: number | null;
+	/** How many records the document holds, so a waiting spell after an Undo differs from the one before. */
+	seq: number;
 	decision: DecisionView | null;
 }
 

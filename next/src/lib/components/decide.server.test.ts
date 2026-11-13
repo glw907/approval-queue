@@ -250,7 +250,8 @@ describe('the records', () => {
 		send(id, { op: 'decide', action: 'read', answers: {} });
 		const res = send(id, { op: 'undo' });
 		expect(res.status).toBe(200);
-		expect(res.body.standing).toEqual({ state: 'waiting', n: null, decision: null });
+		// The waiting spell after an Undo counts both records, so the page can tell it from the first.
+		expect(res.body.standing).toEqual({ state: 'waiting', n: null, seq: 2, decision: null });
 		expect(records(id)[1]).toEqual({ action: 'undo', at: expect.any(String), of: 1 });
 		send(id, { op: 'decide', action: 'read', answers: {} });
 		send(id, { op: 'undo' });
@@ -353,7 +354,7 @@ describe('repeats and late arrivals', () => {
 describe('the standing a page reads', () => {
 	it('folds the records into state, number, and decision', () => {
 		const { id, questions } = mergeDoc();
-		expect(standingOf(root, id)).toEqual({ state: 'waiting', n: null, decision: null });
+		expect(standingOf(root, id)).toEqual({ state: 'waiting', n: null, seq: 0, decision: null });
 		send(id, { op: 'decide', action: 'approve', answers: recommended(questions) });
 		const standing = standingOf(root, id);
 		expect(standing).toMatchObject({ state: 'decided', n: 1, decision: { action: 'approve' } });

@@ -21,8 +21,8 @@
 	type Action = 'approve' | 'sendback' | 'read';
 	type AnswerBody = { op: 'answer'; question: string; pick: number };
 	type Body = AnswerBody | { op: 'decide'; action: Action; answers: Record<string, number> } | { op: 'undo' };
-	/** Where a document stood, as far as the page compares it. */
-	type Mark = { state: DocStanding['state']; n: number | null };
+	/** Where a document stood, as far as the page compares it. `seq` tells one waiting spell from the next. */
+	type Mark = Pick<DocStanding, 'state' | 'n' | 'seq'>;
 	/**
 	 * A post the queue didn't record: the line saying what, the reason, the body to send again, and
 	 * the standing it was drawn against. `retry` is false for a refusal that moved the document on,
@@ -41,8 +41,8 @@
 
 	const questions = $derived(doc.segments.filter((s): s is Question => s.type === 'question'));
 	const recommended = (q: Question) => q.options.findIndex((o) => o.recommended);
-	const mark = (s: { state: DocStanding['state']; n: number | null }): Mark => ({ state: s.state, n: s.n });
-	const same = (a: Mark, b: Mark) => a.state === b.state && a.n === b.n;
+	const mark = (s: Mark): Mark => ({ state: s.state, n: s.n, seq: s.seq });
+	const same = (a: Mark, b: Mark) => a.state === b.state && a.n === b.n && a.seq === b.seq;
 
 	// The page keys this component on the document's id, so the first document's answers are the
 	// only ones it holds. A stored pick wins over the recommended one, and the decision's record wins
@@ -74,6 +74,14 @@
 	// that moved the document on takes the block away with it.
 	const shown = $derived(failure && same(failure.at, standing) ? failure : null);
 	const answerFailures: Record<string, Failure | undefined> = $state({});
+	/**
+	 * The failure question `qid` draws: only while the document waits, and only in the spell it was
+	 * drawn against, so an answer lost before an approve and an Undo never comes back after them.
+	 */
+	const answerShown = (qid: string) => {
+		const f = answerFailures[qid];
+		return f && standing.state === 'waiting' && same(f.at, standing) ? f : undefined;
+	};
 	const answerBusy: Record<string, boolean> = $state({});
 	/** The latest answer post for each question, so a slower, older reply can't draw over it. */
 	const answerSeq: Record<string, number> = {};
@@ -128,7 +136,6 @@
 		try {
 			failed = await send(body);
 			if (!failed || !failed.retry) await invalidateAll();
-			if (!failed && body.op === 'decide') for (const q of Object.keys(answerFailures)) answerFailures[q] = undefined;
 			if (!failed && body.op === 'undo') said = DOC.undone;
 		} finally {
 			failure = failed;
@@ -158,31 +165,48 @@
 		return act({ op: 'decide', action, answers: Object.fromEntries(given) });
 	}
 
-	async function answer(body: AnswerBody, retry = false) {
-		const seq = (answerSeq[body.question] = (answerSeq[body.question] ?? 0) + 1);
-		answerBusy[body.question] = true;
+	/** Whether focus is in question `qid`: on one of its radios or in its not-recorded block. */
+	function focusIn(qid: string): boolean {
+		const el = document.activeElement;
+		return el instanceof HTMLElement && el.closest('[data-question]')?.getAttribute('data-question') === qid;
+	}
+
+	/** Whether focus is on a control the keyboard can still use, and not lost to the body. */
+	function focusLive(): boolean {
+		const el = document.activeElement;
+		return el instanceof HTMLElement && el !== document.body && el.isConnected && !el.matches(':disabled,[aria-disabled="true"]');
+	}
+
+	/**
+	 * Posts an answer and draws its failure against the document's standing, as `act` does for a
+	 * decision. Focus moves only when it was in this question when the answer came back and the
+	 * redraw took it away.
+	 */
+	async function answer(body: AnswerBody) {
+		const qid = body.question;
+		const seq = (answerSeq[qid] = (answerSeq[qid] ?? 0) + 1);
+		answerBusy[qid] = true;
 		const failed = await send(body);
-		if (seq !== answerSeq[body.question]) return;
-		answerBusy[body.question] = false;
-		if (failed && !failed.retry) {
-			// A refusal can show the document moved on, as when another tab decided it. The page then
-			// redraws, and a question no longer open can't draw the refusal, so the decide section does,
-			// and focus goes there from the radio the redraw disabled.
-			await invalidateAll();
-			if (standing.state !== 'waiting') {
-				answerFailures[body.question] = undefined;
-				if (!busy) failure = failed;
-				await tick();
-				land('[data-decided]', ENABLED);
-				return;
-			}
-		}
-		answerFailures[body.question] = failed ?? undefined;
-		if (!retry) return;
-		// A recorded retry takes its block, and the focused button, away; focus goes back to the pick.
+		if (seq !== answerSeq[qid]) return;
+		answerBusy[qid] = false;
+		const held = focusIn(qid);
+		// A refusal that can't be retried may show the document moved on, as when another tab decided
+		// it, so the page redraws from the queue.
+		if (failed && !failed.retry) await invalidateAll();
+		answerFailures[qid] = failed ?? undefined;
+		// A question no longer open can't draw its refusal, so the decide section does.
+		const moved = !!failed && standing.state !== 'waiting' && same(failed.at, standing);
+		if (moved && !busy) failure = failed;
 		await tick();
-		const target = failed ? `[data-retry-answer="${body.question}"]` : `input[name="${doc.id}-${body.question}"]:checked`;
-		articleEl?.querySelector<HTMLElement>(target)?.focus();
+		if (!held || (focusIn(qid) && focusLive())) return;
+		if (moved) return land('[data-decided]', ENABLED);
+		const radios = `input[name="${doc.id}-${qid}"]:not(:disabled)`;
+		const target =
+			(answerShown(qid)?.retry && articleEl?.querySelector<HTMLElement>(`[data-retry-answer="${qid}"]`)) ||
+			articleEl?.querySelector<HTMLElement>(`${radios}:checked`) ||
+			articleEl?.querySelector<HTMLElement>(radios);
+		if (target) target.focus();
+		else land('[data-decided]', ENABLED);
 	}
 
 	// While a decision waits for the hand-off, ask the queue where it stands every 2 seconds and
@@ -283,8 +307,8 @@
 				{#if seg.type === 'html'}
 					<div class="prose-doc">{@html seg.html}</div>
 				{:else if seg.type === 'question'}
-					{@const lost = standing.state === 'waiting' ? answerFailures[seg.id] : undefined}
-					<fieldset class="question" aria-describedby={lost ? `${doc.id}-${seg.id}-failure-what ${doc.id}-${seg.id}-failure-why` : undefined}>
+					{@const lost = answerShown(seg.id)}
+					<fieldset class="question" data-question={seg.id} aria-describedby={lost ? `${doc.id}-${seg.id}-failure-what ${doc.id}-${seg.id}-failure-why` : undefined}>
 						<legend class="sr-only">{seg.label}</legend>
 						{#each seg.options as o, i (i)}
 							<label class="question-option">
@@ -307,10 +331,10 @@
 						{/each}
 					</fieldset>
 					{#if lost}
-						<div data-no-notes>
+						<div data-no-notes data-question={seg.id}>
 							{@render notRecorded(
 								lost,
-								() => answerBusy[seg.id] || busy || !!shown?.retry || answer(lost.body as AnswerBody, true),
+								() => answerBusy[seg.id] || busy || !!shown?.retry || answer(lost.body as AnswerBody),
 								!!answerBusy[seg.id] || busy || !!shown?.retry,
 								seg.id
 							)}

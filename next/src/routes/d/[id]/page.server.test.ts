@@ -83,7 +83,7 @@ describe('the document page', () => {
 
 	it('gives a specimen the waiting state and no stored answers', async () => {
 		const data = await loaded('markdown');
-		expect(data.standing).toEqual({ state: 'waiting', n: null, decision: null });
+		expect(data.standing).toEqual({ state: 'waiting', n: null, seq: 0, decision: null });
 		expect(data.answers).toEqual({});
 	});
 
@@ -94,6 +94,6 @@ describe('the document page', () => {
 		const report = ids['30-round-report'];
 		const at = new Date().toISOString();
 		writeDecision(join(state, 'store'), report, { action: 'read', at });
-		expect((await loaded(report)).standing).toEqual({ state: 'decided', n: 1, decision: { action: 'read', at } });
+		expect((await loaded(report)).standing).toEqual({ state: 'decided', n: 1, seq: 1, decision: { action: 'read', at } });
 	});
 });

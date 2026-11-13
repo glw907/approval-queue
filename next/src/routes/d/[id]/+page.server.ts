@@ -15,7 +15,7 @@ const SPECIMENS: Record<string, string> = { markdown, long };
 /** A specimen was never sent, so its meta line gives the time the server started. */
 const STARTED = new Date().toISOString();
 
-const WAITING: DocStanding = { state: 'waiting', n: null, decision: null };
+const WAITING: DocStanding = { state: 'waiting', n: null, seq: 0, decision: null };
 
 export const load: PageServerLoad = ({ params }) => {
 	const specimen = Object.hasOwn(SPECIMENS, params.id) ? SPECIMENS[params.id] : undefined;

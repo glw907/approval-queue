@@ -59,9 +59,18 @@ class Refusal {
 
 const DECISIONS = new Set(['approve', 'sendback', 'read']);
 
-function toStanding(state: State): DocStanding {
-	if (state.state === 'waiting' || state.state === 'withdrawn') return { state: state.state, n: null, decision: null };
-	return { state: state.state, n: state.n, decision: view(state.decision) };
+/** A folded state with the number of records it was folded from. */
+type Folded = State & { seq: number };
+
+/** Reads document `id`'s records and folds them. */
+function read(root: string, id: string): Folded {
+	const records = readDecisions(root, id);
+	return { ...fold(records), seq: records.length };
+}
+
+function toStanding(state: Folded): DocStanding {
+	if (state.state === 'waiting' || state.state === 'withdrawn') return { state: state.state, n: null, seq: state.seq, decision: null };
+	return { state: state.state, n: state.n, seq: state.seq, decision: view(state.decision) };
 }
 
 /** The part of a decision record the page draws. */
@@ -73,7 +82,7 @@ function view(record: Decision): DecisionView {
 
 /** Where document `id` stands, folded from its records. */
 export function standingOf(root: string, id: string): DocStanding {
-	return toStanding(fold(readDecisions(root, id)));
+	return toStanding(read(root, id));
 }
 
 /** The picks stored before a decision, `{}` when none are. */
@@ -122,15 +131,15 @@ function checkPick(questions: Question[], qid: string, pick: number): Question {
 }
 
 /** Answers with the standing of a document a refusal didn't stop. */
-const ok = (state: State): Reply => ({ status: 200, body: { standing: toStanding(state) } });
+const ok = (state: Folded): Reply => ({ status: 200, body: { standing: toStanding(state) } });
 
 function answer(root: string, id: string, doc: Doc, body: Extract<Body, { op: 'answer' }>): Reply {
 	checkPick(questionsOf(doc), body.question, body.pick);
-	const state = fold(readDecisions(root, id));
+	const state = read(root, id);
 	if (state.state === 'withdrawn') throw new Refusal(409, DOC.withdrawn, toStanding(state));
 	if (state.state !== 'waiting') throw new Refusal(409, DOC.alreadyDecided, toStanding(state));
 	writeNamed(root, id, 'answers.json', { ...answersOf(root, id), [body.question]: body.pick });
-	return ok(fold(readDecisions(root, id)));
+	return ok(read(root, id));
 }
 
 function decide(root: string, id: string, doc: Doc, source: string, body: Extract<Body, { op: 'decide' }>): Reply {
@@ -143,7 +152,7 @@ function decide(root: string, id: string, doc: Doc, source: string, body: Extrac
 		answers[qid] = { pick, label: q.options[pick].label };
 	}
 
-	const before = fold(readDecisions(root, id));
+	const before = read(root, id);
 	if (before.state === 'withdrawn') throw new Refusal(409, DOC.withdrawn, toStanding(before));
 	if (before.state !== 'waiting') {
 		if (before.decision.action === body.action) return ok(before);
@@ -167,7 +176,7 @@ function decide(root: string, id: string, doc: Doc, source: string, body: Extrac
 	}
 	writeDecision(root, id, record);
 
-	const after = fold(readDecisions(root, id));
+	const after = read(root, id);
 	if (after.state === 'withdrawn') throw new Refusal(409, DOC.withdrawn, toStanding(after));
 	if (after.state === 'waiting' || after.decision.action !== body.action) {
 		throw new Refusal(409, DOC.alreadyDecided, toStanding(after));
@@ -177,7 +186,7 @@ function decide(root: string, id: string, doc: Doc, source: string, body: Extrac
 
 function undo(root: string, id: string): Reply {
 	const records = readDecisions(root, id);
-	const before = fold(records);
+	const before: Folded = { ...fold(records), seq: records.length };
 	if (before.state === 'withdrawn') throw new Refusal(409, DOC.withdrawn, toStanding(before));
 	if (before.state === 'handed') throw new Refusal(409, DOC.undoLate, toStanding(before));
 	if (before.state === 'waiting') {
@@ -185,7 +194,7 @@ function undo(root: string, id: string): Reply {
 		throw new Refusal(409, DOC.nothingToUndo, toStanding(before));
 	}
 	writeDecision(root, id, { action: 'undo', at: new Date().toISOString(), of: before.n });
-	const after = fold(readDecisions(root, id));
+	const after = read(root, id);
 	if (after.state === 'handed') throw new Refusal(409, DOC.undoLate, toStanding(after));
 	if (after.state === 'withdrawn') throw new Refusal(409, DOC.withdrawn, toStanding(after));
 	return ok(after);
