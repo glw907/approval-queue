@@ -94,6 +94,10 @@ export function archiveOld(state: string): string[] {
 		fs.rmSync(tmp, { force: true });
 		throw err;
 	}
-	for (const name of names) fs.rmSync(path.join(state, name), { recursive: true, force: true });
+	try {
+		for (const name of names) fs.rmSync(path.join(state, name), { recursive: true, force: true });
+	} catch (err) {
+		throw new Error(`the archive is made, but removing an old file failed (${(err as Error).message}); the archive holds every old file, so remove the rest by hand`);
+	}
 	return names;
 }

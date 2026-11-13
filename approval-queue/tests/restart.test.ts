@@ -50,6 +50,7 @@ describe('restart', () => {
 		expect(r.stage_exists).toBe('no');
 		expect(r.archive).toBe('yes');
 		expect(r.old).toBe('0');
+		expect(r.store).toBe('no');
 		expect(r.archive_list).toContain('items/');
 		expect(r.archive_list).toContain('decisions.jsonl');
 		expect(r.stderr).toContain('archive-2026-11.tar.gz');

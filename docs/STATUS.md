@@ -31,8 +31,8 @@ Geoff and return his decision as JSON. `README.md` holds the interfaces and the 
 
 ## Current state
 
-- `main` still serves the old queue: the old SvelteKit app and the bash command. The rewrite landed
-  in passes A1 to A5 (PRs #19 to #23), and `main` takes it only when PR #PRNUM merges.
+- `main` still serves the old queue: the old SvelteKit app and the bash command. Passes A1 to A5
+  (PRs #19 to #23) put the new app under `next/`, and the switch to it waits on PR #PRNUM.
 - Pass A6 is on `aq-a6` as PR #PRNUM. It deletes the old app, the old bash command, and their shell
   tests, and moves `next/` to `approval-queue/`. The command is a launcher with nine commands, and
   seven old subcommands print that they are gone.

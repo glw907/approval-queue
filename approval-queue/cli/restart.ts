@@ -281,7 +281,7 @@ export async function restart(): Promise<number> {
 								archiveOld(state);
 								say(`the old queue's files are in ${path.join(state, ARCHIVE)}`);
 							} catch (err) {
-								say(`the new server is running, but the old queue's files stay where they were: ${(err as Error).message}; run restart again to retry`);
+								say(`the new server is running, but archiving the old queue's files failed: ${(err as Error).message}`);
 								return 1;
 							}
 						}

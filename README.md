@@ -68,11 +68,11 @@ For a `merge` document, `check` also reads each pull request through `gh` and re
 | `send <doc.md>` | Checks the document, stores it, and waits. Prints the decision as one JSON line that starts with the document's `id`, then the decision record. A `report` prints its id and exits at once. A `merge` document also stores each pull request's head, so `merge` can merge only what the reader saw. | 0 decided, 1 a fault or a check still running |
 | `send --returns <id> <doc.md>` | Returns a revised document for a send-back that was handed over, then waits for the next decision. It refuses a changed `kind`, and it empties the stored answers because question ids can move. | 0 decided, 1 refused |
 | `collect <id>` | Prints the decision of a document whose `send` is gone, once the decision is handed over. | 0 printed, 1 a report, a withdrawn document, or an unknown id |
-| `withdraw <id>` | Takes back a document nobody has decided. | 0 withdrawn, 2 already decided (the decision prints on stdout) |
-| `merge <id>` | Merges each pull request of an approved `merge` document at the head the reader saw, in the document's order, and records each one for the front page. A pull request already merged is skipped, so a rerun goes on from there. | 0 done, 2 a refusal |
+| `withdraw <id>` | Takes back a document nobody has decided. | 0 withdrawn, 1 an unknown id, 2 already decided (the decision prints on stdout) |
+| `merge <id>` | Merges each pull request of an approved `merge` document at the head the reader saw, in the document's order, and records each one for the front page. A pull request already merged is skipped, so a rerun goes on from there. | 0 done, 1 `gh` or the record failed, 2 a refusal |
 | `notes <id>` | Prints the document's note threads as `{"id":…,"threads":[…]}`. | 0, 1 an unknown id |
 | `reply <id> [thread] <text.md>` | Adds the session's note. With a thread number, the file is a reply in that thread. Without one, the file opens with a Markdown blockquote of the passage, then the note. Notes run up to 4,000 characters. | 0 stored, 1 a refusal |
-| `land <owner/repo#n> <sentence>` | Merges a pull request that needs no decision at the head it read, then records the sentence for the front page. | 0 merged, 2 a refusal |
+| `land <owner/repo#n> <sentence>` | Merges a pull request that needs no decision at the head it read, then records the sentence for the front page. | 0 merged, 1 `gh` failed, 2 a refusal |
 | `restart` | Rebuilds the app beside the running one and swaps it in. See "Restart and the archive." | 0 restarted, 1 a refusal or failure |
 
 `merge` refuses with exit 2, naming the pull request, a head other than the one the reader approved, a base other than the default branch, or a check that failed or that's still running. It doesn't read or run a `## Before merge` section in a pull request body (backlog #73). `land` refuses a pull request that sits in a waiting document, is closed, is a draft, is off the default branch, has a failing check, or has a `## Before merge` section. A check that's still running is polled every 30 seconds for up to 15 minutes (`APPROVAL_QUEUE_POLL_S` and `APPROVAL_QUEUE_POLL_MAX_S`).
@@ -85,7 +85,7 @@ The previous queue's `approval-queue design`, `approval-queue triage`, `approval
 
 ## The store
 
-The store is `store/` under the state directory. The state directory is `$APPROVAL_QUEUE_STATE`, else `${XDG_STATE_HOME:-~/.local/state}/approval-queue`. Every write goes to a temporary file that's renamed over its target, so a reader sees the old file or the new one and never a part.
+The store is `store/` under the state directory. The state directory is `$APPROVAL_QUEUE_STATE`, else `${XDG_STATE_HOME:-~/.local/state}/approval-queue`. Every write goes to a temporary file that's renamed or linked into place, so a reader sees the old file or the new one and never a part.
 
 ```text
 store/
@@ -136,7 +136,7 @@ To undo the switch, revert the merge, pull, unpack the archive into the state di
 bash scripts/gate.sh
 ```
 
-The gate runs the app's `check` (`svelte-kit sync` and `svelte-check`) and `test` (vitest), then every `tests/*.test.sh`. The shell tests include `install.test.sh`, which uses a temporary `HOME`, `restart.test.ts`'s scenario script, and the reminder hook's test. `bash scripts/gate.sh` ends with `gate: ok` when everything passes.
+The gate runs the app's `check` (`svelte-kit sync` and `svelte-check`) and `test` (vitest), then every `tests/*.test.sh`. The shell tests include `install.test.sh`, which uses a temporary `HOME`, and the reminder hook's test. The restart scenarios run inside vitest, through `restart.test.ts` and its scenario script. `bash scripts/gate.sh` ends with `gate: ok` when everything passes.
 
 `approval-queue/scripts/check-mutations.sh` removes one fault check at a time and shows that the tests for it fail. `approval-queue/scripts/page-checks.mjs` and `approval-queue/tests/*-checks.mjs` drive a built copy of the app in a browser.
 
