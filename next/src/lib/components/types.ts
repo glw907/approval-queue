@@ -56,7 +56,6 @@ export interface PageDoc {
 	questions: number;
 }
 
-/** The four states a document's records fold to. */
 /** A row of the rail's "Decided today": a document decided or handed today, and its decision. */
 export interface DecidedRow extends Row {
 	action: 'approve' | 'sendback' | 'read';
@@ -64,6 +63,7 @@ export interface DecidedRow extends Row {
 	at: string;
 }
 
+/** The four states a document's records fold to. */
 export type StateName = 'waiting' | 'decided' | 'handed' | 'withdrawn';
 
 /** One answer as a decision records it: the option's index and its label as the page shows it. */

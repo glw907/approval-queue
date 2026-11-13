@@ -1,10 +1,3 @@
-<!--
-@component
-One document from a session: its header, its text with each question asked where the text raises
-it, and the decision. Each click posts to `/api/<id>`, and the page shows a decision or an answer
-as recorded only after the queue has it on disk. A post the queue did not record leaves the
-buttons replaced by a block saying what was not recorded and why, with a "Try again" button.
--->
 <script lang="ts">
 	import { tick, untrack } from 'svelte';
 	import { invalidateAll } from '$app/navigation';
@@ -26,29 +19,41 @@ buttons replaced by a block saying what was not recorded and why, with a "Try ag
 
 	type Question = Extract<Segment, { type: 'question' }>;
 	type Action = 'approve' | 'sendback' | 'read';
-	type Body =
-		| { op: 'answer'; question: string; pick: number }
-		| { op: 'decide'; action: Action; answers: Record<string, number> }
-		| { op: 'undo' };
-	/** A post the queue didn't record: the line saying what, the reason, and the body to send again. */
+	type AnswerBody = { op: 'answer'; question: string; pick: number };
+	type Body = AnswerBody | { op: 'decide'; action: Action; answers: Record<string, number> } | { op: 'undo' };
+	/** Where a document stood, as far as the page compares it. */
+	type Mark = { state: DocStanding['state']; n: number | null };
+	/**
+	 * A post the queue didn't record: the line saying what, the reason, the body to send again, and
+	 * the standing it was drawn against. `retry` is false for a refusal that moved the document on,
+	 * since sending it again could only be refused again.
+	 */
 	interface Failure {
 		what: string;
 		why: string;
 		refused: boolean;
+		retry: boolean;
 		body: Body;
+		at: Mark;
+		/** Counts failures, so a repeat of the same one is drawn, and announced, afresh. */
+		attempt: number;
 	}
 
 	const questions = $derived(doc.segments.filter((s): s is Question => s.type === 'question'));
 	const recommended = (q: Question) => q.options.findIndex((o) => o.recommended);
+	const mark = (s: { state: DocStanding['state']; n: number | null }): Mark => ({ state: s.state, n: s.n });
+	const same = (a: Mark, b: Mark) => a.state === b.state && a.n === b.n;
 
 	// The page keys this component on the document's id, so the first document's answers are the
-	// only ones it holds. A recorded or stored pick wins over the recommended one.
+	// only ones it holds. A stored pick wins over the recommended one, and the decision's record wins
+	// over both, since it holds what was decided.
 	const picks: Record<string, number | undefined> = $state(
 		untrack(() => {
 			const start: Record<string, number | undefined> = {};
 			for (const q of questions) start[q.id] = recommended(q) >= 0 ? recommended(q) : undefined;
+			Object.assign(start, answers);
 			for (const [qid, a] of Object.entries(standing.decision?.answers ?? {})) start[qid] = a.pick;
-			return { ...start, ...answers };
+			return start;
 		})
 	);
 	const unanswered = $derived(questions.filter((q) => picks[q.id] === undefined));
@@ -56,8 +61,16 @@ buttons replaced by a block saying what was not recorded and why, with a "Try ag
 	const decision = $derived(standing.state === 'decided' || standing.state === 'handed' ? standing.decision : null);
 
 	let busy = $state(false);
+	let attempts = 0;
 	let failure = $state<Failure | null>(null);
+	// A failure shows only while the document stands where it was drawn, so a hand-off or a reload
+	// that moved the document on takes the block away with it.
+	const shown = $derived(failure && same(failure.at, standing) ? failure : null);
 	const answerFailures: Record<string, Failure | undefined> = $state({});
+	const answerBusy: Record<string, boolean> = $state({});
+	/** The latest answer post for each question, so a slower, older reply can't draw over it. */
+	const answerSeq: Record<string, number> = {};
+	let articleEl = $state<HTMLElement>();
 	let decideEl = $state<HTMLElement>();
 
 	/** The line for a click that got no answer from the queue. */
@@ -69,6 +82,8 @@ buttons replaced by a block saying what was not recorded and why, with a "Try ag
 
 	/** Posts `body`, answering null once the queue has recorded it, or else the failure to draw. */
 	async function send(body: Body): Promise<Failure | null> {
+		const at = mark(standing);
+		const attempt = ++attempts;
 		let res: Response;
 		try {
 			res = await fetch(`/api/${doc.id}`, {
@@ -79,23 +94,37 @@ buttons replaced by a block saying what was not recorded and why, with a "Try ag
 			});
 		} catch (e) {
 			const slow = e instanceof DOMException && e.name === 'TimeoutError';
-			return { what: unsentLine(body), why: slow ? DOC.tooSlow : DOC.queueDown, refused: false, body };
+			return { what: unsentLine(body), why: slow ? DOC.tooSlow : DOC.queueDown, refused: false, retry: true, body, at, attempt };
 		}
 		if (res.ok) return null;
 		const reply = (await res.json().catch(() => ({}))) as Partial<DecideAnswer>;
-		return { what: DOC.refused, why: reply.message ?? DOC.notSaved(`${res.status} ${res.statusText}`), refused: true, body };
+		const why = reply.message ?? DOC.notSaved(`${res.status} ${res.statusText}`);
+		const now = reply.standing ? mark(reply.standing) : at;
+		return { what: DOC.refused, why, refused: true, retry: same(now, at), body, at: now, attempt };
 	}
 
-	/** Posts a decision or an Undo, and redraws from the server only once it is on disk. */
+	/**
+	 * Posts a decision or an Undo, and redraws from the server only once it is on disk. A refusal
+	 * whose answer shows the document moved on, as when another tab decided first or the session
+	 * took the decision before an Undo, redraws too, with the refusal shown against the new state.
+	 */
 	async function act(body: Body) {
+		if (busy) return;
+		// The buttons mark themselves busy with aria-disabled, never disabled, so focus stays on the
+		// one clicked while the post is out.
 		busy = true;
-		const failed = await send(body);
-		if (!failed) await invalidateAll();
-		failure = failed;
-		busy = false;
+		let failed: Failure | null = null;
+		try {
+			failed = await send(body);
+			if (!failed || !failed.retry) await invalidateAll();
+			if (!failed && body.op === 'decide') for (const q of Object.keys(answerFailures)) answerFailures[q] = undefined;
+		} finally {
+			failure = failed;
+			busy = false;
+		}
 		await tick();
-		const target = failed ? '[data-retry]' : body.op === 'undo' ? 'button:not([disabled])' : '[data-decided]';
-		decideEl?.querySelector<HTMLElement>(target)?.focus();
+		const target = failed?.retry ? '[data-retry]' : !failed && body.op === 'undo' ? 'button:not([disabled])' : '[data-decided]';
+		(decideEl?.querySelector<HTMLElement>(target) ?? decideEl)?.focus();
 	}
 
 	function decide(action: Action) {
@@ -103,55 +132,82 @@ buttons replaced by a block saying what was not recorded and why, with a "Try ag
 		return act({ op: 'decide', action, answers: Object.fromEntries(given) });
 	}
 
-	async function answer(body: Extract<Body, { op: 'answer' }>, retry = false) {
+	async function answer(body: AnswerBody, retry = false) {
+		const seq = (answerSeq[body.question] = (answerSeq[body.question] ?? 0) + 1);
+		answerBusy[body.question] = true;
 		const failed = await send(body);
+		if (seq !== answerSeq[body.question]) return;
+		answerBusy[body.question] = false;
 		answerFailures[body.question] = failed ?? undefined;
 		if (!failed || !retry) return;
 		await tick();
-		document.querySelector<HTMLElement>(`[data-retry-answer="${body.question}"]`)?.focus();
+		articleEl?.querySelector<HTMLElement>(`[data-retry-answer="${body.question}"]`)?.focus();
 	}
 
 	// While a decision waits for the hand-off, ask the queue where it stands every 2 seconds and
-	// redraw only on a change. An `invalidateAll` poll would throw the page away if the server stopped.
+	// redraw only on a change. An `invalidateAll` poll would throw the page away if the server
+	// stopped. The cleanup aborts a poll still out, so an old one never redraws a newer page.
 	$effect(() => {
 		if (report || standing.state !== 'decided') return;
-		const { state, n } = standing;
+		const was = mark(standing);
+		const stop = new AbortController();
 		let out = false;
 		const timer = setInterval(async () => {
 			if (out) return;
 			out = true;
 			try {
-				const res = await fetch(`/api/${doc.id}`, { signal: AbortSignal.timeout(10_000) });
+				const res = await fetch(`/api/${doc.id}`, { signal: AbortSignal.any([stop.signal, AbortSignal.timeout(10_000)]) });
 				const now = res.ok ? ((await res.json()) as DecideAnswer).standing : null;
-				if (now && (now.state !== state || now.n !== n)) await invalidateAll();
+				if (stop.signal.aborted || !now || same(mark(now), was)) return;
+				const held = !!decideEl?.contains(document.activeElement);
+				await invalidateAll();
+				await tick();
+				// The hand-off takes the Undo button away; focus that sat on it lands on the new line.
+				if (held && !decideEl?.contains(document.activeElement)) decideEl?.querySelector<HTMLElement>('[data-decided]')?.focus();
 			} catch {
 				// The queue is down or slow: the page keeps what it shows and asks again.
 			} finally {
 				out = false;
 			}
 		}, 2000);
-		return () => clearInterval(timer);
+		return () => {
+			clearInterval(timer);
+			stop.abort();
+		};
 	});
 </script>
 
-{#snippet notRecorded(f: Failure, retry: () => void, key?: string)}
-	<div role="alert" class="alert alert-error mt-4 block">
-		{#if f.refused}
-			<p><strong class="font-semibold">{f.what}</strong></p>
-			<p class="mt-1">{f.why}</p>
-		{:else}
-			<p><strong class="font-semibold">{f.why}</strong> {f.what}</p>
-		{/if}
-		<p class="mt-3">
-			<button type="button" class="btn btn-sm" data-retry={key ? undefined : ''} data-retry-answer={key} onclick={retry}>
-				{DOC.tryAgain}
-			</button>
-		</p>
-	</div>
+{#snippet notRecorded(f: Failure, retry: () => void, waiting: boolean, key?: string)}
+	{@const id = `${doc.id}-${key ?? 'decide'}-failure`}
+	{#key f.attempt}
+		<div role="alert" class="alert alert-error mt-4 block">
+			{#if f.refused}
+				<p id="{id}-what"><strong class="font-semibold">{f.what}</strong></p>
+				<p id="{id}-why" class="mt-1">{f.why}</p>
+			{:else}
+				<p><strong class="font-semibold" id="{id}-why">{f.why}</strong> <span id="{id}-what">{f.what}</span></p>
+			{/if}
+			{#if f.retry}
+				<p class="mt-3">
+					<button
+						type="button"
+						class="btn btn-sm"
+						data-retry={key ? undefined : ''}
+						data-retry-answer={key}
+						aria-describedby="{id}-what {id}-why"
+						aria-disabled={waiting || undefined}
+						onclick={retry}
+					>
+						{DOC.tryAgain}
+					</button>
+				</p>
+			{/if}
+		</div>
+	{/key}
 {/snippet}
 
 <Annotated>
-	<article>
+	<article bind:this={articleEl}>
 		<header>
 			<p class="doc-meta" data-no-notes>{DOC.sent(doc.tool, doc.sent)}</p>
 			<h1 class="doc-title mt-2">{@html doc.titleHtml}</h1>
@@ -184,7 +240,7 @@ buttons replaced by a block saying what was not recorded and why, with a "Try ag
 				{#if seg.type === 'html'}
 					<div class="prose-doc">{@html seg.html}</div>
 				{:else if seg.type === 'question'}
-					{@const lost = answerFailures[seg.id]}
+					{@const lost = standing.state === 'waiting' ? answerFailures[seg.id] : undefined}
 					<fieldset class="question">
 						<legend class="sr-only">{seg.label}</legend>
 						{#each seg.options as o, i (i)}
@@ -194,7 +250,7 @@ buttons replaced by a block saying what was not recorded and why, with a "Try ag
 									class="radio radio-sm radio-primary"
 									name="{doc.id}-{seg.id}"
 									value={i}
-									disabled={standing.state !== 'waiting'}
+									disabled={busy || standing.state !== 'waiting'}
 									bind:group={picks[seg.id]}
 									onchange={() => answer({ op: 'answer', question: seg.id, pick: i })}
 								/>
@@ -208,10 +264,24 @@ buttons replaced by a block saying what was not recorded and why, with a "Try ag
 						{/each}
 					</fieldset>
 					{#if lost}
-						<div data-no-notes>{@render notRecorded(lost, () => answer(lost.body as Extract<Body, { op: 'answer' }>, true), seg.id)}</div>
+						<div data-no-notes>
+							{@render notRecorded(
+								lost,
+								() => answerBusy[seg.id] || answer(lost.body as AnswerBody, true),
+								!!answerBusy[seg.id],
+								seg.id
+							)}
+						</div>
 					{/if}
 				{:else}
-					<section class="decide" bind:this={decideEl} data-no-notes aria-label={DOC.decision} aria-busy={busy}>
+					<section
+						class="decide"
+						bind:this={decideEl}
+						tabindex="-1"
+						data-no-notes
+						aria-label={DOC.decision}
+						aria-busy={busy}
+					>
 						{#if decision}
 							<div role="status">
 								<h2 class="flex items-center gap-2" tabindex="-1" data-decided>
@@ -223,6 +293,9 @@ buttons replaced by a block saying what was not recorded and why, with a "Try ag
 											: DOC.markedRead(decision.at)}
 								</h2>
 								<p class="mt-1 muted">{DOC.recorded}</p>
+								{#if decision.action !== 'read'}
+									<p class="mt-3 muted">{standing.state === 'handed' ? DOC.handoffAfter : DOC.handoffBefore}</p>
+								{/if}
 							</div>
 							{#if decision.action === 'approve' && questions.length}
 								<ul class="answers mt-3">
@@ -237,13 +310,13 @@ buttons replaced by a block saying what was not recorded and why, with a "Try ag
 							{#if decision.action !== 'read'}
 								{@const html = decision.action === 'approve' ? doc.approve : doc.sendback}
 								{#if html}<p class="ui-code mt-3">{@html html}</p>{/if}
-								<p class="mt-3 muted">{standing.state === 'handed' ? DOC.handoffAfter : DOC.handoffBefore}</p>
 							{/if}
-							{#if failure}
-								{@render notRecorded(failure, () => act(failure!.body))}
-							{:else if standing.state === 'decided'}
+							{#if shown}
+								{@render notRecorded(shown, () => act(shown.body), busy)}
+							{/if}
+							{#if standing.state === 'decided' && !shown?.retry}
 								<p class="mt-4">
-									<button type="button" class="btn btn-sm" disabled={busy} onclick={() => act({ op: 'undo' })}>
+									<button type="button" class="btn btn-sm" aria-disabled={busy || undefined} onclick={() => act({ op: 'undo' })}>
 										{decision.action === 'approve' ? DOC.undoApprove : decision.action === 'sendback' ? DOC.undoSendback : DOC.markUnread}
 									</button>
 								</p>
@@ -253,11 +326,14 @@ buttons replaced by a block saying what was not recorded and why, with a "Try ag
 						{:else if report}
 							<h2>{DOC.reportHeading}</h2>
 							<p class="mt-1 muted">{DOC.reportNote}</p>
-							{#if failure}
-								{@render notRecorded(failure, () => act(failure!.body))}
-							{:else}
+							{#if shown}
+								{@render notRecorded(shown, () => act(shown.body), busy)}
+							{/if}
+							{#if !shown?.retry}
 								<p class="mt-4">
-									<button type="button" class="btn btn-primary" disabled={busy} onclick={() => decide('read')}>{DOC.markRead}</button>
+									<button type="button" class="btn btn-primary" aria-disabled={busy || undefined} onclick={() => decide('read')}>
+										{DOC.markRead}
+									</button>
 								</p>
 							{/if}
 						{:else}
@@ -280,21 +356,29 @@ buttons replaced by a block saying what was not recorded and why, with a "Try ag
 									{/each}
 								</ul>
 							{/if}
-							{#if failure}
-								{@render notRecorded(failure, () => act(failure!.body))}
-							{:else}
+							{#if shown}
+								{@render notRecorded(shown, () => act(shown.body), busy)}
+							{/if}
+							{#if !shown?.retry}
 								<div class="mt-5 grid gap-5">
 									<div>
-										<button type="button" class="btn btn-primary" disabled={busy || unanswered.length > 0} onclick={() => decide('approve')}>
+										<button
+											type="button"
+											class="btn btn-primary"
+											disabled={unanswered.length > 0}
+											aria-disabled={busy || undefined}
+											aria-describedby={unanswered.length ? `${doc.id}-unanswered` : undefined}
+											onclick={() => decide('approve')}
+										>
 											{questions.length ? DOC.approveWithAnswers : DOC.approve}
 										</button>
 										{#if unanswered.length}
-											<p class="mt-1 text-error">{DOC.unanswered(unanswered.map((q) => q.label))}</p>
+											<p class="mt-1 text-error" id="{doc.id}-unanswered">{DOC.unanswered(unanswered.map((q) => q.label))}</p>
 										{/if}
 										{#if doc.approve}<p class="ui-code mt-2">{@html doc.approve}</p>{/if}
 									</div>
 									<div>
-										<button type="button" class="btn" disabled={busy} onclick={() => decide('sendback')}>{DOC.sendBack}</button>
+										<button type="button" class="btn" aria-disabled={busy || undefined} onclick={() => decide('sendback')}>{DOC.sendBack}</button>
 										{#if doc.sendback}<p class="ui-code mt-2">{@html doc.sendback}</p>{/if}
 										<p class="mt-1 muted">{DOC.noNotesWaiting}</p>
 									</div>
