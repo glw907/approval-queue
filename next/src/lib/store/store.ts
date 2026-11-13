@@ -33,6 +33,7 @@ export type Merged = { repo: string; number: number; sentence: string; at: strin
 const ID = /^\d{8}-\d{6}-[0-9a-f]{6}$/;
 const NAMED = /^[a-z][a-z-]*\.json$/;
 const DECISION = /^decision-(\d+)\.json$/;
+const NOTE = /^note-(\d+)\.json$/;
 
 /**
  * Resolves the store's root the way the old command resolves its state directory:
@@ -142,19 +143,32 @@ export function listDocuments(root: string): { documents: Meta[]; unreadable: st
  * one is tried.
  */
 export function writeDecision(root: string, id: string, record: Decision): number {
-	const dir = documentDir(root, id);
-	readMeta(dir);
+	readMeta(documentDir(root, id));
 	if (!validDecision(record)) {
 		throw new StoreError('bad-record', 'a decision record needs a string "action" and an ISO "at".');
 	}
-	const staged = path.join(dir, `.decision.${process.pid}.${crypto.randomBytes(6).toString('hex')}`);
+	return appendRecord(root, id, 'decision', record);
+}
+
+/** The prefixes of the numbered records a document holds. */
+export type RecordPrefix = 'decision' | 'note';
+
+/**
+ * Adds `record` to document `id` as `<prefix>-<n>.json`, the next free number, and returns that
+ * number. The record is staged in full and then hard-linked to its name, so it is never replaced
+ * and never read in part: when another writer takes the number first, the next one is tried.
+ */
+export function appendRecord(root: string, id: string, prefix: RecordPrefix, record: unknown): number {
+	const dir = documentDir(root, id);
+	readMeta(dir);
+	const staged = path.join(dir, `.${prefix}.${process.pid}.${crypto.randomBytes(6).toString('hex')}`);
 	writeJson(staged, record);
 	try {
-		let n = decisionNumbers(dir).at(-1) ?? 0;
+		let n = recordNumbers(dir, prefix).at(-1) ?? 0;
 		for (;;) {
 			n++;
 			try {
-				fs.linkSync(staged, path.join(dir, `decision-${n}.json`));
+				fs.linkSync(staged, path.join(dir, `${prefix}-${n}.json`));
 				return n;
 			} catch (err) {
 				if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
@@ -166,6 +180,24 @@ export function writeDecision(root: string, id: string, record: Decision): numbe
 }
 
 /**
+ * Lists document `id`'s `<prefix>-<n>.json` records in number order, each with its file and its
+ * parsed value, or `null` in place of the value when the file isn't JSON. Checking a record's
+ * fields is the caller's.
+ */
+export function readRecords(root: string, id: string, prefix: RecordPrefix): { n: number; file: string; value: unknown }[] {
+	const dir = documentDir(root, id);
+	return recordNumbers(dir, prefix).map((n) => {
+		const file = path.join(dir, `${prefix}-${n}.json`);
+		try {
+			return { n, file, value: parseFile(file) };
+		} catch (err) {
+			if (!(err instanceof StoreError)) throw err;
+			return { n, file, value: null };
+		}
+	});
+}
+
+/**
  * Reads document `id`'s decision records in the order written, an empty list only when it has
  * no decision file.
  *
@@ -174,7 +206,7 @@ export function writeDecision(root: string, id: string, record: Decision): numbe
  */
 export function readDecisions(root: string, id: string): Decision[] {
 	const dir = documentDir(root, id);
-	return decisionNumbers(dir).map((n) => {
+	return recordNumbers(dir, 'decision').map((n) => {
 		const file = path.join(dir, `decision-${n}.json`);
 		const record = parseFile(file);
 		if (!validDecision(record)) {
@@ -186,7 +218,7 @@ export function readDecisions(root: string, id: string): Decision[] {
 
 /**
  * Writes a named JSON file in document `id`'s directory. The name is lowercase letters and
- * hyphens ending `.json`, never `meta.json` or a `decision-` name.
+ * hyphens ending `.json`, never `meta.json` or a `decision-` or `note-` name.
  */
 export function writeNamed(root: string, id: string, name: string, value: unknown): void {
 	checkName(name);
@@ -249,19 +281,20 @@ function readMeta(dir: string): Meta {
 	return meta;
 }
 
-function decisionNumbers(dir: string): number[] {
+function recordNumbers(dir: string, prefix: RecordPrefix): number[] {
+	const form = prefix === 'decision' ? DECISION : NOTE;
 	return entries(dir)
-		.map((name) => DECISION.exec(name))
+		.map((name) => form.exec(name))
 		.filter((m) => m !== null)
 		.map((m) => Number(m[1]))
 		.sort((x, y) => x - y);
 }
 
 function checkName(name: string): void {
-	if (!NAMED.test(name) || name === 'meta.json' || name.startsWith('decision-')) {
+	if (!NAMED.test(name) || name === 'meta.json' || name.startsWith('decision-') || name.startsWith('note-')) {
 		throw new StoreError(
 			'bad-name',
-			`"${name}" can't be a named file. Use lowercase letters and hyphens ending .json, not meta.json or a decision- name.`
+			`"${name}" can't be a named file. Use lowercase letters and hyphens ending .json, not meta.json or a decision- or note- name.`
 		);
 	}
 }
