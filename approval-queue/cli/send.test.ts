@@ -3,7 +3,7 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { parse } from '#lib/doc/parse.ts';
 import { createDocument, listDocuments, readDecisions, readDocument, readNamed, writeDecision, writeNamed } from '#lib/store/store.ts';
 
@@ -39,8 +39,19 @@ let dir: string;
 let state: string;
 let root: string;
 const children: ChildProcess[] = [];
+let page: ChildProcess;
+let port: number;
 
-const env = () => ({ ...process.env, APPROVAL_QUEUE_STATE: state, PATH: `${dir}:${process.env.PATH}` });
+const env = () => ({ ...process.env, APPROVAL_QUEUE_STATE: state, APPROVAL_QUEUE_PORT: String(port), PATH: `${dir}:${process.env.PATH}` });
+
+/** The pages the stubbed `xdg-open` was asked to open, one per line. */
+const opened = () => {
+	try {
+		return readFileSync(join(dir, 'open.log'), 'utf8').split('\n').filter(Boolean);
+	} catch {
+		return [];
+	}
+};
 
 function serve(number: number, view: object) {
 	writeFileSync(join(dir, `pr-glw907-workstation-${number}.json`), JSON.stringify(view));
@@ -83,6 +94,19 @@ function stored(path: string, kind: string) {
 	return createDocument(root, source, { kind, title: parse(source).doc.title }).id;
 }
 
+// A stand-in page server, so `send` finds one answering and never starts the real build. It runs in
+// a separate process because `run` blocks this one.
+beforeAll(async () => {
+	const script = `const s = require('node:http').createServer((q, r) => r.end('ok'));
+s.listen(0, '127.0.0.1', () => console.log(s.address().port));`;
+	page = spawn(process.execPath, ['-e', script], { stdio: ['ignore', 'pipe', 'inherit'] });
+	port = await new Promise<number>((resolve) => page.stdout!.once('data', (d) => resolve(Number(String(d).trim()))));
+});
+
+afterAll(() => {
+	page.kill();
+});
+
 beforeEach(() => {
 	dir = mkdtempSync(join(tmpdir(), 'aq-send-'));
 	state = join(dir, 'state');
@@ -90,6 +114,8 @@ beforeEach(() => {
 	mkdirSync(state);
 	writeFileSync(join(dir, 'gh'), STUB);
 	chmodSync(join(dir, 'gh'), 0o755);
+	writeFileSync(join(dir, 'xdg-open'), '#!/usr/bin/env bash\nprintf \'%s\\n\' "$1" >>"$(dirname "$0")/open.log"\n');
+	chmodSync(join(dir, 'xdg-open'), 0o755);
 	for (const n of ALL_PRS) serve(n, { state: 'OPEN', isDraft: false, headRefOid: `head${n}`, statusCheckRollup: PASSED });
 });
 
@@ -109,10 +135,31 @@ describe('send', () => {
 		expect(readDocument(root, id).source).toBe(readFileSync(REPORT, 'utf8'));
 	});
 
+	it('names the page when xdg-open is missing, and still stores the document', () => {
+		rmSync(join(dir, 'xdg-open'));
+		const result = spawnSync(process.execPath, [CLI, 'send', REPORT], {
+			encoding: 'utf8',
+			env: { ...env(), PATH: dir }
+		});
+		expect(result.status).toBe(0);
+		const id = result.stdout.trim();
+		expect(result.stderr).toContain(`xdg-open isn't available; open http://127.0.0.1:${port}/d/${id}`);
+		expect(result.stderr).not.toContain('opened ');
+		expect(readDocument(root, id).meta.kind).toBe('report');
+	});
+
+	it('opens the stored document on the page server', async () => {
+		const { out, err } = run('send', REPORT);
+		const id = out.trim();
+		expect(err).toContain(`opened http://127.0.0.1:${port}/d/${id}`);
+		expect(await until(() => opened().length > 0, 5000)).toBe(true);
+		expect(opened()).toEqual([`http://127.0.0.1:${port}/d/${id}`]);
+	});
+
 	it('exits with the decision once it is handed over, and collect prints the same line', async () => {
 		const sent = start('send', MERGE);
 		expect(await until(() => /stored \d{8}-\d{6}-[0-9a-f]{6}/.test(sent.seen.err), 10000)).toBe(true);
-		const id = /stored (\S+?);/.exec(sent.seen.err)![1];
+		const id = /stored (\S+)/.exec(sent.seen.err)![1];
 		writeDecision(root, id, { action: 'approve', at: ago(25) });
 		expect(await Promise.race([sent.done, sleep(5000).then(() => 'late')])).toBe(0);
 		const line = sent.seen.out;
@@ -126,7 +173,7 @@ describe('send', () => {
 	it('is recovered by collect after send is killed, with no server running', async () => {
 		const sent = start('send', MERGE);
 		expect(await until(() => sent.seen.err.includes('stored '), 10000)).toBe(true);
-		const id = /stored (\S+?);/.exec(sent.seen.err)![1];
+		const id = /stored (\S+)/.exec(sent.seen.err)![1];
 		sent.child.kill('SIGKILL');
 		await sent.done;
 		writeDecision(root, id, { action: 'sendback', at: ago(25) });
@@ -160,7 +207,7 @@ describe('send', () => {
 	it('stores each pull request head it checked, in the document order', async () => {
 		const sent = start('send', MERGE);
 		expect(await until(() => sent.seen.err.includes('stored '), 10000)).toBe(true);
-		const id = /stored (\S+?);/.exec(sent.seen.err)![1];
+		const id = /stored (\S+)/.exec(sent.seen.err)![1];
 		expect(readNamed(root, id, 'heads.json')).toEqual(
 			[230, 231, 232].map((number) => ({ repo: 'glw907/workstation', number, head: `head${number}` }))
 		);
@@ -221,6 +268,8 @@ describe('send --returns', () => {
 		const sent = start('send', '--returns', id, revision());
 		expect(await until(() => sent.seen.err.includes('waiting for a decision'), 10000)).toBe(true);
 		expect(sent.seen.err).toContain(`returned ${id} as version 2`);
+		expect(await until(() => opened().length > 0, 5000)).toBe(true);
+		expect(opened()).toEqual([`http://127.0.0.1:${port}/d/${id}`]);
 		expect(readDocument(root, id).meta.versions).toBe(2);
 		expect(readDocument(root, id).source).toContain('Revised after the send-back.');
 		expect(readNamed(root, id, 'heads.json')).toEqual(

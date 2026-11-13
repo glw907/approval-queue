@@ -2,6 +2,7 @@ import type { PrView, ViewResult } from '#lib/doc/pr.ts';
 import { addVersion, createDocument, readDocument, storeRoot, writeDecision, writeNamed } from '#lib/store/store.ts';
 import { check } from './check.ts';
 import { ghView } from './pr.ts';
+import { showDocument } from './show.ts';
 import type { State } from './state.ts';
 import { readState, storeFailure, waitForDecision } from './wait.ts';
 
@@ -58,7 +59,7 @@ function checkToSend(path: string): Checked | number {
 }
 
 /**
- * Checks a document as `check` does, stores it, and waits for the queue's decision. A fault, or a
+ * Checks a document as `check` does, stores it, opens its page, and waits for the queue's decision. A fault, or a
  * check still running, stores nothing and exits 1. A report prints its id and exits at once.
  *
  * @remarks A merge document also stores `heads.json`, each pull request's head commit as it was
@@ -85,11 +86,13 @@ export async function send(path: string): Promise<number> {
 			return storeFailure(err);
 		}
 	}
+	process.stderr.write(`approval-queue: stored ${id}\n`);
+	await showDocument(id);
 	if (checked.doc.kind === 'report') {
 		process.stdout.write(`${id}\n`);
 		return 0;
 	}
-	process.stderr.write(`approval-queue: stored ${id}; waiting for a decision\n`);
+	process.stderr.write(`approval-queue: waiting for a decision on ${id}\n`);
 	return waitForDecision(root, id);
 }
 
@@ -150,6 +153,8 @@ export async function sendReturn(id: string, path: string): Promise<number> {
 		process.stderr.write(`approval-queue: stored version ${version} of ${id}, but the return isn't complete\n`);
 		return storeFailure(err);
 	}
-	process.stderr.write(`approval-queue: returned ${id} as version ${version}; waiting for a decision\n`);
+	process.stderr.write(`approval-queue: returned ${id} as version ${version}\n`);
+	await showDocument(id);
+	process.stderr.write(`approval-queue: waiting for a decision on ${id}\n`);
 	return waitForDecision(root, id);
 }

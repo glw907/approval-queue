@@ -43,7 +43,7 @@ async function stop(pid: number): Promise<void> {
 }
 
 /** Takes an exclusive `flock` on `file` and keeps the descriptor open; returns it, or null when `wait` is off and the lock is held. */
-function lock(file: string, wait: boolean): number | null {
+export function lock(file: string, wait: boolean): number | null {
 	const fd = fs.openSync(file, 'w');
 	const held = spawnSync('flock', wait ? ['3'] : ['-n', '3'], { stdio: ['ignore', 'ignore', 'ignore', fd] });
 	if (held.status === 0) return fd;
@@ -51,7 +51,8 @@ function lock(file: string, wait: boolean): number | null {
 	return null;
 }
 
-async function answers(url: string): Promise<boolean> {
+/** Whether `url` answers with a status below 500 within three seconds. */
+export async function answers(url: string): Promise<boolean> {
 	try {
 		const res = await fetch(url, { signal: AbortSignal.timeout(3000) });
 		await res.arrayBuffer();
