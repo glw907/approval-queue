@@ -1,0 +1,657 @@
+@import "tailwindcss";
+@plugin "daisyui";
+@import "./fonts.css";
+@import "./survey.css";
+@import "./components.css";
+
+@theme inline {
+	--font-display: "Spectral", serif;
+	--font-body: "Karla Variable", system-ui, sans-serif;
+	--font-mono: "Monaspace Neon", ui-monospace, monospace;
+}
+
+:root {
+	/* A document is technical writing, so its text takes the size, face class, and line height of
+	   GitHub's Markdown stylesheet: 16px sans at 1.5. The column holds 80 characters of that text,
+	   the upper limit in WCAG 2.2's criterion for blocks of text (1.4.8, level AAA). */
+	--doc-text: 1rem;
+	--doc-measure: 36.5rem;
+	--rail-width: 17.5rem;
+	--margin-width: 19rem;
+	--mark: color-mix(in oklab, var(--color-warning) 30%, transparent);
+	--mark-active: color-mix(in oklab, var(--color-warning) 62%, transparent);
+	--ins: color-mix(in oklab, var(--color-success) 17%, transparent);
+	--del: color-mix(in oklab, var(--color-error) 9%, transparent);
+}
+
+html {
+	scroll-padding-top: 4.5rem;
+}
+body {
+	font-family: var(--font-body);
+	overflow-wrap: break-word;
+}
+:focus-visible {
+	outline: 2px solid var(--color-primary);
+	outline-offset: 2px;
+}
+.muted {
+	color: var(--color-muted);
+}
+.wordmark,
+.display {
+	font-family: var(--font-display);
+	font-weight: var(--font-weight-heading);
+}
+
+/* The rail: the list of what waits. */
+.rail {
+	width: var(--rail-width);
+	background-color: var(--color-base-200);
+	border-inline-end: var(--border) solid var(--color-base-300);
+}
+.rail-row {
+	display: block;
+	padding: var(--spacing-9px) var(--spacing-12px);
+	border: var(--border) solid transparent;
+	border-radius: var(--radius-box);
+	font-size: var(--text-step-9);
+	line-height: 1.35;
+}
+.rail-row:hover {
+	background-color: color-mix(in oklab, var(--color-base-300) 45%, transparent);
+}
+.rail-row[aria-current="page"] {
+	background-color: var(--color-base-100);
+	border-color: var(--color-base-300);
+}
+.rail-row .sub {
+	display: block;
+	margin-top: var(--spacing-3px);
+	font-size: var(--text-step-4);
+	color: var(--color-muted);
+}
+.rail-heading {
+	display: flex;
+	align-items: baseline;
+	justify-content: space-between;
+	padding: 0 var(--spacing-12px);
+	margin-bottom: var(--spacing-4px);
+	font-size: var(--text-step-5);
+	font-weight: 600;
+	color: var(--color-muted);
+}
+
+/* The outline of the open document: second- and third-level headings, the current one marked
+   (US Web Design System, "In-page navigation"). It sits in the left rail, one of the three places
+   Nielsen Norman Group lists ("Table of Contents: The Ultimate Design Guide"). */
+.page-outline {
+	margin: var(--spacing-6px) 0 var(--spacing-9px) var(--spacing-12px);
+	padding-inline-start: var(--spacing-9px);
+	border-inline-start: var(--border) solid var(--color-base-300);
+}
+.page-outline-label {
+	padding: var(--spacing-3px) var(--spacing-6px);
+	font-size: var(--text-step-4);
+	font-weight: 600;
+	color: var(--color-muted);
+}
+.page-outline a {
+	display: block;
+	padding: var(--spacing-3px) var(--spacing-6px);
+	border-radius: var(--radius-field);
+	font-size: var(--text-step-5);
+	line-height: 1.35;
+	color: var(--color-muted);
+}
+.page-outline a.page-outline-sub {
+	padding-inline-start: var(--spacing-16px);
+}
+.page-outline a:hover {
+	color: var(--color-base-content);
+}
+.page-outline a[aria-current] {
+	color: var(--color-base-content);
+	font-weight: 600;
+	background-color: color-mix(in oklab, var(--color-base-300) 45%, transparent);
+}
+
+/* The page: one reading column and one notes margin, on every page. */
+.page {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr);
+	padding: var(--spacing-24px) var(--spacing-16px) 9rem;
+}
+.page-main {
+	min-width: 0;
+	max-width: var(--doc-measure);
+	width: 100%;
+	margin-inline: auto;
+}
+.page-margin {
+	display: none;
+}
+@media (min-width: 86rem) {
+	.page {
+		grid-template-columns: minmax(0, var(--doc-measure)) var(--margin-width);
+		column-gap: 2.75rem;
+		justify-content: center;
+		padding: 2.5rem 2rem 10rem 2.5rem;
+	}
+	.page-main {
+		margin-inline: 0;
+	}
+	.page-margin {
+		display: block;
+	}
+}
+
+.doc-meta {
+	font-size: var(--text-step-9);
+	line-height: 1.55;
+	color: var(--color-muted);
+}
+.doc-meta a,
+.prose-doc a,
+.plain-link {
+	color: var(--color-primary);
+	text-decoration: underline;
+	text-decoration-thickness: 1px;
+	text-underline-offset: 3px;
+	transition: color var(--motion-quick) var(--motion-ease);
+}
+.doc-title {
+	font-family: var(--font-display);
+	font-weight: var(--font-weight-heading);
+	font-size: var(--text-step-13);
+	line-height: 1.22;
+	letter-spacing: -0.008em;
+	text-wrap: balance;
+}
+@media (min-width: 48rem) {
+	.doc-title {
+		font-size: 1.9rem;
+	}
+}
+
+.prose-doc {
+	font-family: var(--font-body);
+	font-size: var(--doc-text);
+	line-height: 1.5;
+}
+.prose-doc > * + * {
+	/* One em between blocks: GitHub's value, and the least the US Web Design System gives. */
+	margin-top: 1em;
+}
+/* Headings. The first four levels are set in the serif face over sans text, so a heading differs
+   from the text in face as well as size. Each level is the smallest visible step from the next
+   (Butterick, "Headings"), with at least one and a half times as much space above as below
+   (US Web Design System, "Typography"). */
+.prose-doc :is(h1, h2, h3, h4, h5, h6) {
+	text-wrap: balance;
+}
+.prose-doc :is(h1, h2, h3, h4) {
+	font-family: var(--font-display);
+}
+.prose-doc h2 {
+	font-weight: 600;
+	font-size: 1.5rem;
+	line-height: 1.25;
+	letter-spacing: -0.005em;
+	margin-top: 1.75rem;
+	padding-top: 1.25rem;
+	border-top: var(--border) dashed var(--site-rule-color);
+}
+.prose-doc h3 {
+	font-weight: 600;
+	font-size: 1.25rem;
+	line-height: 1.3;
+	margin-top: 1.5rem;
+}
+/* Lists. A list sits close under the sentence that introduces it. The marker is quiet and hangs in
+   a fixed gutter, so the text of every item starts on one line. Items sit half an em apart
+   (US Web Design System, "Typography"); each nested level steps in by the same gutter. */
+.prose-doc :is(ul, ol) {
+	padding-inline-start: 1.6em;
+}
+.prose-doc ul {
+	list-style: disc;
+}
+.prose-doc ol {
+	list-style: decimal;
+	font-variant-numeric: tabular-nums lining-nums;
+}
+.prose-doc p + :is(ul, ol) {
+	margin-top: 0.4em;
+}
+.prose-doc li {
+	padding-inline-start: 0.2em;
+	line-height: 1.5;
+}
+.prose-doc li::marker {
+	color: var(--color-muted);
+}
+.prose-doc ol > li::marker {
+	font-family: var(--font-body);
+	font-size: 0.9em;
+	font-weight: 500;
+}
+.prose-doc li + li {
+	margin-top: 0.5em;
+}
+.prose-doc strong {
+	font-weight: 600;
+}
+.prose-doc code,
+.ui-code code {
+	font-family: var(--font-mono);
+	font-size: 0.8em;
+	background-color: var(--color-base-200);
+	border-radius: var(--radius-field);
+	padding: 0.08em 0.22em;
+	overflow-wrap: anywhere;
+}
+
+/* The rest of GitHub Flavored Markdown. */
+.prose-doc h1 {
+	font-weight: var(--font-weight-heading);
+	font-size: 1.5rem;
+	line-height: 1.25;
+	margin-top: 2.6rem;
+}
+.prose-doc h4 {
+	font-weight: 600;
+	font-size: 1.125rem;
+	margin-top: 1.1rem;
+}
+.prose-doc h5,
+.prose-doc h6 {
+	font-family: var(--font-body);
+	font-weight: 600;
+	font-size: 0.9375rem;
+	margin-top: 1.6rem;
+}
+.prose-doc h6 {
+	font-weight: 500;
+	color: color-mix(in oklab, currentColor 72%, transparent);
+}
+.prose-doc :is(h2, h3) + * {
+	margin-top: 0.7rem;
+}
+.prose-doc :is(h4, h5, h6) + * {
+	margin-top: 0.45rem;
+}
+.prose-doc em {
+	font-style: italic;
+}
+.prose-doc s {
+	text-decoration-thickness: 1px;
+	color: color-mix(in oklab, currentColor 62%, transparent);
+}
+.prose-doc a {
+	overflow-wrap: anywhere;
+}
+.prose-doc li > :is(ul, ol) {
+	margin-top: 0.35em;
+}
+.prose-doc li li + li {
+	margin-top: 0.3em;
+}
+.prose-doc ol ol {
+	list-style: lower-alpha;
+}
+.prose-doc li > p + p {
+	margin-top: 0.6em;
+}
+.prose-doc ul ul {
+	list-style: circle;
+}
+.prose-doc li:has(> input[type="checkbox"]),
+.prose-doc li:has(> p > input[type="checkbox"]) {
+	list-style: none;
+	margin-inline-start: -1.6em;
+	padding-inline-start: 1.8em;
+	position: relative;
+}
+.prose-doc li input[type="checkbox"] {
+	position: absolute;
+	inset-inline-start: 0;
+	top: 0.42em;
+	width: 1.05em;
+	height: 1.05em;
+	accent-color: var(--color-primary);
+}
+.prose-doc blockquote {
+	border-inline-start: 2px solid var(--site-rule-color);
+	padding-inline-start: 1.1em;
+	font-style: italic;
+}
+.prose-doc blockquote > * + * {
+	margin-top: 0.8em;
+}
+.prose-doc pre {
+	font-family: var(--font-mono);
+	font-size: 0.875rem;
+	line-height: 1.5;
+	background-color: var(--color-base-200);
+	border-radius: var(--radius-box);
+	padding: 0.7em 1.1em;
+	overflow-x: auto;
+	tab-size: 2;
+}
+.prose-doc pre:focus-visible {
+	outline: 2px solid var(--color-primary);
+	outline-offset: 2px;
+}
+.prose-doc pre code {
+	font-size: inherit;
+	background: none;
+	padding: 0;
+	border-radius: 0;
+	overflow-wrap: normal;
+	white-space: pre;
+}
+.prose-doc hr {
+	border: 0;
+	border-top: var(--border) solid var(--site-rule-color);
+	margin-block: 1.5rem;
+}
+.prose-doc img {
+	max-width: 100%;
+	height: auto;
+	border-radius: var(--radius-field);
+}
+.prose-doc kbd {
+	font-family: var(--font-mono);
+	font-size: 0.78em;
+	border: var(--border) solid var(--site-rule-color);
+	border-bottom-width: 2px;
+	border-radius: var(--radius-field);
+	padding: 0.05em 0.35em;
+}
+.prose-doc summary {
+	cursor: pointer;
+	font-weight: 600;
+}
+/* A folded section: a heading inside the summary keeps its size and its place in the outline. */
+.prose-doc summary > :is(h2, h3, h4) {
+	display: inline;
+	margin: 0;
+	padding: 0;
+	border: 0;
+}
+.prose-doc details:has(> summary > h2) {
+	margin-top: 1.75rem;
+	padding-top: 1.25rem;
+	border-top: var(--border) dashed var(--site-rule-color);
+}
+.prose-doc summary::marker {
+	color: var(--color-muted);
+}
+.prose-doc details > * + * {
+	margin-top: 0.6em;
+}
+.prose-doc :is(th, td)[align="center"] {
+	text-align: center;
+}
+
+/* Tables: the sans face at a size that reads as large as the text around it, light rules between
+   rows, a column of numbers aligned right (GOV.UK, "Table"). Code in a cell stays on one line. */
+.table-frame {
+	overflow-x: auto;
+	margin-block: 1.5em;
+	border-block: var(--border) solid var(--site-rule-color);
+}
+.table-frame:focus-visible {
+	outline: 2px solid var(--color-primary);
+	outline-offset: 2px;
+}
+.prose-doc table {
+	width: 100%;
+	border-collapse: collapse;
+	font-size: 0.9375rem;
+	line-height: 1.45;
+	font-variant-numeric: tabular-nums lining-nums;
+}
+.prose-doc th,
+.prose-doc td {
+	padding: 0.5em 1.25em 0.5em 0;
+	text-align: start;
+	vertical-align: top;
+}
+.prose-doc th:last-child,
+.prose-doc td:last-child {
+	padding-inline-end: 0;
+}
+.prose-doc th {
+	font-weight: 600;
+	vertical-align: bottom;
+	border-bottom: var(--border) solid var(--site-rule-color);
+	white-space: nowrap;
+}
+.prose-doc tbody tr + tr td {
+	border-top: var(--border) solid color-mix(in oklab, var(--site-rule-color) 45%, transparent);
+}
+.prose-doc th[align="right"],
+.prose-doc td[align="right"] {
+	text-align: end;
+	white-space: nowrap;
+}
+.prose-doc td code {
+	font-size: 0.86em;
+}
+@media (min-width: 48rem) {
+	.prose-doc td code {
+		white-space: nowrap;
+		overflow-wrap: normal;
+	}
+}
+
+/* Changed passages, marked the way Word and Google Docs mark them. */
+ins {
+	text-decoration: none;
+	background-color: var(--ins);
+	color: var(--cairn-success-ink);
+	border-radius: 2px;
+	padding-block: 1px;
+}
+del {
+	background-color: var(--del);
+	color: var(--cairn-error-ink);
+	text-decoration-thickness: 1px;
+}
+.changes-off ins {
+	background: none;
+	color: inherit;
+	padding: 0;
+}
+.changes-off del {
+	display: none;
+}
+
+/* A passage with a note on it. */
+mark.note-mark {
+	background-color: var(--mark);
+	color: inherit;
+	border-radius: 2px;
+	padding-block: 1px;
+	cursor: pointer;
+}
+mark.note-mark[data-on] {
+	background-color: var(--mark-active);
+}
+
+/* A question, set in the text where it is asked. */
+.question {
+	display: grid;
+	gap: var(--spacing-8px);
+	margin-block: 1rem 1.4rem;
+	font-family: var(--font-body);
+}
+.question-option {
+	display: grid;
+	grid-template-columns: auto minmax(0, 1fr);
+	gap: var(--spacing-12px);
+	align-items: start;
+	padding: var(--spacing-12px) var(--spacing-14px);
+	border: var(--border) solid var(--site-field-border);
+	border-radius: var(--radius-box);
+	background-color: var(--color-base-100);
+	font-size: var(--text-step-11);
+	line-height: 1.5;
+	cursor: pointer;
+}
+.question-option:has(input:checked) {
+	background-color: var(--site-field-bg);
+	border-color: var(--color-primary);
+	outline: 1px solid var(--color-primary);
+}
+.question-option:has(input:disabled) {
+	cursor: default;
+}
+.question-option:has(input:disabled):not(:has(input:checked)) {
+	color: var(--color-muted);
+	border-color: var(--color-base-300);
+}
+.question-option .radio {
+	margin-top: 0.2rem;
+}
+.question-option strong {
+	font-weight: 600;
+}
+
+/* The decision. */
+.decide {
+	margin-block: 1.5rem;
+	padding: var(--spacing-20px);
+	border: var(--border) solid var(--color-base-300);
+	border-radius: var(--radius-box);
+	background-color: var(--color-base-200);
+	font-family: var(--font-body);
+	font-size: var(--text-step-10);
+	line-height: 1.5;
+}
+.decide h2 {
+	font-size: var(--text-step-10);
+	font-weight: 600;
+}
+.answers {
+	display: grid;
+	gap: var(--spacing-4px);
+}
+.answers li {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr);
+}
+@media (min-width: 40rem) {
+	.answers li {
+		grid-template-columns: minmax(0, 15rem) minmax(0, 1fr);
+		column-gap: var(--spacing-16px);
+	}
+}
+
+/* Note cards in the margin. */
+.note-cards {
+	position: relative;
+}
+.note-card {
+	background-color: var(--color-base-100);
+	border: var(--border) solid var(--color-base-300);
+	border-radius: var(--radius-box);
+	padding: var(--spacing-10px) var(--spacing-12px);
+	font-size: var(--text-step-9);
+	line-height: 1.45;
+}
+.note-cards.placed .note-card {
+	position: absolute;
+	inset-inline: 0;
+}
+.note-cards.settled .note-card {
+	transition: top var(--motion-quick) var(--motion-ease);
+}
+.note-card.on {
+	background-color: var(--site-field-bg);
+	border-color: var(--site-field-border);
+}
+.note-card.done {
+	color: var(--color-muted);
+}
+.note-quote {
+	font-family: var(--font-display);
+	font-style: italic;
+	color: var(--color-muted);
+	border-inline-start: 2px solid var(--color-secondary);
+	padding-inline-start: var(--spacing-10px);
+	display: -webkit-box;
+	-webkit-line-clamp: 2;
+	line-clamp: 2;
+	-webkit-box-orient: vertical;
+	overflow: hidden;
+}
+.note-who {
+	font-weight: 600;
+}
+.note-who.claude {
+	color: var(--color-secondary);
+}
+.note-entry + .note-entry {
+	margin-top: var(--spacing-8px);
+	padding-top: var(--spacing-8px);
+	border-top: var(--border) solid var(--color-base-300);
+}
+.textarea.note-field {
+	width: 100%;
+	min-height: 4.75rem;
+	background-color: var(--site-field-bg);
+	border-color: var(--site-field-border);
+	font-size: var(--text-step-9);
+	line-height: 1.4;
+	padding: var(--spacing-7px) var(--spacing-9px);
+}
+
+/* The bar that follows the reader down a long document. */
+.follow-bar {
+	position: fixed;
+	inset-inline: 0;
+	bottom: 0;
+	z-index: 20;
+	background-color: var(--color-base-200);
+	border-top: var(--border) solid var(--color-base-300);
+	padding: var(--spacing-10px) var(--spacing-16px);
+	font-size: var(--text-step-9);
+}
+@media (min-width: 64rem) {
+	.follow-bar {
+		inset-inline-start: var(--rail-width);
+	}
+}
+.clamp-2 {
+	display: -webkit-box;
+	-webkit-line-clamp: 2;
+	line-clamp: 2;
+	-webkit-box-orient: vertical;
+	overflow: hidden;
+}
+.clamp-3 {
+	display: -webkit-box;
+	-webkit-line-clamp: 3;
+	line-clamp: 3;
+	-webkit-box-orient: vertical;
+	overflow: hidden;
+}
+
+/* A retitled document shows the old title as one small struck line above the new one. */
+.doc-title del {
+	display: block;
+	width: fit-content;
+	margin-block-end: 0.35rem;
+	font-family: var(--font-body);
+	font-size: var(--text-step-10);
+	font-weight: 400;
+	line-height: 1.4;
+	letter-spacing: 0;
+}
+
+.changes-off .doc-title del {
+	display: none;
+}
