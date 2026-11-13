@@ -78,9 +78,10 @@ export function readThreads(root: string, id: string): Notes {
 }
 
 /**
- * Places a thread written on an older version against the newest one. A quote still in the newest
- * text keeps its words. A quote inside a changed passage's removed words takes the added words,
- * with the old ones as `was`, or is an orphan when nothing was added. Any other quote is an orphan.
+ * Places a thread written on an older version against the newest one. A quote inside a changed
+ * passage's removed words keeps its words when the added words still hold them. Otherwise it takes
+ * the added words, with the old ones as `was`, or is an orphan when nothing was added. A quote in no
+ * changed passage keeps its words while the newest text holds them, and is otherwise an orphan.
  * A moved thread loses its `start`, because offsets shift between versions.
  */
 function moved(thread: Thread, older: string, newest: string): Thread {
@@ -88,14 +89,15 @@ function moved(thread: Thread, older: string, newest: string): Thread {
 	const comparison = compare(older, newest);
 	if (comparison.whole) return { ...placed, orphan: true };
 	const quote = normalize(thread.quote);
-	// A changed passage is a whole sentence, so the quoted words can survive inside one.
-	if (normalize(documentText(newest)).includes(quote)) return placed;
 	for (const passage of comparison.passages) {
 		if (!normalize(inlineText(passage.removed)).includes(quote)) continue;
 		const added = inlineText(passage.added);
+		// A changed passage is a whole sentence, so the quoted words can survive inside one.
+		if (normalize(added).includes(quote)) return placed;
 		if (!added) return { ...placed, orphan: true };
 		return { ...placed, quote: added, was: thread.quote };
 	}
+	if (normalize(documentText(newest)).includes(quote)) return placed;
 	return { ...placed, orphan: true };
 }
 

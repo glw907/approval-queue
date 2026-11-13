@@ -88,6 +88,16 @@ describe('readThreads', () => {
 		expect(title.was).toBe('Two answers needed before workstation #233 and #234 merge');
 	});
 
+	it('gives a short quote inside a changed passage the new words, though the newest text repeats it', () => {
+		const { id } = createDocument(root, SENT, { kind: 'merge', title: 'Sent' });
+		addVersion(root, id, RETURNED);
+		writeNote(root, id, open('#233', 'Which one?', 1, 33));
+		const [thread] = readThreads(root, id).threads;
+		expect(thread.quote).toBe('Keep an edit to a file Survey owns, and accept a test with ten findings?');
+		expect(thread.was).toBe('#233');
+		expect(thread.orphan).toBeUndefined();
+	});
+
 	it('keeps the quote of a thread on an unchanged paragraph, without its start', () => {
 		const id = report('It ran.\n\nThen it stopped.');
 		addVersion(root, id, REPORT('It ran.\n\nThen it stopped for good.'));

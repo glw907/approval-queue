@@ -33,7 +33,7 @@ export function reply(id: string, thread: string | undefined, file: string): num
 
 		let n: number;
 		if (thread !== undefined) {
-			n = Number(thread);
+			n = /^\d+$/.test(thread) ? Number(thread) : NaN;
 			const found = threads.find((t) => t.id === n);
 			if (deleted.includes(n)) return refuse(`thread ${thread} of ${id} was deleted`);
 			if (!found) return refuse(`${id} has no thread ${thread}`);

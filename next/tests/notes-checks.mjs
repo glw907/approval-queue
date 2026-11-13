@@ -450,6 +450,8 @@ async function check5(/** @type {Browser} */ browser) {
 	const decide = page.locator('section.decide');
 	const sendBack = decide.getByRole('button', { name: DOC.sendBack });
 	check((await sendBack.getAttribute('aria-disabled').catch(() => null)) === 'true', 'check 5: Send back is aria-disabled with no note and every pick recommended');
+	const look = () => sendBack.evaluate((/** @type {HTMLElement} */ b) => { const c = getComputedStyle(b); return { color: c.color, background: c.backgroundColor, pointer: c.pointerEvents }; }).catch(() => null);
+	const refusedLook = await look();
 	// A reader can click a button marked aria-disabled, so the click skips Playwright's enabled wait.
 	await sendBack.click({ force: true }).catch(() => {});
 	check(await visible(decide.getByText(DOC.nothingToSendBack)), 'check 5: a click shows nothingToSendBack');
@@ -460,6 +462,8 @@ async function check5(/** @type {Browser} */ browser) {
 	await off.check();
 	for (let i = 0; i < 30 && !readNamed(root, id, 'answers.json'); i++) await pause(100);
 	check((await sendBack.getAttribute('aria-disabled').catch(() => 'true')) !== 'true', 'check 5: with one answer moved, Send back is enabled');
+	const readyLook = await look();
+	check(refusedLook !== null && JSON.stringify(refusedLook) === JSON.stringify(readyLook), `check 5: the refused Send back looks as it does once enabled, the mockup's look: ${JSON.stringify(refusedLook)} and ${JSON.stringify(readyLook)}`);
 	await sendBack.click();
 	await visible(page.getByText(DOC.recorded));
 	check(readDecisions(root, id).at(-1)?.action === 'sendback', 'check 5: with one answer moved, the send-back is on disk');

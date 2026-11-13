@@ -181,7 +181,7 @@ A post that fails keeps what was written and says why, beside the box.
 	const relay = () => tick().then(layout);
 
 	$effect(() => {
-		void [threads, active, draft, relayout, wide, replyText === '', failed, tooLong, replyTooLong];
+		void [threads, active, draft, draft?.writing, relayout, wide, replyText === '', failed, tooLong, replyTooLong];
 		relay();
 	});
 
@@ -246,7 +246,17 @@ A post that fails keeps what was written and says why, beside the box.
 	/** Closes the note box and keeps what it held, for a later note on the same words. */
 	function shelve() {
 		if (draft && draftText.trim()) kept = { quote: draft.quote, text: draftText };
+		closeBox();
+	}
+
+	/** Closes the note box, and gives focus to the sheet or the page rather than leave it nowhere. */
+	function closeBox() {
 		draft = null;
+		tick().then(() => {
+			if (document.activeElement && document.activeElement !== document.body) return;
+			const target = sheet?.open ? sheet.querySelector('button') : main;
+			target?.focus({ preventScroll: true });
+		});
 	}
 
 	function threadAt(x: number, y: number): string | null {
@@ -371,7 +381,7 @@ A post that fails keeps what was written and says why, beside the box.
 				{@render failure()}
 				<div class="mt-2 flex gap-2">
 					<button class="btn btn-primary btn-sm" disabled={!draftText.trim() || tooLong} onclick={saveDraft}>{NOTES.saveNote}</button>
-					<button class="btn btn-ghost btn-sm" onclick={() => (draft = null)}>{NOTES.cancel}</button>
+					<button class="btn btn-ghost btn-sm" onclick={closeBox}>{NOTES.cancel}</button>
 				</div>
 			{:else}
 				<button class="btn btn-sm w-full justify-start" onmousedown={(e) => e.preventDefault()} onclick={write}>
@@ -453,7 +463,7 @@ A post that fails keeps what was written and says why, beside the box.
 
 <div class="page">
 	<!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
-	<div class="page-main" bind:this={main} onclick={clicked} onmousemove={hovered}>
+	<div class="page-main" tabindex="-1" bind:this={main} onclick={clicked} onmousemove={hovered}>
 		{#if !wide && threads.length}
 			<p class="mb-3 flex justify-end" data-no-notes>
 				<button class="btn btn-sm" onclick={() => (sheetOpen = true)}>
@@ -521,6 +531,11 @@ A post that fails keeps what was written and says why, beside the box.
 </dialog>
 
 <style>
+	/* The page takes focus only when a closed note box hands it back. */
+	.page-main:focus {
+		outline: none;
+	}
+
 	:global(::highlight(note)) {
 		background-color: var(--mark);
 	}

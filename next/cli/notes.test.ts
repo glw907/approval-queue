@@ -99,6 +99,7 @@ describe('reply', () => {
 	const refusals: [string, () => string[], string][] = [
 		['an unknown id', () => ['20261112-083300-abcdef', '1', file('a.md', 'x')], 'no document'],
 		['an unknown thread', () => [id, '7', file('a.md', 'x')], 'has no thread 7'],
+		['a thread number that is not a plain number', () => [id, '1.0', file('a.md', 'x')], 'has no thread 1.0'],
 		['a missing file', () => [id, '1', join(state, 'absent.md')], "can't read"],
 		['a new thread with no blockquote', () => [id, file('a.md', 'Just a note.')], 'blockquote'],
 		['an empty reply', () => [id, '1', file('a.md', '  \n')], 'holds no note'],

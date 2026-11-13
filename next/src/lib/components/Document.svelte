@@ -483,9 +483,9 @@
 										<button
 											type="button"
 											class="btn"
+											class:refusable={nothingToAct && !busy}
 											aria-disabled={busy || nothingToAct || undefined}
 											aria-describedby={refusedEmpty ? `${doc.id}-nothing` : undefined}
-											style:pointer-events={nothingToAct ? 'auto' : undefined}
 											onclick={() => decide('sendback')}
 										>
 											{DOC.sendBack}
@@ -505,3 +505,23 @@
 		</div>
 	</article>
 </Annotated>
+
+<style>
+	/*
+	 * Send back keeps the mockup's look while it is refused. daisyUI draws any
+	 * `.btn[aria-disabled=true]` greyed and deaf to clicks, so this puts back the
+	 * base `.btn` values: the click has to land to show the refusal sentence.
+	 */
+	.btn.refusable[aria-disabled='true'] {
+		pointer-events: auto;
+		color: var(--color-base-content);
+		--btn-bg: var(--color-base-200);
+		--btn-border: color-mix(in oklab, var(--color-base-200), #000 calc(var(--depth) * 5%));
+		--btn-shadow:
+			0 3px 2px -2px color-mix(in oklab, var(--btn-bg) calc(var(--depth) * 30%), #0000),
+			0 4px 3px -2px color-mix(in oklab, var(--btn-bg) calc(var(--depth) * 30%), #0000);
+		--btn-inset: 0 0.5px 0 0.5px oklch(100% 0 0 / calc(var(--depth) * 6%));
+		background-color: var(--btn-bg);
+		background-image: none, var(--fx-noise);
+	}
+</style>
