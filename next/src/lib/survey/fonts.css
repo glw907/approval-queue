@@ -1,0 +1,9 @@
+/* Survey fonts, self-hosted from Fontsource. The consumer installs the packages these import.
+   Adapted from the approval queue's copy of cairn-themes commit dea9839; the Karla italic is new. */
+@import "@fontsource/spectral/400.css";
+@import "@fontsource/spectral/400-italic.css";
+@import "@fontsource/spectral/500.css";
+@import "@fontsource/spectral/600.css";
+@import "@fontsource-variable/karla";
+@import "@fontsource-variable/karla/wght-italic.css";
+@import "@fontsource/monaspace-neon/400.css";
