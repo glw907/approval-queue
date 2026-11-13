@@ -137,6 +137,8 @@ export const DOC = {
 	handoffAfter: "The session has picked up your decision, so it can't be undone.",
 	undoLate: 'The session picked up your decision before your Undo reached the queue, so your decision stands.',
 	withdrawn: "The session withdrew this document, so there's nothing left to decide.",
+	/** Spoken only, when another tab undoes the decision this page shows. */
+	reopened: 'Your decision was undone in another tab. This document is open again.',
 	unanswered: (labels: string[]) => `Answer ${joinAnd(labels)} first.`,
 	headsMissing: "The queue has no record of the commits the session sent, so you can't approve this.",
 	notSaved: (detail: string) => `The queue couldn't save it: ${detail}`,

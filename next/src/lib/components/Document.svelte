@@ -61,6 +61,8 @@
 	const decision = $derived(standing.state === 'decided' || standing.state === 'handed' ? standing.decision : null);
 
 	let busy = $state(false);
+	/** Set when the poll finds the decision undone elsewhere, which the section's live line says. */
+	let reopened = $state(false);
 	let attempts = 0;
 	let failure = $state<Failure | null>(null);
 	// A failure shows only while the document stands where it was drawn, so a hand-off or a reload
@@ -113,6 +115,7 @@
 		// The buttons mark themselves busy with aria-disabled, never disabled, so focus stays on the
 		// one clicked while the post is out.
 		busy = true;
+		reopened = false;
 		let failed: Failure | null = null;
 		try {
 			failed = await send(body);
@@ -153,6 +156,8 @@
 		if (seq !== answerSeq[body.question]) return;
 		answerBusy[body.question] = false;
 		answerFailures[body.question] = failed ?? undefined;
+		// A refusal showing the document moved on, as when another tab decided it, redraws the page.
+		if (failed && !failed.retry) await invalidateAll();
 		if (!retry) return;
 		// A recorded retry takes its block, and the focused button, away; focus goes back to the pick.
 		await tick();
@@ -169,13 +174,15 @@
 		const stop = new AbortController();
 		let out = false;
 		const timer = setInterval(async () => {
-			if (out) return;
+			// While a post is out, `act` alone redraws and moves focus.
+			if (out || busy) return;
 			out = true;
 			try {
 				const res = await fetch(`/api/${doc.id}`, { signal: AbortSignal.any([stop.signal, AbortSignal.timeout(10_000)]) });
 				const now = res.ok ? ((await res.json()) as DecideAnswer).standing : null;
-				if (stop.signal.aborted || !now || same(mark(now), was)) return;
+				if (stop.signal.aborted || busy || !now || same(mark(now), was)) return;
 				const held = !!decideEl?.contains(document.activeElement);
+				if (now.state === 'waiting') reopened = true;
 				await invalidateAll();
 				await tick();
 				// The hand-off, or an Undo from another tab, takes the focused button away.
@@ -257,7 +264,7 @@
 					<div class="prose-doc">{@html seg.html}</div>
 				{:else if seg.type === 'question'}
 					{@const lost = standing.state === 'waiting' ? answerFailures[seg.id] : undefined}
-					<fieldset class="question">
+					<fieldset class="question" aria-describedby={lost ? `${doc.id}-${seg.id}-failure-what ${doc.id}-${seg.id}-failure-why` : undefined}>
 						<legend class="sr-only">{seg.label}</legend>
 						{#each seg.options as o, i (i)}
 							<label class="question-option">
@@ -283,8 +290,8 @@
 						<div data-no-notes>
 							{@render notRecorded(
 								lost,
-								() => answerBusy[seg.id] || answer(lost.body as AnswerBody, true),
-								!!answerBusy[seg.id],
+								() => answerBusy[seg.id] || busy || !!shown?.retry || answer(lost.body as AnswerBody, true),
+								!!answerBusy[seg.id] || busy || !!shown?.retry,
 								seg.id
 							)}
 						</div>
@@ -298,6 +305,7 @@
 						aria-label={DOC.decision}
 						aria-busy={busy}
 					>
+						<p class="sr-only" role="status">{reopened && standing.state === 'waiting' ? DOC.reopened : ''}</p>
 						{#if decision}
 							<div role="status">
 								<h2 class="flex items-center gap-2" tabindex="-1" data-decided>
@@ -338,7 +346,10 @@
 								</p>
 							{/if}
 						{:else if standing.state === 'withdrawn'}
-							<p>{DOC.withdrawn}</p>
+							<p tabindex="-1" data-decided>{DOC.withdrawn}</p>
+							{#if shown}
+								{@render notRecorded(shown, () => act(shown.body), busy)}
+							{/if}
 						{:else if report}
 							<h2>{DOC.reportHeading}</h2>
 							<p class="mt-1 muted">{DOC.reportNote}</p>
