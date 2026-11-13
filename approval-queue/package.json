@@ -10,7 +10,8 @@
   "scripts": {
     "build": "vite build",
     "check": "svelte-kit sync && svelte-check",
-    "test": "vitest run"
+    "test": "vitest run",
+    "rehearse": "unshare -rnpf --mount-proc --kill-child bash tests/switch-rehearsal.sh"
   },
   "devDependencies": {
     "@sveltejs/adapter-node": "^6.0.0",
