@@ -32,8 +32,8 @@ Geoff and return his decision as JSON. `README.md` holds the interfaces and the 
 ## Current state
 
 - `main` still serves the old queue: the old SvelteKit app and the bash command. Passes A1 to A5
-  (PRs #19 to #23) put the new app under `next/`, and the switch to it waits on PR #PRNUM.
-- Pass A6 is on `aq-a6` as PR #PRNUM. It deletes the old app, the old bash command, and their shell
+  (PRs #19 to #23) put the new app under `next/`, and the switch to it waits on PR #24.
+- Pass A6 is on `aq-a6` as PR #24. It deletes the old app, the old bash command, and their shell
   tests, and moves `next/` to `approval-queue/`. The command is a launcher with nine commands, and
   seven old subcommands print that they are gone.
 - `restart` carries the switch. The first restart on a state directory that holds the old queue's
@@ -47,7 +47,7 @@ Geoff and return his decision as JSON. `README.md` holds the interfaces and the 
 
 ## Next action
 
-The workstation round's conductor sends the close packet that carries PR #PRNUM, and runs the
+The workstation round's conductor sends the close packet that carries PR #24, and runs the
 switch after Geoff's approve (workstation design, "The switch"): merge, pull the checkout, and run
 `approval-queue restart` on pavilion. On thinkpad-x1, after the switch: pull `~/.dotfiles` and
 `~/Projects/approval-queue`, run `approval-queue restart`, and run
