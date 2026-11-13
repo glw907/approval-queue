@@ -48,6 +48,12 @@ describe('restart', () => {
 		expect(r.build_prev_exists).toBe('no');
 		expect(r.node_modules_prev_exists).toBe('no');
 		expect(r.stage_exists).toBe('no');
+		expect(r.archive).toBe('yes');
+		expect(r.old).toBe('0');
+		expect(r.archive_list).toContain('items/');
+		expect(r.archive_list).toContain('decisions.jsonl');
+		expect(r.stderr).toContain('archive-2026-11.tar.gz');
+		expect(r.stderr).toContain('left in place');
 	}, 70_000);
 
 	it('leaves the old server running when the new build exits at start', () => {
@@ -59,6 +65,8 @@ describe('restart', () => {
 		expect(r['now.aq_build_status']).toBe('404');
 		expect(r.build_prev_exists).toBe('no');
 		expect(r.stage_processes).toBe('0');
+		expect(r.archive).toBe('no');
+		expect(r.old).toBe('4');
 	}, 70_000);
 
 	it('stops a new build that never answers and leaves the old server running', () => {
@@ -70,6 +78,8 @@ describe('restart', () => {
 		expect(r.stage_processes).toBe('0');
 		expect(r['now.pid_on_7907_is_old']).toBe('yes');
 		expect(r['now.aq_build_status']).toBe('404');
+		expect(r.archive).toBe('no');
+		expect(r.old).toBe('4');
 	}, 85_000);
 
 	it('puts the old build back when the new build answers on the spare port but not on the real one', () => {
@@ -83,7 +93,21 @@ describe('restart', () => {
 		expect(r['later.pid_on_7907_is_ours']).toBe('yes');
 		expect(r['later.aq_build_status']).toBe('404');
 		expect(r['later.build_processes']).toBe('1');
+		expect(r.archive).toBe('no');
+		expect(r.old).toBe('4');
 	}, 130_000);
+
+	it('refuses to switch while an old item is undecided, naming it', () => {
+		const r = scenario('undecided', 45);
+		expect(r.exit).toBe('1');
+		expect(r.stderr).toContain('waiting-1');
+		expect(r.stderr).toContain('Waiting item');
+		expect(r['now.pid_on_7907_is_old']).toBe('yes');
+		expect(r['now.aq_build_status']).toBe('404');
+		expect(r.stage_exists).toBe('no');
+		expect(r.archive).toBe('no');
+		expect(r.old).toBe('4');
+	}, 55_000);
 
 	it('refuses a port held by a server this queue did not start, and stages nothing', () => {
 		const r = scenario('foreign', 45);

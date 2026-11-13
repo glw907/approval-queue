@@ -4,6 +4,7 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { ARCHIVE, archiveExists, archiveOld, oldEntries, strangers, undecided } from './archive.ts';
 
 const TRIAL_MS = 20_000;
 const STOP_MS = 10_000;
@@ -88,7 +89,9 @@ function freePort(): Promise<number> {
  * when it answers within 20 seconds does the old server stop, the build and `node_modules` swap
  * in, and the new server start on the real port. A new server that doesn't answer is stopped, and
  * the directories the swap moved go back, from the swap's own record, with the old build started
- * again. Returns the exit code: 0 on a restart, 1 on any refusal or failure.
+ * again. Refuses first while an old item is undecided or an old archive stands in the way. Once the
+ * new server answers on the real port, moves the old queue's files into one archive. Returns the
+ * exit code: 0 on a restart, 1 on any refusal or failure.
  */
 export async function restart(): Promise<number> {
 	const port = Number(process.env.APPROVAL_QUEUE_PORT ?? 7907);
@@ -163,6 +166,19 @@ export async function restart(): Promise<number> {
 	};
 
 	try {
+		// The switch from the old queue: refuse before anything is staged.
+		const old = oldEntries(state);
+		if (old.length && archiveExists(state)) {
+			say(`${path.join(state, ARCHIVE)} exists and the old queue's files are still there; move the archive aside and run restart again`);
+			return 1;
+		}
+		const waiting = undecided(state);
+		if (waiting.length) {
+			for (const item of waiting) say(`${item.id} "${item.title}" is undecided`);
+			say(`decide each on the old page at ${base} and run restart again; the old server keeps running`);
+			return 1;
+		}
+
 		// Name the listener before staging anything.
 		const first = await identify();
 		if (typeof first === 'string') {
@@ -259,6 +275,18 @@ export async function restart(): Promise<number> {
 					if (typeof pid === 'number' && pid !== oldPid && ours(pid)) {
 						for (const dir of SWAP_DIRS) fs.rmSync(path.join(app, `${dir}.prev`), { recursive: true, force: true });
 						say(`the new build answered on spare port ${spare}; restarted, pid ${pid}`);
+						// The old state moves only now that the new server answers on the real port.
+						if (old.length) {
+							try {
+								archiveOld(state);
+								say(`the old queue's files are in ${path.join(state, ARCHIVE)}`);
+							} catch (err) {
+								say(`the new server is running, but the old queue's files stay where they were: ${(err as Error).message}; run restart again to retry`);
+								return 1;
+							}
+						}
+						const others = strangers(state);
+						if (others.length) say(`left in place; the queue doesn't know them: ${others.join(', ')}`);
 						return 0;
 					}
 				}

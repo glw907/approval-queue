@@ -6,7 +6,9 @@
 # build as the old server on 7907, then runs the copy's restart. A shim npm breaks the staged build
 # per mode: exits (the staged server exits at once), silent (it never listens), slow (it waits 15
 # seconds before listening on 7907 only), foreign (a server this queue didn't start holds 7907), and
-# locked (another restart holds restart.lock). Mode ok leaves the build alone.
+# locked (another restart holds restart.lock). Mode ok leaves the build alone. Mode undecided leaves an
+# old item with no decision. Every mode seeds the state directory with the old queue's files, and the
+# output says whether the archive was made and how many of those files remain.
 set -uo pipefail
 mode=${1:?mode} tree=${2:?tree} state=${3:?state}
 src=$(cd "$(dirname "$0")/.." && pwd)
@@ -17,6 +19,17 @@ mkdir -p "$tree" "$state"
 tree=$(realpath "$tree")
 state=$(realpath "$state")
 export APPROVAL_QUEUE_STATE="$state"
+# The old queue's files: a decided item, a retired one, a log, a fetch, and a findings folder.
+mkdir -p "$state/items/decided-1" "$state/items/retired-1" "$state/findings"
+echo '{"title":"Decided item"}' >"$state/items/decided-1/item.json"
+echo '{"decision":"approve"}' >"$state/items/decided-1/decision.json"
+echo '{}' >"$state/decisions.jsonl"
+echo '{}' >"$state/fetch-1.json"
+echo x >"$state/findings/f.md"
+if [ "$mode" = undecided ]; then
+	mkdir -p "$state/items/waiting-1"
+	echo '{"title":"Waiting item"}' >"$state/items/waiting-1/item.json"
+fi
 tar -C "$src" --exclude=./node_modules --exclude=./build --exclude=./.svelte-kit --exclude=./.stage -cf - . | tar -C "$tree" -xf -
 
 up() { curl -s -o /dev/null --max-time 2 "http://127.0.0.1:${1:-7907}/"; }
@@ -106,6 +119,12 @@ echo "build_prev_exists=$([ -e "$tree/build.prev" ] && echo yes || echo no)"
 echo "node_modules_prev_exists=$([ -e "$tree/node_modules.prev" ] && echo yes || echo no)"
 echo "stage_exists=$([ -e "$tree/.stage" ] && echo yes || echo no)"
 echo "stage_processes=$(count "$tree/.stage")"
+echo "archive=$([ -e "$state/archive-2026-11.tar.gz" ] && echo yes || echo no)"
+old=0
+for f in items decisions.jsonl fetch-1.json findings; do [ -e "$state/$f" ] && old=$((old + 1)); done
+echo "old=$old"
+echo "store=$([ -d "$state/store" ] && echo yes || echo no)"
+echo "archive_list=$(tar -tzf "$state/archive-2026-11.tar.gz" 2>/dev/null | tr '\n' ' ')"
 report now
 if [ "$mode" = slow ]; then
 	sleep 20
