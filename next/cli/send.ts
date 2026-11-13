@@ -1,8 +1,9 @@
 import type { PrView, ViewResult } from '#lib/doc/pr.ts';
-import { createDocument, storeRoot, writeNamed } from '#lib/store/store.ts';
+import { addVersion, createDocument, readDocument, storeRoot, writeDecision, writeNamed } from '#lib/store/store.ts';
 import { check } from './check.ts';
 import { ghView } from './pr.ts';
-import { storeFailure, waitForDecision } from './wait.ts';
+import type { State } from './state.ts';
+import { readState, storeFailure, waitForDecision } from './wait.ts';
 
 /** `ghView`'s view, which carries the head commit the pull request had when it was checked. */
 type HeadView = PrView & { headRefOid?: string };
@@ -29,15 +30,14 @@ function headKeeper() {
 	return { view, heads, headless };
 }
 
+type Checked = { doc: NonNullable<ReturnType<typeof check>['doc']>; source: string; heads: Head[] };
+
 /**
- * Checks a document as `check` does, stores it, and waits for the queue's decision. A fault, or a
- * check still running, stores nothing and exits 1. A report prints its id and exits at once.
- *
- * @remarks A merge document also stores `heads.json`, each pull request's head commit as it was
- * checked, which an approve copies so `merge` merges only what Geoff read. A pull request GitHub
- * gives no head for stores nothing and exits 1.
+ * Runs `send`'s check on the document at `path`, keeping each pull request's head. Returns what
+ * to store, or the exit code after printing why nothing can be stored: a fault, a check still
+ * running, or a merge pull request GitHub gives no head for.
  */
-export async function send(path: string): Promise<number> {
+function checkToSend(path: string): Checked | number {
 	const kept = headKeeper();
 	const checked = check(path, kept.view);
 	if (checked.code !== 0 || !checked.doc || checked.source === null) {
@@ -49,12 +49,26 @@ export async function send(path: string): Promise<number> {
 		process.stderr.write('approval-queue: a check is still running; send it when the checks finish\n');
 		return 1;
 	}
-	const merge = checked.doc.kind === 'merge';
-	if (merge && kept.headless.length) {
+	if (checked.doc.kind === 'merge' && kept.headless.length) {
 		const names = kept.headless.join(', ');
 		process.stderr.write(`approval-queue: GitHub gave no head commit for ${names}, so nothing was stored\n`);
 		return 1;
 	}
+	return { doc: checked.doc, source: checked.source, heads: kept.heads };
+}
+
+/**
+ * Checks a document as `check` does, stores it, and waits for the queue's decision. A fault, or a
+ * check still running, stores nothing and exits 1. A report prints its id and exits at once.
+ *
+ * @remarks A merge document also stores `heads.json`, each pull request's head commit as it was
+ * checked, which an approve copies so `merge` merges only what Geoff read. A pull request GitHub
+ * gives no head for stores nothing and exits 1.
+ */
+export async function send(path: string): Promise<number> {
+	const checked = checkToSend(path);
+	if (typeof checked === 'number') return checked;
+	const merge = checked.doc.kind === 'merge';
 	const root = storeRoot();
 	let id: string;
 	try {
@@ -64,7 +78,7 @@ export async function send(path: string): Promise<number> {
 	}
 	if (merge) {
 		try {
-			writeNamed(root, id, 'heads.json', kept.heads);
+			writeNamed(root, id, 'heads.json', checked.heads);
 		} catch (err) {
 			// The document is stored, so name it: with no heads it can't be approved.
 			process.stderr.write(`approval-queue: stored ${id}, but not its head commits, so it can't be approved\n`);
@@ -76,5 +90,66 @@ export async function send(path: string): Promise<number> {
 		return 0;
 	}
 	process.stderr.write(`approval-queue: stored ${id}; waiting for a decision\n`);
+	return waitForDecision(root, id);
+}
+
+/** How a refusal of `send --returns` names the state a document is in. */
+function stateName(state: State): string {
+	if (state.state === 'waiting') return 'waiting for a decision';
+	if (state.state === 'withdrawn') return 'withdrawn';
+	if (state.state === 'decided') return `decided (${state.decision.action}) and not handed over yet`;
+	return `handed over as ${state.decision.action}`;
+}
+
+/** A refusal of `send --returns`: its sentence goes on stderr and the command exits 1. */
+const refuse = (sentence: string) => {
+	process.stderr.write(`approval-queue: ${sentence}\n`);
+	return 1;
+};
+
+/**
+ * Returns a revised document for the send-back of document `id`, then waits for the new decision
+ * as `send` does.
+ *
+ * @remarks
+ * Refuses with exit 1, storing nothing, unless the document's send-back has been handed over, and
+ * when the revision changes the document's kind or fails `send`'s check. Then it adds the version,
+ * rewrites a merge document's `heads.json` with the heads just checked, and empties
+ * `answers.json`, because question ids can move between versions. Last it writes a `returned`
+ * record, which folds the document back to waiting. A write that fails after the version is added
+ * exits 1 and names the version.
+ */
+export async function sendReturn(id: string, path: string): Promise<number> {
+	const root = storeRoot();
+	let kind: string;
+	try {
+		const state = readState(root, id);
+		if (state.state !== 'handed' || state.decision.action !== 'sendback') {
+			return refuse(`only a send-back that was handed over can be returned, and ${id} is ${stateName(state)}`);
+		}
+		kind = readDocument(root, id).meta.kind;
+	} catch (err) {
+		return storeFailure(err);
+	}
+	const checked = checkToSend(path);
+	if (typeof checked === 'number') return checked;
+	if (checked.doc.kind !== kind) {
+		return refuse(`${id} is a ${kind} document and ${path} is a ${checked.doc.kind} document; a return keeps the kind`);
+	}
+	let version: number;
+	try {
+		version = addVersion(root, id, checked.source).versions;
+	} catch (err) {
+		return storeFailure(err);
+	}
+	try {
+		if (kind === 'merge') writeNamed(root, id, 'heads.json', checked.heads);
+		writeNamed(root, id, 'answers.json', {});
+		writeDecision(root, id, { action: 'returned', at: new Date().toISOString(), version });
+	} catch (err) {
+		process.stderr.write(`approval-queue: stored version ${version} of ${id}, but the return isn't complete\n`);
+		return storeFailure(err);
+	}
+	process.stderr.write(`approval-queue: returned ${id} as version ${version}; waiting for a decision\n`);
 	return waitForDecision(root, id);
 }

@@ -1,6 +1,6 @@
 /**
  * Records Geoff's decisions from the document page: an answer picked before a decision, the
- * decision itself, and an Undo. Each write goes to the store before the answer, and the answer is
+ * decision itself, an Undo, and his note operations. Each write goes to the store before the answer, and the answer is
  * the state the records fold to after the write, so a 2xx means the record is on disk.
  *
  * @remarks Only the command writes `handed` and `withdraw`. The server refuses both, runs no
@@ -19,7 +19,8 @@ import {
 	writeNamed,
 	type Decision
 } from '#lib/store/store.ts';
-import { DOC } from '#lib/strings.ts';
+import { DOC, NOTES } from '#lib/strings.ts';
+import { NOTE_LIMIT, noteLength, readThreads, writeNote } from '#lib/components/notes.server.ts';
 import type { DecideAnswer, DecisionView, DocStanding, RecordedAnswer } from '#lib/components/types.ts';
 
 /** The ids of the specimen pages, which load as documents but take no decision. */
@@ -43,10 +44,17 @@ export interface Reply {
 
 type Picks = Record<string, number>;
 
+type NoteBody =
+	| { op: 'note'; quote: string; start?: number; version: number; text: string }
+	| { op: 'reply'; thread: number; text: string }
+	| { op: 'resolve'; thread: number; resolved: boolean }
+	| { op: 'delete'; thread: number };
+
 type Body =
 	| { op: 'answer'; question: string; pick: number }
 	| { op: 'decide'; action: 'approve' | 'sendback' | 'read'; answers: Picks }
-	| { op: 'undo' };
+	| { op: 'undo' }
+	| NoteBody;
 
 /** Thrown inside a handler to answer with `status` and the page's sentence. */
 class Refusal {
@@ -113,6 +121,23 @@ function shape(text: string): Body | null {
 		if (!DECISIONS.has(b.action)) throw new Refusal(400, DOC.badAction);
 		return { op: 'decide', action: b.action as 'approve' | 'sendback' | 'read', answers: b.answers };
 	}
+	return noteShape(b);
+}
+
+const isCount = (v: unknown, least: number): v is number => Number.isInteger(v) && (v as number) >= least;
+
+/** A note operation's body, or null when it lacks a field its operation needs. */
+function noteShape(b: Record<string, unknown>): NoteBody | null {
+	const text = typeof b.text === 'string' ? b.text.trim() : null;
+	if (b.op === 'note' && text && typeof b.quote === 'string' && b.quote.trim() && isCount(b.version, 1)) {
+		if (b.start !== undefined && !isCount(b.start, 0)) return null;
+		const start = b.start as number | undefined;
+		return { op: 'note', quote: b.quote.trim(), version: b.version, text, ...(start === undefined ? {} : { start }) };
+	}
+	if (!isCount(b.thread, 1)) return null;
+	if (b.op === 'reply' && text) return { op: 'reply', thread: b.thread, text };
+	if (b.op === 'resolve' && typeof b.resolved === 'boolean') return { op: 'resolve', thread: b.thread, resolved: b.resolved };
+	if (b.op === 'delete') return { op: 'delete', thread: b.thread };
 	return null;
 }
 
@@ -160,6 +185,9 @@ function decide(root: string, id: string, doc: Doc, source: string, body: Extrac
 		throw new Refusal(409, why, toStanding(before));
 	}
 
+	if (body.action === 'sendback' && !notesWaiting(root, id) && !questions.some((q) => moved(q, body.answers[q.id]))) {
+		throw new Refusal(400, DOC.nothingToSendBack, toStanding(before));
+	}
 	if (body.action === 'approve') {
 		const missing = questions.filter((q) => !(q.id in answers));
 		if (missing.length) throw new Refusal(400, DOC.unanswered(missing.map((q) => q.label)));
@@ -182,6 +210,50 @@ function decide(root: string, id: string, doc: Doc, source: string, body: Extrac
 		throw new Refusal(409, DOC.alreadyDecided, toStanding(after));
 	}
 	return ok(after);
+}
+
+/**
+ * The open threads whose last entry is Geoff's, the count the page shows as notes waiting. A
+ * send-back with none, and no answer moved, gives the session nothing to act on.
+ */
+export function notesWaiting(root: string, id: string): number {
+	return readThreads(root, id).threads.filter((t) => !t.resolved && t.entries.at(-1)?.who === 'geoff').length;
+}
+
+/**
+ * True when `pick` differs from the question's recommended option. A missing pick counts as the
+ * recommended one; on a question with none, any pick is a change and a missing one isn't.
+ */
+function moved(q: Question, pick: number | undefined): boolean {
+	const recommended = q.options.findIndex((o) => o.recommended);
+	return pick !== undefined && pick !== recommended;
+}
+
+/**
+ * Writes one note operation of Geoff's and answers the folded threads.
+ *
+ * @remarks Notes are taken while the document is waiting or decided, since a decided send-back is
+ * what the notes explain, and refused once it is handed or withdrawn.
+ */
+function noteOp(root: string, id: string, versions: number, body: NoteBody): Reply {
+	const state = read(root, id);
+	if (state.state === 'handed' || state.state === 'withdrawn') throw new Refusal(409, NOTES.closed, toStanding(state));
+	if ('text' in body && noteLength(body.text) > NOTE_LIMIT) throw new Refusal(400, NOTES.tooLong(noteLength(body.text)));
+	const at = new Date().toISOString();
+	if (body.op === 'note') {
+		if (body.version > versions) throw new Refusal(400, DOC.badRequest);
+		writeNote(root, id, { op: 'open', who: 'geoff', quote: body.quote, start: body.start, version: body.version, text: body.text, at });
+	} else {
+		const thread = readThreads(root, id).threads.find((t) => t.id === body.thread);
+		if (!thread) throw new Refusal(400, DOC.badRequest);
+		if (body.op === 'reply') writeNote(root, id, { op: 'reply', thread: body.thread, who: 'geoff', text: body.text, at });
+		else if (body.op === 'resolve') writeNote(root, id, { op: 'resolve', thread: body.thread, resolved: body.resolved, who: 'geoff', at });
+		else {
+			if (thread.entries.some((e) => e.who !== 'geoff')) throw new Refusal(400, DOC.badRequest);
+			writeNote(root, id, { op: 'delete', thread: body.thread, at });
+		}
+	}
+	return { status: 200, body: { standing: toStanding(read(root, id)), threads: readThreads(root, id).threads } };
 }
 
 function undo(root: string, id: string): Reply {
@@ -211,13 +283,14 @@ export function post(root: string, id: string, req: PostRequest): Reply {
 	}
 	if (SPECIMEN_IDS.has(id)) return { status: 404, body: { standing: null, message: DOC.specimen } };
 	try {
-		const { source } = readDocument(root, id);
+		const { meta, source } = readDocument(root, id);
 		const body = shape(req.body);
 		if (!body) throw new Refusal(400, DOC.badRequest);
 		const { doc } = parse(source);
 		if (body.op === 'answer') return answer(root, id, doc, body);
 		if (body.op === 'decide') return decide(root, id, doc, source, body);
-		return undo(root, id);
+		if (body.op === 'undo') return undo(root, id);
+		return noteOp(root, id, meta.versions, body);
 	} catch (e) {
 		return refused(e);
 	}

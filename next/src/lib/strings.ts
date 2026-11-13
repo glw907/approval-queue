@@ -92,6 +92,8 @@ export const DOC = {
 	returned: (at: string, changes: number) =>
 		`You sent this back with notes. It came back ${when(at)} with ${plural(changes, 'passage').toLowerCase()} changed.`,
 	showChanges: 'Show what changed',
+	wholeChanged: 'The session rewrote the whole document, so there are no marks to show.',
+	nothingToSendBack: 'Write a note or change an answer first. Otherwise the session has nothing to act on.',
 	merges: (n: number, tool: string) =>
 		`Approving this merges ${plural(n, 'pull request').toLowerCase()} into ${tool}${n > 1 ? ', in this order:' : ':'}`,
 	prLine: (i: number, words: string, number: number) => `${i}. ${capital(words)} (#${number})`,
@@ -184,5 +186,8 @@ export const NOTES = {
 	geoff: 'Geoff',
 	claude: 'Claude',
 	example: ', an example',
-	unsaved: "The queue isn't running, so your note wasn't saved. What you wrote is still here."
+	unsaved: "The queue isn't running, so your note wasn't saved. What you wrote is still here.",
+	tooLong: (n: number) => `This note is ${n.toLocaleString('en-US')} characters. Notes can be up to 4,000.`,
+	notSaved: (detail: string) => `The queue didn't save the note: ${detail}`,
+	closed: 'This document is no longer open for notes.'
 };

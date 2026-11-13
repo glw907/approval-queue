@@ -46,6 +46,10 @@ export interface PageDoc {
 	returned?: string;
 	/** The number of passages the returned version changed. */
 	changes: number;
+	/** True when the returned version shares nothing with the one before, so no marks are drawn. */
+	whole: boolean;
+	/** The newest version's number, which a note opened on this page records. */
+	version: number;
 	prs: { number: number; words: string; url: string }[];
 	approve: string | null;
 	sendback: string | null;
@@ -92,6 +96,27 @@ export interface DocStanding {
 	decision: DecisionView | null;
 }
 
+/** Who wrote a note entry: Geoff on the page, or a session through `reply`. */
+export type Who = 'geoff' | 'claude';
+
+export type Entry = { who: Who; text: string; at: string };
+
+/** A note thread as the fold of a document's note records gives it. */
+export type Thread = {
+	/** The number of the record that opened it, which the page posts and never shows. */
+	id: number;
+	/** The passage the thread is about, as plain text. */
+	quote: string;
+	/** Where the quote starts in the page's text index, when the page that wrote it knew. */
+	start?: number;
+	/** The passage's words before a later version changed them. */
+	was?: string;
+	/** True when the passage is no longer in the document. */
+	orphan?: boolean;
+	resolved: boolean;
+	entries: Entry[];
+};
+
 /**
  * The server's answer to a decision post: the standing after the write, and on a refusal the
  * sentence the page shows as its reason. `standing` is null when the document can't be read.
@@ -99,4 +124,12 @@ export interface DocStanding {
 export interface DecideAnswer {
 	standing: DocStanding | null;
 	message?: string;
+	/** The document's threads after a note operation. */
+	threads?: Thread[];
 }
+
+/** The most characters a note or a reply can hold, counted as code points. */
+export const NOTE_LIMIT = 4000;
+
+/** A note's length as the page, the server, and the command all count it: its code points. */
+export const noteLength = (text: string) => [...text].length;

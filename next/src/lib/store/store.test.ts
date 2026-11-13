@@ -5,12 +5,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
 	StoreError,
 	addVersion,
+	appendRecord,
 	createDocument,
 	listDocuments,
 	listMerged,
 	readDecisions,
 	readDocument,
 	readNamed,
+	readRecords,
 	recordMerged,
 	storeRoot,
 	writeDecision,
@@ -185,6 +187,49 @@ describe('decisions', () => {
 	});
 });
 
+describe('numbered records', () => {
+	it('numbers notes apart from decisions and reads them back in order', () => {
+		const { id } = createDocument(root, SOURCE_1, { kind: 'report', title: 'A report' });
+		const dir = path.join(root, id);
+		writeDecision(root, id, { action: 'approve', at: '2026-11-12T08:00:00Z' });
+		expect(appendRecord(root, id, 'note', { op: 'open', text: 'one' })).toBe(1);
+		expect(appendRecord(root, id, 'note', { op: 'reply', text: 'two' })).toBe(2);
+		expect(dotFiles(dir)).toEqual([]);
+		expect(readRecords(root, id, 'note').map((r) => [r.n, r.value])).toEqual([
+			[1, { op: 'open', text: 'one' }],
+			[2, { op: 'reply', text: 'two' }]
+		]);
+		expect(readDecisions(root, id)).toEqual([{ action: 'approve', at: '2026-11-12T08:00:00Z' }]);
+	});
+
+	it('takes the next note number when another writer holds the first', () => {
+		const { id } = createDocument(root, SOURCE_1, { kind: 'report', title: 'A report' });
+		const dir = path.join(root, id);
+		const link = fs.linkSync.bind(fs);
+		vi.spyOn(fs, 'linkSync').mockImplementationOnce((from, to) => {
+			fs.writeFileSync(path.join(dir, 'note-1.json'), '{"op":"open"}');
+			link(from, to);
+		});
+		expect(appendRecord(root, id, 'note', { op: 'reply' })).toBe(2);
+		expect(readRecords(root, id, 'note').map((r) => r.value)).toEqual([{ op: 'open' }, { op: 'reply' }]);
+		expect(dotFiles(dir)).toEqual([]);
+	});
+
+	it('reads a note file that is not JSON as a null value, with its path', () => {
+		const { id } = createDocument(root, SOURCE_1, { kind: 'report', title: 'A report' });
+		const file = path.join(root, id, 'note-1.json');
+		fs.writeFileSync(file, '{"op":');
+		expect(readRecords(root, id, 'note')).toEqual([{ n: 1, file, value: null }]);
+	});
+
+	it('refuses a note on a document that does not exist, and creates nothing', () => {
+		const id = '20261112-083300-abcdef';
+		expect(storeError(() => appendRecord(root, id, 'note', {})).code).toBe('missing');
+		expect(storeError(() => readRecords(root, '../x', 'note')).code).toBe('bad-id');
+		expect(fs.readdirSync(root)).toEqual([]);
+	});
+});
+
 describe('ids', () => {
 	for (const bad of ['../x', 'merged', '20261112-083300-ABCDEF']) {
 		it(`refuses the id ${bad}`, () => {
@@ -213,6 +258,8 @@ describe('named files', () => {
 		expect(() => writeNamed(root, id, 'meta.json', {})).toThrow(StoreError);
 		expect(() => writeNamed(root, id, 'decision-1.json', {})).toThrow(StoreError);
 		expect(() => writeNamed(root, id, 'decision-notes.json', {})).toThrow(StoreError);
+		expect(() => writeNamed(root, id, 'note-1.json', {})).toThrow(StoreError);
+		expect(() => writeNamed(root, id, 'note-threads.json', {})).toThrow(StoreError);
 		expect(() => writeNamed(root, id, '../notes.json', {})).toThrow(StoreError);
 	});
 

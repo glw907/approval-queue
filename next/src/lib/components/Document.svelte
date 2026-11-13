@@ -5,7 +5,7 @@
 	import ExternalLink from '@lucide/svelte/icons/external-link';
 	import Annotated from './Annotated.svelte';
 	import { DOC } from '#lib/strings.ts';
-	import type { DecideAnswer, DocStanding, PageDoc } from '#lib/components/types.ts';
+	import type { DecideAnswer, DocStanding, PageDoc, Thread } from '#lib/components/types.ts';
 	import type { Segment } from '#lib/doc/types.ts';
 
 	interface Props {
@@ -14,8 +14,10 @@
 		standing: DocStanding;
 		/** The picks the queue has stored for the open questions. */
 		answers: Record<string, number>;
+		/** The document's note threads, replaced by the ones each saved note answers with. */
+		threads: Thread[];
 	}
-	let { doc, standing, answers }: Props = $props();
+	let { doc, standing, answers, threads }: Props = $props();
 
 	type Question = Extract<Segment, { type: 'question' }>;
 	type Action = 'approve' | 'sendback' | 'read';
@@ -40,6 +42,8 @@
 	}
 
 	const questions = $derived(doc.segments.filter((s): s is Question => s.type === 'question'));
+	/** Off, the article hides each removed passage and draws each added one as plain text. */
+	let showChanges = $state(true);
 	const recommended = (q: Question) => q.options.findIndex((o) => o.recommended);
 	const mark = (s: Mark): Mark => ({ state: s.state, n: s.n, seq: s.seq });
 	const same = (a: Mark, b: Mark) => a.state === b.state && a.n === b.n && a.seq === b.seq;
@@ -62,6 +66,21 @@
 		if (recorded) untrack(() => Object.entries(recorded).forEach(([qid, a]) => (picks[qid] = a.pick)));
 	});
 	const unanswered = $derived(questions.filter((q) => picks[q.id] === undefined));
+	/** The threads shown, set by a saved note until the next load brings the stored ones. */
+	let notes = $derived(threads);
+	/** Open threads whose last entry is Geoff's: what a send-back asks the session to answer. */
+	const waitingNotes = $derived(notes.filter((t) => !t.resolved && t.entries.at(-1)?.who === 'geoff').length);
+	/**
+	 * Whether a pick moved off its question's recommended option. On a question with no
+	 * recommended option, any pick counts, and a missing one doesn't.
+	 */
+	const moved = $derived(questions.some((q) => picks[q.id] !== undefined && picks[q.id] !== recommended(q)));
+	/** A send-back with no note waiting and no answer changed gives the session nothing to act on. */
+	const nothingToAct = $derived(waitingNotes === 0 && !moved);
+	let refusedEmpty = $state(false);
+	$effect(() => {
+		if (!nothingToAct) refusedEmpty = false;
+	});
 	const report = $derived(doc.kind === 'report');
 	const decision = $derived(standing.state === 'decided' || standing.state === 'handed' ? standing.decision : null);
 
@@ -162,6 +181,10 @@
 
 	function decide(action: Action) {
 		if (action === 'approve' && unanswered.length) return;
+		if (action === 'sendback' && nothingToAct) {
+			refusedEmpty = true;
+			return;
+		}
 		const given = Object.entries($state.snapshot(picks)).filter((e): e is [string, number] => e[1] !== undefined);
 		return act({ op: 'decide', action, answers: Object.fromEntries(given) });
 	}
@@ -274,15 +297,23 @@
 	{/key}
 {/snippet}
 
-<Annotated>
-	<article bind:this={articleEl}>
+<Annotated id={doc.id} version={doc.version} threads={notes} relayout={[showChanges, decision, shown]} onthreads={(t) => (notes = t)}>
+	<article bind:this={articleEl} class:changes-off={!showChanges}>
 		<header>
 			<p class="doc-meta" data-no-notes>{DOC.sent(doc.tool, doc.sent)}</p>
 			<h1 class="doc-title mt-2">{@html doc.titleHtml}</h1>
 
-			{#if doc.returned}
+			{#if doc.returned && doc.whole}
 				<div class="doc-meta mt-4" data-no-notes>
+					<p>{DOC.wholeChanged}</p>
+				</div>
+			{:else if doc.returned}
+				<div class="doc-meta mt-4 flex flex-wrap items-center justify-between gap-x-6 gap-y-2" data-no-notes>
 					<p>{DOC.returned(doc.returned, doc.changes)}</p>
+					<label class="flex cursor-pointer items-center gap-2 text-base-content">
+						<input type="checkbox" class="toggle toggle-sm toggle-primary" bind:checked={showChanges} />
+						{DOC.showChanges}
+					</label>
 				</div>
 			{/if}
 
@@ -310,7 +341,7 @@
 				{:else if seg.type === 'question'}
 					{@const lost = answerShown(seg.id)}
 					<fieldset class="question" data-question={seg.id} aria-describedby={lost ? `${doc.id}-${seg.id}-failure-what ${doc.id}-${seg.id}-failure-why` : undefined}>
-						<legend class="sr-only">{seg.label}</legend>
+						<legend class="sr-only" data-no-notes>{seg.label}</legend>
 						{#each seg.options as o, i (i)}
 							<label class="question-option">
 								<input
@@ -449,9 +480,21 @@
 										{#if doc.approve}<p class="ui-code mt-2">{@html doc.approve}</p>{/if}
 									</div>
 									<div>
-										<button type="button" class="btn" aria-disabled={busy || undefined} onclick={() => decide('sendback')}>{DOC.sendBack}</button>
+										<button
+											type="button"
+											class="btn"
+											class:refusable={nothingToAct && !busy}
+											aria-disabled={busy || nothingToAct || undefined}
+											aria-describedby={refusedEmpty ? `${doc.id}-nothing` : undefined}
+											onclick={() => decide('sendback')}
+										>
+											{DOC.sendBack}
+										</button>
+										{#if refusedEmpty}
+											<p class="mt-1 text-error" id="{doc.id}-nothing" role="alert">{DOC.nothingToSendBack}</p>
+										{/if}
 										{#if doc.sendback}<p class="ui-code mt-2">{@html doc.sendback}</p>{/if}
-										<p class="mt-1 muted">{DOC.noNotesWaiting}</p>
+										<p class="mt-1 muted">{waitingNotes ? DOC.notesWaiting(waitingNotes) : DOC.noNotesWaiting}</p>
 									</div>
 								</div>
 							{/if}
@@ -462,3 +505,23 @@
 		</div>
 	</article>
 </Annotated>
+
+<style>
+	/*
+	 * Send back keeps the mockup's look while it is refused. daisyUI draws any
+	 * `.btn[aria-disabled=true]` greyed and deaf to clicks, so this puts back the
+	 * base `.btn` values: the click has to land to show the refusal sentence.
+	 */
+	.btn.refusable[aria-disabled='true'] {
+		pointer-events: auto;
+		color: var(--color-base-content);
+		--btn-bg: var(--color-base-200);
+		--btn-border: color-mix(in oklab, var(--color-base-200), #000 calc(var(--depth) * 5%));
+		--btn-shadow:
+			0 3px 2px -2px color-mix(in oklab, var(--btn-bg) calc(var(--depth) * 30%), #0000),
+			0 4px 3px -2px color-mix(in oklab, var(--btn-bg) calc(var(--depth) * 30%), #0000);
+		--btn-inset: 0 0.5px 0 0.5px oklch(100% 0 0 / calc(var(--depth) * 6%));
+		background-color: var(--btn-bg);
+		background-image: none, var(--fx-noise);
+	}
+</style>
