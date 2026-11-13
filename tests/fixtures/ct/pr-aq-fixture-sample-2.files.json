@@ -1,1 +1,0 @@
-[{"filename":"docs/queue.md","status":"modified","patch":"@@ -3,2 +3,3 @@\n The queue lists items.\n+A decided item leaves the list.\n "}]

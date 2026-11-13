@@ -26,8 +26,8 @@ ctx=$(jq -r .hookSpecificOutput.additionalContext <<<"$out")
 assert_eq "$(printf '%s' "$ctx" | wc -l)" "0" "created: one line"
 [ "$(printf '%s' "$ctx" | wc -c)" -lt 200 ] || { echo "FAIL: created: the line runs $(printf '%s' "$ctx" | wc -c) bytes: $ctx"; fail=1; }
 case "$ctx" in
-  *'#38 in glw907/workstation'*"close packet"*'`approval-queue land`'*'no call'*'auth-data'*'## Before merge'*) ;;
-  *) echo "FAIL: created: the line lacks the close packet or the land route: $ctx"; fail=1 ;;
+  *'#38 in glw907/workstation'*'`approval-queue send`'*'`approval-queue land`'*'no call'*'auth-data'*'## Before merge'*) ;;
+  *) echo "FAIL: created: the line lacks the send route or the land route: $ctx"; fail=1 ;;
 esac
 
 run 'git push -u origin x && gh pr create --fill' 'https://github.com/glw907/cairn-cms/pull/7'

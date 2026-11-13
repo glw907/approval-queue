@@ -2,21 +2,27 @@ import adapter from '@sveltejs/adapter-node';
 import { sveltekit } from '@sveltejs/kit/vite';
 import tailwindcss from '@tailwindcss/vite';
 import { defineConfig } from 'vite';
-import { queuePort } from './src/lib/port.ts';
-
-// Read once at build time: the CSRF origin and the Host check must name the same port.
-const port = queuePort(process.env.APPROVAL_QUEUE_PORT);
 
 export default defineConfig({
-	define: { __QUEUE_PORT__: JSON.stringify(port) },
 	plugins: [
 		tailwindcss(),
 		sveltekit({
 			adapter: adapter(),
-			// The built app's CSRF check trusts this origin; without it adapter-node
-			// derives an https origin and every form post from the browser fails.
-			paths: { origin: `http://127.0.0.1:${port}` },
-			csp: { directives: { 'script-src': ['self'] } }
+			// A document is a session's Markdown, so its page loads nothing from outside the queue and
+			// runs only the queue's scripts. SvelteKit hashes its own inline start-up script into
+			// script-src. Components set style attributes, so style-src allows inline styles.
+			csp: {
+				mode: 'hash',
+				directives: {
+					'default-src': ['self'],
+					'script-src': ['self'],
+					'style-src': ['self', 'unsafe-inline'],
+					'img-src': ['self', 'data:'],
+					'object-src': ['none'],
+					'base-uri': ['self'],
+					'form-action': ['self']
+				}
+			}
 		})
 	]
 });

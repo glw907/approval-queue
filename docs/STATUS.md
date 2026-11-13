@@ -26,49 +26,31 @@ Landed: Q1 (#15), Q2 (#16), Q3 (#17), Q4 (#18). Every pass merged, pulled, and r
 Resume from: /var/home/glw907/Projects/initiatives/.claude/worktrees/unattended-rounds/unattended-rounds/plans/ur-queue-conductor-prompt.txt
 <!-- /round-report -->
 
-The Approval Queue: a local SvelteKit app and a command that put a session's hand-over in front of
+The Approval Queue: a local SvelteKit app and a command that put a session's document in front of
 Geoff and return his decision as JSON. `README.md` holds the interfaces and the gate.
 
 ## Current state
 
-- `main` serves the rebuilt queue (Pass 2a of the `workstation-refinement` initiative, merged as
-  PR #14, `1d2cbee`, on 2026-11-11). A packet is a fact file the session writes and a text file a
-  writer writes, and the page is one reading column with a notes margin.
-- The command has `snapshot`, `packet`, `merge`, `land`, `digest`, `reply`, `withdraw`, `pending`,
-  `collect`, `design`, `triage`, `report`, and `restart`. The docs and single-`pr` kinds, Defer, per-part verdicts, and
-  the contents rail are gone.
-- Pass Q2: `merge` refuses a stop packet; `merge`, `land`, and `packet` refuse a pull request not
-  based on the default branch; a stop page says "Pass parked until you answer." Backlog #64.
-- Pass Q3: a packet, a queued item, and a `land --round <id>` digest line carry a round that the
-  board, sidebar, digest page, and status line show. Backlog #65, #66.
-- Pass Q4: `report <initiative> <round> <report.md>` stores a round report, a fourth item kind that
-  leads its round on the board and sidebar. Its page lists the round's waiting packets and landed
-  pull requests, with "Mark read". Backlog #67, #68.
-- pavilion runs the new build: the cutover ran on 2026-11-11 with `glw907/workstation#227` and
-  Survey 1.6.0.
+- `main` still serves the old queue: the old SvelteKit app and the bash command. Passes A1 to A5
+  (PRs #19 to #23) put the new app under `next/`, and the switch to it waits on PR #24.
+- Pass A6 is on `aq-a6` as PR #24. It deletes the old app, the old bash command, and their shell
+  tests, and moves `next/` to `approval-queue/`. The command is a launcher with nine commands, and
+  seven old subcommands print that they are gone.
+- `restart` carries the switch. The first restart on a state directory that holds the old queue's
+  files refuses while an old item is undecided, then moves the old files into
+  `archive-2026-11.tar.gz` once the new server answers.
+- The switch and its undo were rehearsed against a copy of the real state directory under
+  `unshare -rnpf --mount-proc --kill-child` (`npm run rehearse --prefix approval-queue`). The
+  rehearsal's output is in the PR body.
+- The reminder hook says a pull request goes to Geoff in a document sent with `approval-queue send`.
+- pavilion and thinkpad-x1 both run the old queue until the switch.
 
 ## Next action
 
-thinkpad-x1 has not taken the cutover. Its first session there runs, before any hand-over:
+The workstation round's conductor sends the close packet that carries PR #24, and runs the
+switch after Geoff's approve (workstation design, "The switch"): merge, pull the checkout, and run
+`approval-queue restart` on pavilion. On thinkpad-x1, after the switch: pull `~/.dotfiles` and
+`~/Projects/approval-queue`, run `approval-queue restart`, and run
+`systemctl --user disable --now decision-review.timer` if it still runs.
 
-1. `approval-queue pending` (empty, or collect what it lists with the old build first).
-2. `approval-queue restart` rebuilds the app; the build before Q4 cannot show a round report.
-3. `systemctl --user disable --now decision-review.timer`.
-4. Check that `approval-queue merge` with no id exits 2.
-
-`workstation-sync` never rebuilds the app, so this step stays here until it is done. Open items are
-in `BACKLOG.md`.
-
-## Stop
-
-**Pass A4, close, on `aq-a4` at 3617fa6 (PR #22, draft).** Acceptance item 6 is unmet, as Geoff's 2026-11-12 ruling allowed. The executor's launch goal accepts a ready finish only with evidence that every item is met, and round standing answer 12 parks a pass with an unmet item. So the pass parks here instead of landing.
-
-**What was done.** The ruling's rework landed in 2fc04c0. Its final `standards:daisyui-a11y-reviewer` read confirmed read 5's three warnings fixed, and returned "0 Blocker, 0 Major, 6 Minor (4 on the answer-refusal path)". The whole-branch `standards:diff-reviewer` returned accept with 0 blocking, and its Minor findings were folded in 3617fa6. The gate is green on 3617fa6. On a fresh build, the decide checks print 55 ok lines and the page checks 103. Items 1 to 5 are met. The PR body carries the ruling under Decisions, sets `Calls: none`, and lists the four answer-path findings for A5.
-
-**Question.** Should A4 land at 3617fa6 with item 6 unmet, as the ruling says?
-
-**Choices.**
-
-1. *(Recommended)* Land PR #22 as it stands, under the ruling. The four answer-path findings go to A5.
-2. Fold the four answer-path findings and run one more read first. This reopens the loop the ruling closed.
-3. Hold A4 until A5 and land the two together.
+The PR body's "Undo the switch" lists the steps back. Open items are in `BACKLOG.md`.

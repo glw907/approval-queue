@@ -1,12 +1,11 @@
-/* Copied from cairn-themes/survey-theme/core/components.css at commit dea983976f4d7951d3e2a7395938859a978d4bd8. Do not edit. */
 /* Survey components: the alert override and the site- signature details.
+   Adapted from the approval queue's copy of cairn-themes commit dea9839, with the 2026-10-22
+   rulings applied. Colors, radii, and motion come from theme/survey.css or survey-vars.css.
    Every rule sits in a sublayer of utilities. daisyUI's component rules live in that layer
    too, so a later sublayer beats them, while a Tailwind utility on the element still wins. */
 
 :root {
-  /* Contour brown follows the scheme because it reads the theme's secondary role. */
-  --site-contour: var(--color-secondary);
-  --site-contour-opacity: 0.25;
+  /* --site-contour and its opacity are theme tokens, set per scheme. */
   --site-rule-color: color-mix(in oklab, var(--site-contour) 55%, transparent);
 }
 
@@ -20,7 +19,8 @@
       background-color: var(--color-base-200);
       color: var(--color-base-content);
       padding-block: var(--spacing-6px);
-      padding-inline: var(--spacing-9px);
+      /* 13px plus the 1px border puts the text 14px from the box edge, clear of the 4px bar. */
+      padding-inline: var(--spacing-13px);
       font-size: var(--text-step-8);
       line-height: 1.5;
       gap: var(--spacing-8px);
@@ -159,6 +159,38 @@
       color: var(--color-muted);
     }
 
+    /* Tab: daisyUI mixes an inactive tab to 50% of ink, under 4.5:1 on base-200, and has no
+       variable for it. Hover keeps daisyUI's full ink. */
+    .tabs > .tab:not(.tab-active, [aria-selected="true"], [aria-current="true"], [aria-current="page"], :checked, :has(:checked)) {
+      color: var(--color-muted);
+
+      @media (hover: hover) {
+        &:hover {
+          color: var(--color-base-content);
+        }
+      }
+    }
+
+    /* Soft badge: the text is the status fill, which is under 4.5:1 for warning and success in
+       light. --badge-color also tints the ground, so only the text takes the alert ink. */
+    .badge-soft.badge-warning {
+      color: var(--cairn-warning-ink);
+    }
+
+    .badge-soft.badge-success {
+      color: var(--cairn-success-ink);
+    }
+
+    /* Icon: Lucide draws a 2 stroke on its 24 grid, so the line grows with the icon. A
+       non-scaling stroke holds --icon-stroke at every size. Lucide puts .lucide on every icon. */
+    .lucide {
+      stroke-width: var(--icon-stroke);
+    }
+
+    .lucide * {
+      vector-effect: non-scaling-stroke;
+    }
+
     /* Link: the browser's default focus ring is replaced to match buttons and the rail. */
     a:focus-visible {
       outline: 2px solid var(--color-primary);
@@ -208,6 +240,10 @@
     .site-index-rail a {
       color: var(--color-base-content);
       font-weight: 600;
+    }
+
+    .site-index-rail a {
+      transition: color var(--motion-quick) var(--motion-ease);
     }
 
     .site-index-rail a:hover {
