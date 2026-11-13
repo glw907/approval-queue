@@ -92,7 +92,7 @@ export function archiveOld(state: string): string[] {
 		fs.renameSync(tmp, path.join(state, ARCHIVE));
 	} catch (err) {
 		fs.rmSync(tmp, { force: true });
-		throw err;
+		throw new Error(`${(err as Error).message}; the old files stay where they were, and running restart again retries`);
 	}
 	try {
 		for (const name of names) fs.rmSync(path.join(state, name), { recursive: true, force: true });
