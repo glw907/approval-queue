@@ -1,14 +1,7 @@
-import { storeRoot } from '#lib/store/store.ts';
-import { check } from './check.ts';
-import { land } from './land.ts';
-import { merge } from './merge.ts';
-import { notes } from './notes.ts';
-import { ghView } from './pr.ts';
-import { reply } from './reply.ts';
-import { restart } from './restart.ts';
-import { send, sendReturn } from './send.ts';
-import { USAGE, waitForDecision } from './wait.ts';
-import { withdraw } from './withdraw.ts';
+import { USAGE } from './wait.ts';
+
+/** Subcommands of the old queue's command that the new one lacks. */
+const RETIRED = ['design', 'triage', 'snapshot', 'packet', 'report', 'pending', 'digest'];
 
 const [command, arg = '', ...rest] = process.argv.slice(2);
 
@@ -17,32 +10,50 @@ function usage(): never {
 	process.exit(2);
 }
 
+// Each command loads on its own, so `restart`, the retired names, and the usage line run in a
+// checkout that has no `node_modules` yet.
 async function dispatch(): Promise<number> {
 	switch (command) {
 		case 'check': {
+			const { check } = await import('./check.ts');
+			const { ghView } = await import('./pr.ts');
 			const { lines, code } = check(arg, ghView);
 			process.stdout.write(lines.map((l) => `${l}\n`).join(''));
 			return code;
 		}
-		case 'send':
+		case 'send': {
+			const { send, sendReturn } = await import('./send.ts');
 			return returns ? sendReturn(rest[0], rest[1]) : send(arg);
-		case 'collect':
+		}
+		case 'collect': {
+			const { storeRoot } = await import('#lib/store/store.ts');
+			const { waitForDecision } = await import('./wait.ts');
 			return waitForDecision(storeRoot(), arg);
+		}
 		case 'withdraw':
-			return withdraw(arg);
+			return (await import('./withdraw.ts')).withdraw(arg);
 		case 'land':
-			return land(arg, rest[0] ?? '');
+			return (await import('./land.ts')).land(arg, rest[0] ?? '');
 		case 'merge':
-			return merge(arg);
+			return (await import('./merge.ts')).merge(arg);
 		case 'notes':
-			return notes(arg);
-		case 'reply':
+			return (await import('./notes.ts')).notes(arg);
+		case 'reply': {
+			const { reply } = await import('./reply.ts');
 			return rest[1] === undefined ? reply(arg, undefined, rest[0] ?? '') : reply(arg, rest[0], rest[1]);
+		}
 		case 'restart':
-			return restart();
+			return (await import('./restart.ts')).restart();
 		default:
 			return usage();
 	}
+}
+
+if (command && RETIRED.includes(command)) {
+	process.stderr.write(
+		`approval-queue: ${command} is gone from the new queue; the approval-packet skill says what to run now\n`
+	);
+	process.exit(1);
 }
 
 const returns = command === 'send' && arg === '--returns';
