@@ -127,8 +127,32 @@ export const DOC = {
 	answerUnsent: "Your answer shows on this page but isn't saved. If you reload the page, you lose it.",
 	readUnsent: "The report isn't marked as read. Start the queue, and then select Mark as read again.",
 	decisionUnsent: "Your decision wasn't recorded, and the session hasn't seen it. Start the queue, and then choose again.",
-	undoUnsent: 'Your decision still stands. Start the queue, and then undo it again.'
+	undoUnsent: 'Your decision still stands. Start the queue, and then undo it again.',
+	/** The strings below are pass A4's, which the mockup doesn't draw. */
+	tryAgain: 'Try again',
+	tooSlow: "The queue didn't answer within 10 seconds.",
+	handoffBefore: "The session picks up your decision 20 seconds after you make it, if it's waiting. Until then, you can undo it.",
+	handoffAfter: "The session has picked up your decision, so it can't be undone.",
+	undoLate: 'The session picked up your decision before your Undo reached the queue, so your decision stands.',
+	withdrawn: "The session withdrew this document, so there's nothing left to decide.",
+	unanswered: (labels: string[]) => `Answer ${joinAnd(labels)} first.`,
+	headsMissing: "The queue has no record of the commits the session sent, so you can't approve this.",
+	notSaved: (detail: string) => `The queue couldn't save it: ${detail}`,
+	refused: "The queue is running but didn't record this. The reason is below.",
+	nothingToUndo: "There's no decision to undo.",
+	specimen: "This page shows how a document looks, so you can't decide anything on it.",
+	badOrigin: 'The queue takes decisions only from pages it serves.',
+	badRequest: "The page sent a request the queue can't read.",
+	badAction: "The page asked for a decision this document can't take.",
+	badAnswer: "The page sent an answer to a question this document doesn't ask.",
+	alreadyDecided: 'You have already decided this document. To change the decision, undo it first.'
 };
+
+/** "a", "a and b", "a, b, and c". */
+export function joinAnd(items: string[]): string {
+	if (items.length < 3) return items.join(' and ');
+	return `${items.slice(0, -1).join(', ')}, and ${items.at(-1)}`;
+}
 
 export const NOTES = {
 	margin: 'Notes',

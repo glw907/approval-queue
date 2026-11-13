@@ -5,7 +5,8 @@ import { fileURLToPath } from 'node:url';
 import { isHttpError } from '@sveltejs/kit';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { seed } from '../../../../scripts/page-checks.mjs';
-import type { PageDoc } from '#lib/components/types.ts';
+import type { DocStanding, PageDoc } from '#lib/components/types.ts';
+import { writeDecision, writeNamed } from '#lib/store/store.ts';
 import { load } from './+page.server.ts';
 
 let state: string;
@@ -22,8 +23,10 @@ afterAll(() => {
 	rmSync(state, { recursive: true, force: true });
 });
 
-const open = async (id: string) =>
-	((await load({ params: { id } } as Parameters<typeof load>[0])) as { doc: PageDoc }).doc;
+type Data = { doc: PageDoc; standing: DocStanding; answers: Record<string, number> };
+
+const loaded = async (id: string) => (await load({ params: { id } } as Parameters<typeof load>[0])) as Data;
+const open = async (id: string) => (await loaded(id)).doc;
 
 /** Each page's title and its segment count, from the mockup's documents and the two specimens. */
 const PAGES: [string, string, number][] = [
@@ -76,5 +79,21 @@ describe('the document page', () => {
 		);
 		expect(isHttpError(thrown, 404)).toBe(true);
 		expect((thrown as { body: { message: string } }).body.message).toBe('The queue has no document at this address.');
+	});
+
+	it('gives a specimen the waiting state and no stored answers', async () => {
+		const data = await loaded('markdown');
+		expect(data.standing).toEqual({ state: 'waiting', n: null, decision: null });
+		expect(data.answers).toEqual({});
+	});
+
+	it("gives a stored document its folded state and the answers picked before a decision", async () => {
+		const backlog = ids['50-backlog'];
+		writeNamed(join(state, 'store'), backlog, 'answers.json', { q1: 1, q2: 0 });
+		expect((await loaded(backlog)).answers).toEqual({ q1: 1, q2: 0 });
+		const report = ids['30-round-report'];
+		const at = new Date().toISOString();
+		writeDecision(join(state, 'store'), report, { action: 'read', at });
+		expect((await loaded(report)).standing).toEqual({ state: 'decided', n: 1, decision: { action: 'read', at } });
 	});
 });

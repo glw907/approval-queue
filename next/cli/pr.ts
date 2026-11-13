@@ -31,8 +31,11 @@ export function ghJson<T>(args: string[]): { ok: true; value: T } | { ok: false;
 	}
 }
 
-/** Reads a pull request with `gh pr view`, giving up after 30 seconds. */
+/**
+ * Reads a pull request with `gh pr view`, giving up after 30 seconds. The view also carries
+ * `headRefOid`, the head commit `send` records.
+ */
 export function ghView(repo: string, number: number): ViewResult {
-	const read = ghJson<PrView>(['pr', 'view', String(number), '--repo', repo, '--json', 'state,isDraft,statusCheckRollup']);
+	const read = ghJson<PrView>(['pr', 'view', String(number), '--repo', repo, '--json', 'state,isDraft,headRefOid,statusCheckRollup']);
 	return read.ok ? { ok: true, view: read.value } : read;
 }
