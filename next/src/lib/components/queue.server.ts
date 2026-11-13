@@ -83,8 +83,11 @@ export function merged(root: string, now = Date.now()): MergedGroup[] {
 	return [...groups.values()];
 }
 
+/** How a returned document differs from the version before it. */
+type Returned = { at: string; changes: number; whole: boolean };
+
 /** Prepares a parsed document for its page, running `typeset` over every HTML string. */
-export function pageDoc(id: string, doc: Doc, sent: string, returned?: { at: string; changes: number }): PageDoc {
+export function pageDoc(id: string, doc: Doc, sent: string, returned?: Returned, version = 1): PageDoc {
 	return {
 		id,
 		kind: doc.kind,
@@ -92,6 +95,8 @@ export function pageDoc(id: string, doc: Doc, sent: string, returned?: { at: str
 		sent,
 		returned: returned?.at,
 		changes: returned?.changes ?? 0,
+		whole: returned?.whole ?? false,
+		version,
 		prs: doc.prs.map((pr) => ({
 			number: pr.number,
 			words: curly(pr.words),
@@ -111,13 +116,19 @@ export function pageDoc(id: string, doc: Doc, sent: string, returned?: { at: str
 	};
 }
 
-/** Reads stored document `id` for its page. A returned document carries its passage count. */
+/**
+ * Reads stored document `id` for its page.
+ *
+ * @remarks A returned document is compared with the version before it, the one Geoff last decided
+ * on, since each return adds one version. It is drawn from the comparison's marked text, so each
+ * changed passage shows as a `<del>` and `<ins>` pair, unless the versions share nothing.
+ */
 export function storedDoc(root: string, id: string): PageDoc {
 	const { meta, source } = readDocument(root, id);
-	const { doc } = parse(source);
 	const at = returnedAt(root, meta);
-	const returned = at
-		? { at, changes: compare(readDocument(root, id, meta.versions - 1).source, source).passages.length }
-		: undefined;
-	return pageDoc(id, doc, meta.created, returned);
+	if (!at) return pageDoc(id, parse(source).doc, meta.created);
+	const comparison = compare(readDocument(root, id, meta.versions - 1).source, source);
+	const doc = comparison.whole ? parse(source).doc : parse(comparison.marked, { changes: true }).doc;
+	const returned = { at, changes: comparison.passages.length, whole: comparison.whole };
+	return pageDoc(id, doc, meta.created, returned, meta.versions);
 }

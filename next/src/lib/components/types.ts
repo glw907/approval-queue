@@ -46,6 +46,10 @@ export interface PageDoc {
 	returned?: string;
 	/** The number of passages the returned version changed. */
 	changes: number;
+	/** True when the returned version shares nothing with the one before, so no marks are drawn. */
+	whole: boolean;
+	/** The newest version's number, which a note opened on this page records. */
+	version: number;
 	prs: { number: number; words: string; url: string }[];
 	approve: string | null;
 	sendback: string | null;

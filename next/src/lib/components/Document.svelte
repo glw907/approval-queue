@@ -40,6 +40,8 @@
 	}
 
 	const questions = $derived(doc.segments.filter((s): s is Question => s.type === 'question'));
+	/** Off, the article hides each removed passage and draws each added one as plain text. */
+	let showChanges = $state(true);
 	const recommended = (q: Question) => q.options.findIndex((o) => o.recommended);
 	const mark = (s: Mark): Mark => ({ state: s.state, n: s.n, seq: s.seq });
 	const same = (a: Mark, b: Mark) => a.state === b.state && a.n === b.n && a.seq === b.seq;
@@ -275,14 +277,22 @@
 {/snippet}
 
 <Annotated>
-	<article bind:this={articleEl}>
+	<article bind:this={articleEl} class:changes-off={!showChanges}>
 		<header>
 			<p class="doc-meta" data-no-notes>{DOC.sent(doc.tool, doc.sent)}</p>
 			<h1 class="doc-title mt-2">{@html doc.titleHtml}</h1>
 
-			{#if doc.returned}
+			{#if doc.returned && doc.whole}
 				<div class="doc-meta mt-4" data-no-notes>
+					<p>{DOC.wholeChanged}</p>
+				</div>
+			{:else if doc.returned}
+				<div class="doc-meta mt-4 flex flex-wrap items-center justify-between gap-x-6 gap-y-2" data-no-notes>
 					<p>{DOC.returned(doc.returned, doc.changes)}</p>
+					<label class="flex cursor-pointer items-center gap-2 text-base-content">
+						<input type="checkbox" class="toggle toggle-sm toggle-primary" bind:checked={showChanges} />
+						{DOC.showChanges}
+					</label>
 				</div>
 			{/if}
 
