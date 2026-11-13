@@ -52,7 +52,9 @@ export const LAYOUT = {
 	reports: 'Reports',
 	merged: 'Recently merged PRs',
 	readMerged: 'Read what each one changed',
-	decidedToday: 'Decided today'
+	decidedToday: 'Decided today',
+	/** The second line of a decided row in the rail, as the mockup draws it. */
+	decidedNote: (action: keyof typeof DECIDED, at: string) => `${DECIDED[action]} ${when(at)}`
 };
 
 /** The second line of a decided row in the rail (pass A4). */

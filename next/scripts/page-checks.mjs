@@ -502,7 +502,7 @@ async function checkControls(browser, base, ids) {
 		const file = name === 'markdown' || name === 'long' ? join(MOCKUP, 'specimen', `${name}.md`) : join(MOCKUP, 'content', `${name}.md`);
 		const { doc } = parse(readFileSync(file, 'utf8'));
 		const options = doc.segments.reduce((n, s) => n + (s.type === 'question' ? s.options.length : 0), 0);
-		const buttons = doc.kind === 'report' ? 0 : 2;
+		const buttons = doc.kind === 'report' ? 1 : 2;
 		await page.goto(base + path);
 		await settle(page);
 		const r = await page.evaluate(() => ({

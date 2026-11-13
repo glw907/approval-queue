@@ -12,7 +12,7 @@ import type { Doc } from '#lib/doc/types.ts';
 import { listDocuments, listMerged, readDecisions, readDocument, type Meta } from '#lib/store/store.ts';
 import { toolName } from '#lib/strings.ts';
 import { curly, typeset } from '#lib/components/typeset.ts';
-import type { MergedGroup, PageDoc, Row } from '#lib/components/types.ts';
+import type { DecidedRow, MergedGroup, PageDoc, Row } from '#lib/components/types.ts';
 
 /** How long a merged line stays on the front page, a week by Geoff's choice in the round design. */
 export const MERGED_DAYS = 7;
@@ -28,23 +28,43 @@ function returnedAt(root: string, meta: Meta): string | undefined {
 	return fs.statSync(path.join(root, meta.id, `v${meta.versions}.md`)).mtime.toISOString();
 }
 
+/** The row the rail and the front page draw for a stored document. */
+function rowOf(root: string, meta: Meta): Row {
+	const { doc } = parse(readDocument(root, meta.id).source);
+	return {
+		id: meta.id,
+		kind: doc.kind,
+		title: curly(doc.title),
+		summary: curly(doc.summary),
+		tool: toolOf(doc),
+		sent: meta.created,
+		returned: returnedAt(root, meta),
+		questions: doc.questions
+	};
+}
+
 /** The waiting documents, oldest first. A document with any other state is left out. */
 export function rows(root: string): Row[] {
 	return listDocuments(root)
 		.documents.filter((meta) => waiting(root, meta.id))
-		.map((meta) => {
-			const { doc } = parse(readDocument(root, meta.id).source);
-			return {
-				id: meta.id,
-				kind: doc.kind,
-				title: curly(doc.title),
-				summary: curly(doc.summary),
-				tool: toolOf(doc),
-				sent: meta.created,
-				returned: returnedAt(root, meta),
-				questions: doc.questions
-			};
-		});
+		.map((meta) => rowOf(root, meta));
+}
+
+/**
+ * The documents whose decision, decided or handed, was recorded today in the server's local time,
+ * newest first, so a decided document can be reached again for its Undo.
+ */
+export function decidedToday(root: string, now = new Date()): DecidedRow[] {
+	const today = now.toDateString();
+	const found: DecidedRow[] = [];
+	for (const meta of listDocuments(root).documents) {
+		const state = fold(readDecisions(root, meta.id));
+		if (state.state !== 'decided' && state.state !== 'handed') continue;
+		const { action, at } = state.decision;
+		if (new Date(at).toDateString() !== today) continue;
+		found.push({ ...rowOf(root, meta), action: action as DecidedRow['action'], at });
+	}
+	return found.sort((a, b) => b.at.localeCompare(a.at));
 }
 
 /**

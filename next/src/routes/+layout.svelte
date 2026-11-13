@@ -9,7 +9,7 @@ open document, and a top bar that opens the rail at narrow widths.
 	import { page } from '$app/state';
 	import Menu from '@lucide/svelte/icons/menu';
 	import { APP, LAYOUT, railNote } from '#lib/strings.ts';
-	import type { OutlineHeading, PageDoc, Row } from '#lib/components/types.ts';
+	import type { DecidedRow, OutlineHeading, PageDoc, Row } from '#lib/components/types.ts';
 
 	let { data, children } = $props();
 	let open = $state(false);
@@ -24,7 +24,7 @@ open document, and a top bar that opens the rail at narrow widths.
 		const list = (page.data.doc as PageDoc | undefined)?.outline ?? [];
 		return list.length >= 3 ? list : [];
 	});
-	const listed = $derived(data.rows.some((r) => here(r.id)));
+	const listed = $derived([...data.rows, ...data.decided].some((r) => here(r.id)));
 	/** Opens the fold around a heading, so that a link to it has somewhere to land. */
 	const unfold = (id: string) => document.getElementById(id)?.closest('details')?.setAttribute('open', '');
 	let current = $state('');
@@ -82,13 +82,13 @@ open document, and a top bar that opens the rail at narrow widths.
 	</div>
 {/snippet}
 
-{#snippet rows(items: Row[])}
+{#snippet rows(items: (Row | DecidedRow)[])}
 	<ul class="grid gap-0.5">
 		{#each items as item (item.id)}
 			<li>
 				<a class="rail-row" href="/d/{item.id}" aria-current={here(item.id)}>
 					<span class="clamp-3">{item.title}</span>
-					<span class="sub">{railNote(item.tool, item.questions, item.sent)}</span>
+					<span class="sub">{'action' in item ? LAYOUT.decidedNote(item.action, item.at) : railNote(item.tool, item.questions, item.sent)}</span>
 				</a>
 				{#if here(item.id) && outline.length}
 					{@render onThisPage()}
@@ -146,6 +146,13 @@ open document, and a top bar that opens the rail at narrow widths.
 					<h2 class="rail-heading">{LAYOUT.merged} <span>{data.mergedCount}</span></h2>
 					<a class="rail-row" href="/#merged">{LAYOUT.readMerged}</a>
 				</section>
+
+				{#if data.decided.length}
+					<section>
+						<h2 class="rail-heading">{LAYOUT.decidedToday} <span>{data.decided.length}</span></h2>
+						{@render rows(data.decided)}
+					</section>
+				{/if}
 			</div>
 		</nav>
 	</div>
