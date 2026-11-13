@@ -53,8 +53,12 @@ export function merge(id: string): number {
 		return refuse(`the approve of ${id} names no commits to merge at`);
 	}
 
+	const cap = (s: string) => s[0].toUpperCase() + s.slice(1);
 	const bases = new Map<string, string>();
 	const todo: Head[] = [];
+	// A rerun skips a pull request merged on an earlier run, so a refusal then merges nothing more.
+	let skipped = false;
+	const none = () => (skipped ? 'nothing more was merged' : 'nothing was merged');
 	for (const pr of heads) {
 		const ref = `${pr.repo}#${pr.number}`;
 		if (!bases.has(pr.repo)) {
@@ -73,15 +77,18 @@ export function merge(id: string): number {
 		if (!read.ok) return refuse(`could not read ${ref} from GitHub: ${read.error}`);
 		const view = read.value;
 		if (view.headRefOid !== pr.head) {
-			return refuse(`${ref} is at ${view.headRefOid}, not ${pr.head}, the commit Geoff read; nothing was merged`);
+			return refuse(`${ref} is at ${view.headRefOid}, not ${pr.head}, the commit Geoff read; ${none()}`);
 		}
-		if (view.state === 'MERGED') continue;
+		if (view.state === 'MERGED') {
+			skipped = true;
+			continue;
+		}
 		if (view.baseRefName !== bases.get(pr.repo)) {
-			return refuse(`${ref} is based on ${view.baseRefName}, which is not the default branch ${bases.get(pr.repo)}; nothing was merged`);
+			return refuse(`${ref} is based on ${view.baseRefName}, which is not the default branch ${bases.get(pr.repo)}; ${none()}`);
 		}
 		const found = checkPullRequests([{ ...pr, words: '', line: 0 }], () => ({ ok: true, view }));
-		if (found.faults.length) return refuse(`${found.faults[0].message} Nothing was merged.`);
-		if (found.pending.length) return refuse(`${found.pending[0]} Nothing was merged.`);
+		if (found.faults.length) return refuse(`${found.faults[0].message} ${cap(none())}.`);
+		if (found.pending.length) return refuse(`${found.pending[0]} ${cap(none())}.`);
 		todo.push(pr);
 	}
 

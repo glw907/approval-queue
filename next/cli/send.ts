@@ -59,9 +59,17 @@ export async function send(path: string): Promise<number> {
 	let id: string;
 	try {
 		id = createDocument(root, checked.source, { kind: checked.doc.kind as string, title: checked.doc.title }).id;
-		if (merge) writeNamed(root, id, 'heads.json', kept.heads);
 	} catch (err) {
 		return storeFailure(err);
+	}
+	if (merge) {
+		try {
+			writeNamed(root, id, 'heads.json', kept.heads);
+		} catch (err) {
+			// The document is stored, so name it: with no heads it can't be approved.
+			process.stderr.write(`approval-queue: stored ${id}, but not its head commits, so it can't be approved\n`);
+			return storeFailure(err);
+		}
 	}
 	if (checked.doc.kind === 'report') {
 		process.stdout.write(`${id}\n`);

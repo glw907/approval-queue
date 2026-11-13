@@ -114,6 +114,16 @@ describe('merge', () => {
 		expect(listMerged(root).lines).toEqual([]);
 	});
 
+	it('says nothing more was merged when a rerun skips one already merged, then refuses', () => {
+		const id = stored('20-survey-edit.md', [approve(), handed()]);
+		serve(233, view('aaa233', { state: 'MERGED' }));
+		serve(234, view('ccc999'));
+		const { code, err } = run('merge', id);
+		expect(code).toBe(2);
+		expect(err).toContain('nothing more was merged');
+		expect(merges()).toEqual([]);
+	});
+
 	it('names the second pull request when GitHub refuses its merge, and the first stays merged', () => {
 		const id = stored('20-survey-edit.md', [approve(), handed()]);
 		writeFileSync(join(dir, 'merge-fails-234'), '');

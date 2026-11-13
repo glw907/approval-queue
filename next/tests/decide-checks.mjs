@@ -338,18 +338,21 @@ async function check5(/** @type {Browser} */ browser, /** @type {string} */ id) 
 	check(await railHas(page, LAYOUT.decidedToday, id), 'check 5: the report shows in Decided today');
 	await shot(page, '5-read');
 	await page.goto(BASE);
-	const onFront = await page.evaluate(
-		(/** @type {[string, string]} */ [label, id]) =>
-			[...document.querySelectorAll('main section')].some(
-				(s) => (s.querySelector('h2')?.textContent ?? '').trim() === label && !!s.querySelector(`a[href="/d/${id}"]`)
-			),
-		[FRONT.reports, id]
-	);
-	check(!onFront, 'check 5: the front page no longer lists the report under Reports');
+	const onFront = () =>
+		page.evaluate(
+			(/** @type {[string, string]} */ [label, id]) =>
+				[...document.querySelectorAll('main section')].some(
+					(s) => (s.querySelector('h2')?.textContent ?? '').trim() === label && !!s.querySelector(`a[href="/d/${id}"]`)
+				),
+			[FRONT.reports, id]
+		);
+	check(!(await onFront()), 'check 5: the front page no longer lists the report under Reports');
 	await open(page, id);
 	await decide(page).getByRole('button', { name: DOC.markUnread }).click();
 	check(await visible(decide(page).getByRole('button', { name: DOC.markRead })), 'check 5: Mark as unread brings Mark as read back');
 	check(await railHas(page, LAYOUT.reports, id), 'check 5: the report is back under Reports');
+	await page.goto(BASE);
+	check(await onFront(), 'check 5: after Mark as unread, the front page lists the report under Reports');
 	await page.close();
 }
 

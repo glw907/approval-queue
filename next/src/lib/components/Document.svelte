@@ -115,9 +115,10 @@
 		const reply = (await res.json().catch(() => ({}))) as Partial<DecideAnswer>;
 		const why = reply.message ?? DOC.notSaved(`${res.status} ${res.statusText}`);
 		const now = reply.standing ? mark(reply.standing) : at;
-		// A refusal with no standing, such as a malformed body, would only be refused again, so it
-		// offers Try again only when the server itself failed.
-		const retry = reply.standing ? same(now, at) : res.status >= 500;
+		// A 4xx refusal, such as a malformed body or a merge with no stored heads, would only be
+		// refused again, so Try again is offered only when the server itself failed and the
+		// document still stands where the page drew it.
+		const retry = res.status >= 500 && (!reply.standing || same(now, at));
 		return { what: DOC.refused, why, refused: true, retry, body, at: now, attempt };
 	}
 
