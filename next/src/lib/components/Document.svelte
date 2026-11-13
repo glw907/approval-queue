@@ -56,13 +56,18 @@
 			return start;
 		})
 	);
+	// A redraw into a decision, as from another tab, sets the radios to the answers it recorded.
+	$effect(() => {
+		const recorded = decision?.answers;
+		if (recorded) untrack(() => Object.entries(recorded).forEach(([qid, a]) => (picks[qid] = a.pick)));
+	});
 	const unanswered = $derived(questions.filter((q) => picks[q.id] === undefined));
 	const report = $derived(doc.kind === 'report');
 	const decision = $derived(standing.state === 'decided' || standing.state === 'handed' ? standing.decision : null);
 
 	let busy = $state(false);
-	/** Set when the poll finds the decision undone elsewhere, which the section's live line says. */
-	let reopened = $state(false);
+	/** What the section's hidden live line says once the document is open again after an Undo. */
+	let said = $state('');
 	let attempts = 0;
 	let failure = $state<Failure | null>(null);
 	// A failure shows only while the document stands where it was drawn, so a hand-off or a reload
@@ -102,7 +107,10 @@
 		const reply = (await res.json().catch(() => ({}))) as Partial<DecideAnswer>;
 		const why = reply.message ?? DOC.notSaved(`${res.status} ${res.statusText}`);
 		const now = reply.standing ? mark(reply.standing) : at;
-		return { what: DOC.refused, why, refused: true, retry: same(now, at), body, at: now, attempt };
+		// A refusal with no standing, such as a malformed body, would only be refused again, so it
+		// offers Try again only when the server itself failed.
+		const retry = reply.standing ? same(now, at) : res.status >= 500;
+		return { what: DOC.refused, why, refused: true, retry, body, at: now, attempt };
 	}
 
 	/**
@@ -115,12 +123,13 @@
 		// The buttons mark themselves busy with aria-disabled, never disabled, so focus stays on the
 		// one clicked while the post is out.
 		busy = true;
-		reopened = false;
+		said = '';
 		let failed: Failure | null = null;
 		try {
 			failed = await send(body);
 			if (!failed || !failed.retry) await invalidateAll();
 			if (!failed && body.op === 'decide') for (const q of Object.keys(answerFailures)) answerFailures[q] = undefined;
+			if (!failed && body.op === 'undo') said = DOC.undone;
 		} finally {
 			failure = failed;
 			busy = false;
@@ -155,9 +164,20 @@
 		const failed = await send(body);
 		if (seq !== answerSeq[body.question]) return;
 		answerBusy[body.question] = false;
+		if (failed && !failed.retry) {
+			// A refusal can show the document moved on, as when another tab decided it. The page then
+			// redraws, and a question no longer open can't draw the refusal, so the decide section does,
+			// and focus goes there from the radio the redraw disabled.
+			await invalidateAll();
+			if (standing.state !== 'waiting') {
+				answerFailures[body.question] = undefined;
+				if (!busy) failure = failed;
+				await tick();
+				land('[data-decided]', ENABLED);
+				return;
+			}
+		}
 		answerFailures[body.question] = failed ?? undefined;
-		// A refusal showing the document moved on, as when another tab decided it, redraws the page.
-		if (failed && !failed.retry) await invalidateAll();
 		if (!retry) return;
 		// A recorded retry takes its block, and the focused button, away; focus goes back to the pick.
 		await tick();
@@ -182,7 +202,7 @@
 				const now = res.ok ? ((await res.json()) as DecideAnswer).standing : null;
 				if (stop.signal.aborted || busy || !now || same(mark(now), was)) return;
 				const held = !!decideEl?.contains(document.activeElement);
-				if (now.state === 'waiting') reopened = true;
+				if (now.state === 'waiting') said = DOC.reopened;
 				await invalidateAll();
 				await tick();
 				// The hand-off, or an Undo from another tab, takes the focused button away.
@@ -217,7 +237,7 @@
 						class="btn btn-sm"
 						data-retry={key ? undefined : ''}
 						data-retry-answer={key}
-						aria-describedby="{id}-what {id}-why"
+						aria-describedby="{id}-what {id}-why{key && shown?.retry ? ` ${doc.id}-decide-failure-what` : ''}"
 						aria-disabled={waiting || undefined}
 						onclick={retry}
 					>
@@ -305,7 +325,7 @@
 						aria-label={DOC.decision}
 						aria-busy={busy}
 					>
-						<p class="sr-only" role="status">{reopened && standing.state === 'waiting' ? DOC.reopened : ''}</p>
+						<p class="sr-only" role="status">{standing.state === 'waiting' ? said : ''}</p>
 						{#if decision}
 							<div role="status">
 								<h2 class="flex items-center gap-2" tabindex="-1" data-decided>

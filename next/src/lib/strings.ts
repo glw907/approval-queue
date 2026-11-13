@@ -139,6 +139,8 @@ export const DOC = {
 	withdrawn: "The session withdrew this document, so there's nothing left to decide.",
 	/** Spoken only, when another tab undoes the decision this page shows. */
 	reopened: 'Your decision was undone in another tab. This document is open again.',
+	/** Spoken only, when an Undo on this page is recorded. */
+	undone: 'Your decision is undone. This document is open again.',
 	unanswered: (labels: string[]) => `Answer ${joinAnd(labels)} first.`,
 	headsMissing: "The queue has no record of the commits the session sent, so you can't approve this.",
 	notSaved: (detail: string) => `The queue couldn't save it: ${detail}`,
