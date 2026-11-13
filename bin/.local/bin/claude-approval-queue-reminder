@@ -16,8 +16,8 @@ import sys
 PR_URL = re.compile(r"https://github\.com/([\w.-]+/[\w.-]+)/pull/(\d+)")
 STAGE_BREAK = {"&&", "||", ";", "|", "&", "(", ")"}
 CONTEXT = (
-    "PR #{number} in {repo} goes to Geoff in the pass's close packet, or lands with "
-    "`approval-queue land` if it has no call, no auth-data path, and no `## Before merge` step."
+    "PR #{number} in {repo} goes to Geoff in a document sent with `approval-queue send`, or lands "
+    "with `approval-queue land` if it has no call, no auth-data path, and no `## Before merge` step."
 )
 
 

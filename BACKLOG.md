@@ -4,18 +4,20 @@
 
 ## High
 
-- [ ] **#71** An approve can be lost with no sign, and the tab then shows nothing waiting `#bug` `#approval-queue` `#initiative:unattended-rounds` *(2026-11-12)*
+- [x] **#71** An approve can be lost with no sign, and the tab then shows nothing waiting `#bug` `#approval-queue` `#initiative:unattended-rounds` *(2026-11-12)*
   Geoff, 2026-11-12, on close packet `20261112T083259-3290807` (queued 08:33): "Nothing is waiting in the queue.", "I'd already approved both of these.", "I just approved them again.", and "This is another instance of the same bug that occured earlier." The item held no `decision.json` until 09:04:27, when the second approve was recorded and both pull requests merged. The first approve left no trace on disk, and his tab showed an empty queue while a fresh browser was redirected from `/` to the packet.
   What the code does: an approve is held for 5 seconds before it posts (`approval-queue/src/lib/held.svelte.ts:113`), and the rail and the board hide a held or posting item at once (`src/routes/+layout.svelte:28`, `src/routes/+page.svelte:22`). A failed post shows only a toast (`held.svelte.ts:196`). If the page goes away during the hold, `leave()` sends the decision as a keepalive request and a failure there is dropped (`held.svelte.ts:126`). The empty state closes the tab once nothing is held (`src/lib/components/EmptyState.svelte:50`). The server was rebuilt and restarted at 08:40 for `b877919`, seven minutes after the packet was queued.
   Not known: when the first approve was clicked, and which of these paths lost it. A post that met the restart is a guess until reproduced. To reproduce under a scratch `APPROVAL_QUEUE_STATE`: approve, then stop the server inside the 5 seconds; approve and close the tab inside the 5 seconds with the server down; approve in a tab loaded from the build before a restart.
   The fix should leave no approve unrecorded without a lasting sign on the page: a decision that did not reach the server keeps its item on screen marked as unsent, and a test covers a post that fails and a page that leaves. The 409 on a design approve on 2026-11-11 had the same face for Geoff (he clicked approve "many times" and nothing changed), so the round should also check that every refusal is shown where he is looking. Left alone: a round stalls on a packet he believes he answered.
+  Done in pass A4 (PR #22): a decision that did not reach the server keeps its item on screen, and the approve records the document it covers.
 
-- [ ] **#70** Give every page one shell, one notes margin, and a written set of UI rules `#improvement` `#approval-queue` `#initiative:unattended-rounds` *(2026-11-12)*
+- [x] **#70** Give every page one shell, one notes margin, and a written set of UI rules `#improvement` `#approval-queue` `#initiative:unattended-rounds` *(2026-11-12)*
   Geoff, 2026-11-12: "The notes UI should be the same across all pages", "Selecting text should pull up a notes box on the right side. That should be consistant acorss all of approval queue", and the app "probably needs a larger UI/UX cleanup and standardization pass".
   Today only the packet page has the margin (`approval-queue/src/lib/components/NotesMargin.svelte`). The digest page keeps a note form inside each folded line (`approval-queue/src/routes/digest/+page.svelte:45`), and the report page has no notes (`approval-queue/src/lib/components/ReportPage.svelte:31`).
   The pages use three shells: `.packet` on the packet, digest, and history pages; `mx-auto max-w-3xl p-8` on the report, retired, and legacy pages; `flex-1 px-5` on the board and claim pages. The board carries 133 lines of page-local CSS and `DesignView.svelte` 67.
   The repo has no UI rules file, so each pass chose its markup. Scope for one round: write the rules (the Survey recipe, the shell, the margin, the fold), prototype each changed page for Geoff before the plan, then move every page to them. Takes #69 with it.
   Left alone: a note can be anchored to a passage on one page only, and each new page adds another layout. Found by Geoff on the digest page; `b877919` is the stopgap that keeps a digest line open.
+  Done in pass A3 (PR #21): every page renders in one layout with one notes margin, and the rules sit in `.claude/rules/pages.md`.
 
 - [x] **#44** Give a decision whose session ended an owner `#bug` `#approval-queue` `#initiative:docs-system` *(2026-10-24)*
   Two page approvals (Content model, Arrange the admin sidebar, 2026-10-24 16:26) landed in decision files after their queueing session ended; the follow-up (mark glw907/cairn-cms#139 ready, CI, merge) has no owner. `collect` covers a deferred item, but an approve with no live session is a file in a folder.
@@ -25,38 +27,74 @@
 
 ## Medium
 
-- [ ] **#69** A round report's page reads as a wall of raw fields `#improvement` `#approval-queue` `#initiative:unattended-rounds` *(2026-11-12)*
+- [ ] **#78** Two page edges: a poll's `invalidateAll` after a GET that succeeded, and no browser check of focus after Escape or Cancel `#improvement` `#approval-queue` *(2026-11-13)*
+  The 2-second poll calls `invalidateAll` after a GET that already succeeded, and no browser check covers where focus lands after Escape or Cancel in the note box (PR #22, PR #23).
+  Skip the reload when the GET changed nothing, and add the focus check to the page checks.
+
+- [ ] **#77** Three small command edges: `reply` reads "01" as thread 1, `send` writes `heads.json` after `createDocument`, and `restart`'s spare-port wait carries on after 10 seconds `#improvement` `#approval-queue` *(2026-11-13)*
+  Found in PR #20, PR #22, and PR #23. `reply 01` answers thread 1 where it should refuse the spelling. `send` writes `heads.json` after `createDocument`, so a crash between the two leaves a document with no heads. `restart` keeps waiting for the spare port after 10 seconds when the trial allows 20.
+  Refuse the spelling, write `heads.json` first or in one rename, and stop the wait at the trial's limit.
+
+- [ ] **#76** Notes across a return: a thread loses `start`, so a note on the second of two identical phrases anchors on the first `#bug` `#approval-queue` *(2026-11-13)*
+  After a document returns from a send-back, a thread no longer carries `start`, so a note on the second of two identical phrases anchors on the first. The mirror case is A5's Major finding (PR #23).
+  Keep `start` through a return and test both phrases.
+
+- [ ] **#75** The mockup look changes waiting on Geoff: the decide panel's `btn`, the aria-disabled Approve, the busy button, and Send back on hover while refused `#improvement` `#approval-queue` *(2026-11-13)*
+  The mockup shows a plain `btn` with no edge on the decide panel. The app's aria-disabled Approve is faint, the busy button has no spinner, and Send back does not darken on hover while it is refused (PR #22, PR #23). Per `.claude/rules/pages.md`, the mockup changes first and Geoff approves it.
+  Draw each in `docs/mockup/`, get his approval, then change the app.
+
+- [ ] **#74** The answer-refusal path's four accessibility points S1 to S4, and S6's missing margin `#improvement` `#approval-queue` *(2026-11-13)*
+  The `standards:daisyui-a11y-reviewer` read of pass A4 left four Minor findings on the answer-refusal path (S1 to S4), and pass A5's read found S6, a page with no notes margin (PR #22, PR #23).
+  Fix S1 to S4 together, then give S6's page the margin.
+
+- [ ] **#73** `merge` has no answer for a `## Before merge` section in a pull request body `#improvement` `#approval-queue` *(2026-11-13)*
+  The old `merge` stopped with exit 2 at a pull request whose body had `## Before merge` and printed the section. The new `merge` runs no such step and says nothing, and neither the queue design nor the workstation design gives that work to a pass (PR #22). The README claims none.
+  Decide where the section is read: in `merge`, or in the document that carries the approve.
+
+- [ ] **#72** Swap the queue's document styles for Survey's file once Survey's release exists `#improvement` `#approval-queue` *(2026-11-13)*
+  The queue's own document styles stand in for Survey's technical-writing file, which has no release yet. The round design lists the swap as out of scope.
+  Replace the queue's styles with Survey's file when the release lands, and keep the mockup in step.
+
+- [x] **#69** A round report's page reads as a wall of raw fields `#improvement` `#approval-queue` `#initiative:unattended-rounds` *(2026-11-12)*
   `ReportPage.svelte:36` prints the conductor's Markdown as written, through `renderReport` (`markdown.ts:51`, `breaks: true`). That file is a session's bookkeeping. One line holds stops, refusals, and calls, another holds every pass's planning misses, and the busy check note, the STATUS copy line, and the resume path sit beside the line that says what waits for Geoff. Geoff read the `ur-ws` report of 2026-11-12 on the page and called it very poorly formatted. Left alone, every round's report is a slow read that buries the one line he has to act on.
   Lay the fields out on the page: what waits and what landed first, then the pass table, then the counts, with the bookkeeping lines folded away. The `report` subcommand only copies the file (`bin/.local/bin/approval-queue:342`) and needs no change.
   The other half is the workstation's: `pass-core/references/round-run.md:135` (workstation#232) lists the fields and says nothing of their form, so each conductor packs them as it likes and adds lines of its own. That file should fix one field to a line and mark which lines are Geoff's and which are for a resuming session. File it in the workstation backlog once the `ur-ws` close packets merge, since all five open PRs there touch `BACKLOG.md`.
+  Done in passes A3 and A4 (PR #21, PR #22): a round report is a document, so it reads on the document page.
 
-- [ ] **#68** A round report's landed list misses a pull request landed without a round `#improvement` `#approval-queue` *(2026-11-11)*
+- [x] **#68** A round report's landed list misses a pull request landed without a round `#improvement` `#approval-queue` *(2026-11-11)*
   The page lists the digest lines that carry the report's round. A pull request merged by `digest` (see #66) or by `land` with no `--round` has no round, so it never shows.
   Fix #66 first, then have the conductor's land and record steps pass `--round`.
+  Moot: the pages that carried the round flags went in pass A6.
 
-- [ ] **#67** `reply <id>` on a round report says it was "queued in an old shape" `#improvement` `#approval-queue` *(2026-11-11)*
+- [x] **#67** `reply <id>` on a round report says it was "queued in an old shape" `#improvement` `#approval-queue` *(2026-11-11)*
   A report holds no notes, so `reply` has nothing to answer, but its message names the wrong cause.
   Refuse a report with "a round report takes no replies", as `merge`, `collect`, and `withdraw` do.
+  Moot: the pages that carried the round flags went in pass A6.
 
-- [ ] **#66** `digest` takes no `--round` `#improvement` `#approval-queue` *(2026-11-11)*
+- [x] **#66** `digest` takes no `--round` `#improvement` `#approval-queue` *(2026-11-11)*
   Pass Q3 added `land --round <id>`. `digest`, which records a merge already done, still writes a line with no round, so a recorded merge shows under "No round".
   Give `digest` the same first-argument flag and id rule.
+  Moot: the pages that carried the round flags went in pass A6.
 
-- [ ] **#65** The next item after a decision follows queue order, not the rail's round order `#improvement` `#approval-queue` *(2026-11-11)*
+- [x] **#65** The next item after a decision follows queue order, not the rail's round order `#improvement` `#approval-queue` *(2026-11-11)*
   The rail now groups a round's items under their initiative, so its order can differ from the queue order that picks the item shown after a decision.
   Have the page that follows a decision pick the next item in the rail's order.
+  Done in pass A3 (PR #21): the front page lists the waiting items oldest first.
 
-- [ ] **#64** A stop packet's page still says "approve" after the answer `#improvement` `#approval-queue` *(2026-11-11)*
+- [x] **#64** A stop packet's page still says "approve" after the answer `#improvement` `#approval-queue` *(2026-11-11)*
   After "Answer and resume" the page shows the "Approved the packet." toast, "Approved" on the decided page, an "If you approve" fold, and "Approve the packet" in the shortcut sheet. Pass Q2 reworded the lead, the status line, and the button only.
   Word each of the four by kind, through `primaryLabel` in `packet-view.ts`.
+  Moot: a stop is a `decide` document the session words, in pass A6.
 
-- [ ] **#63** `restart`'s rollback can leave a slow new server running and infers what the swap moved `#improvement` `#approval-queue` *(2026-11-11)*
+- [x] **#63** `restart`'s rollback can leave a slow new server running and infers what the swap moved `#improvement` `#approval-queue` *(2026-11-11)*
   `r_rollback` stops the new server only when it already listens, and `setsid -f` records no pid, so a server slower than the 10-second wait survives the rollback and can race the restored build for the port. It also decides whether to remove a failed new `build` by whether `.stage` still holds it, which is sound only while the adapter's output directory stays `build`.
   Have `r_swap` record which directories it moved and key the removal on that record; find a slow new server by its command line and state root under `/proc` and stop it before the rollback restarts the old build.
+  Folded into A2 (PR #20): `restart` is rewritten and keeps a record of what its swap moved.
 
-- [ ] **#62** A design item whose `design.json` is missing approves with no check `#bug` `#approval-queue` *(2026-11-11)*
+- [x] **#62** A design item whose `design.json` is missing approves with no check `#bug` `#approval-queue` *(2026-11-11)*
   `checkDesign` returns at `heads.ts:58` before it hashes anything when `readFactPacket` finds no `design.json`, so the approve goes through with no out-of-date check. It predates pass Q1, which checks a recorded path and refuses a bad one.
   Refuse the approve (503) when a design item has no `design.json`.
+  Done in pass A4 (PR #22): the approve records the design's hash.
 
 - [x] **#61** A PR whose diff touches an escape-bearing file can't be queued `#bug` `#approval-queue` *(2026-11-01)*
   `gh pr diff` now refuses a diff with terminal escape sequences unless passed `--allow-escape-sequences`, so `approval-queue packet` and `--check` exit 1 on such a PR. glw907/cairn-cms#180 hit this by deleting 30 `.ansi` reference frames, with no added line carrying an escape. The session wrote the packet to its state dir and merged under the hand-over's queue-down rule. The queue should render the neutralized diff, or fall back to `git diff`, since passing raw escapes to a browser page needs its own thought.
@@ -97,8 +135,9 @@
   `collect` runs the page or head check before `append_log` looks for an existing line. If the page changed after the first command logged the approve, the second writes `refused.json` and exits 1, and the rail shows "Refused" for a decision that was recorded. Skip the check, or the file, when the log already holds the item's id (task-scope review of the batch 4 friction pass).
   Closed: docs-only. `approval-queue merge` is idempotent on a rerun (PR #14).
 
-- [ ] **#49** `withdraw` refuses a decided item, and a malformed packet decision stays in `pending` `#improvement` `#approval-queue` `#initiative:docs-system` *(2026-10-25)*
+- [x] **#49** `withdraw` refuses a decided item, and a malformed packet decision stays in `pending` `#improvement` `#approval-queue` `#initiative:docs-system` *(2026-10-25)*
   `withdraw` refuses a decided item (`approval-queue:56`), and a packet decision the command rejects as malformed stays in `pending` with nothing to clear it. Reworded 2026-11-11 after the Pass 2a sweep; the docs-kind causes went with PR #14.
+  Folded into A1 and A2 (PR #19, PR #20): the new commands take a decided item, and a malformed decision is refused.
 
 - [x] **#48** Keep one PR's page approvals from voiding each other `#bug` `#approval-queue` `#initiative:docs-system` *(2026-10-25)*
   Three `page` items queued on glw907/cairn-cms#140 were all approved around 08:30, and all three were refused with "moved ... while it waited, so the approval does not cover it". The first two moved because the later pages' commits rode the same PR. The third moved because `pr_head` read GitHub about five seconds after a push, before the head updated. An approval cost three re-reviews. For a `page` item, check that the page's blob is unchanged instead of the PR head, or check the head against the local commit given at queue time, and show the refusal on the screen, not only on stderr.
@@ -200,9 +239,10 @@
   "Sent back" in "Decided this session" takes the green success ink; the decision bar's Defer is hidden while the send-back note is open; `PacketAsks`' comment does not name the digit keys, and the digit caps show on a decided packet; each rail initiative is a `section` landmark; the `packet-facts` cache only drops a key when its file goes; `.linkbtn`, `.reopen`, and the pane toggle are about 20px tall and unmeasured against 2.5.8.
   Closed: the rail, Defer, and per-part controls went in PR #14, and target size is in its acceptance.
 
-- [ ] **#41** A `collect` can read a decision that the app is about to back off `#improvement` `#approval-queue` `#initiative:approval-queue` *(2026-10-25)*
+- [x] **#41** A `collect` can read a decision that the app is about to back off `#improvement` `#approval-queue` `#initiative:approval-queue` *(2026-10-25)*
   With a `collect` beside a `withdraw` and Geoff's post in the same microsecond window, the collect can print a `decision.json` the app then unlinks, while his page says nothing was recorded. The reverse ordering is covered by `withdraw`'s "run collect". A fix is a design call, for example `collect` checking `item.json` again after reading the decision (task-scope review of the polish pass).
   Pass 2a (PR #14) covers the command side: a `collect` racing a `withdraw` on a decided item keeps the decision (`tests/lifecycle.test.sh`). The app's back-off, which unlinks a `decision.json` when it finds `item.json` gone, is unchanged and still open.
+  Folded into A2 (PR #20): the new store writes each file by write-then-rename, so a read never sees a half-written decision.
 
 - [x] **#40** `approval-queue withdraw` prints "No such file" from `proc_stat` when the waiter is gone `#bug` `#approval-queue` `#initiative:approval-queue` *(2026-10-25)*
   `read -r s <"/proc/$1/stat" 2>/dev/null` fails its redirect before the `2>/dev/null` applies, so bash prints `line 25: /proc/<pid>/stat: No such file or directory`. The result is right; the line is noise. Group the read in braces with the redirect outside.
@@ -213,8 +253,9 @@
   The columns of a rendered design table run together on the design screen and in a packet part (`DesignView`'s `.desk-read` has no table rule). An embedded design's `##` headings render as `h2` inside a part's Why, so the outline jumps up, and the prose there inherits the Why body's muted colour.
   Done in pass 2a (PR #14): a design packet renders the whole design with demoted headings and the daisyUI `table` class.
 
-- [ ] **#38** The Undo toasts have no key and no length setting for someone who turns single-key shortcuts off `#improvement` `#approval-queue` `#initiative:approval-queue` *(2026-10-25)*
+- [x] **#38** The Undo toasts have no key and no length setting for someone who turns single-key shortcuts off `#improvement` `#approval-queue` `#initiative:approval-queue` *(2026-10-25)*
   `z` reaches the held decision's Undo only with single-key shortcuts on, and the 10-second flash Undo has no key. A speech-input user must Tab to a toast at the end of the page in time. Options: a chord that ignores single-key mode, "Press Z to undo" in the announcement, or a hold length next to the shortcuts setting (daisyui-a11y review of the polish pass, WCAG 2.2.1).
+  Done in pass A4 (PR #22): the Undo toasts take a key.
 
 - [x] **#37** Read the inline notes with NVDA on a Windows machine `#improvement` `#approval-queue` `#initiative:docs-system` *(2026-10-25)*
   The Orca half of #10 passed on 2026-10-25 (each note choice is announced as a button). NVDA and JAWS in focus mode may still read CodeMirror's `role="textbox"` content as plain text; this needs a Windows machine.
