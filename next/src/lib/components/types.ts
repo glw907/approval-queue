@@ -127,3 +127,9 @@ export interface DecideAnswer {
 	/** The document's threads after a note operation. */
 	threads?: Thread[];
 }
+
+/** The most characters a note or a reply can hold, counted as code points. */
+export const NOTE_LIMIT = 4000;
+
+/** A note's length as the page, the server, and the command all count it: its code points. */
+export const noteLength = (text: string) => [...text].length;

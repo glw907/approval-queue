@@ -15,11 +15,7 @@ import { appendRecord, readDocument, readRecords } from '#lib/store/store.ts';
 import type { Entry, Thread, Who } from './types.ts';
 import { curly } from './typeset.ts';
 
-/** The most characters a note or a reply can hold, counted as code points. */
-export const NOTE_LIMIT = 4000;
-
-/** A note's length as the page, the server, and the command all count it: its code points. */
-export const noteLength = (text: string) => [...text].length;
+export { NOTE_LIMIT, noteLength } from './types.ts';
 
 export type { Entry, Thread, Who };
 

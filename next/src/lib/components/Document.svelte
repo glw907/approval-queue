@@ -5,7 +5,7 @@
 	import ExternalLink from '@lucide/svelte/icons/external-link';
 	import Annotated from './Annotated.svelte';
 	import { DOC } from '#lib/strings.ts';
-	import type { DecideAnswer, DocStanding, PageDoc } from '#lib/components/types.ts';
+	import type { DecideAnswer, DocStanding, PageDoc, Thread } from '#lib/components/types.ts';
 	import type { Segment } from '#lib/doc/types.ts';
 
 	interface Props {
@@ -14,8 +14,10 @@
 		standing: DocStanding;
 		/** The picks the queue has stored for the open questions. */
 		answers: Record<string, number>;
+		/** The document's note threads, replaced by the ones each saved note answers with. */
+		threads: Thread[];
 	}
-	let { doc, standing, answers }: Props = $props();
+	let { doc, standing, answers, threads }: Props = $props();
 
 	type Question = Extract<Segment, { type: 'question' }>;
 	type Action = 'approve' | 'sendback' | 'read';
@@ -64,6 +66,21 @@
 		if (recorded) untrack(() => Object.entries(recorded).forEach(([qid, a]) => (picks[qid] = a.pick)));
 	});
 	const unanswered = $derived(questions.filter((q) => picks[q.id] === undefined));
+	/** The threads shown, set by a saved note until the next load brings the stored ones. */
+	let notes = $derived(threads);
+	/** Open threads whose last entry is Geoff's: what a send-back asks the session to answer. */
+	const waitingNotes = $derived(notes.filter((t) => !t.resolved && t.entries.at(-1)?.who === 'geoff').length);
+	/**
+	 * Whether a pick moved off its question's recommended option. On a question with no
+	 * recommended option, any pick counts, and a missing one doesn't.
+	 */
+	const moved = $derived(questions.some((q) => picks[q.id] !== undefined && picks[q.id] !== recommended(q)));
+	/** A send-back with no note waiting and no answer changed gives the session nothing to act on. */
+	const nothingToAct = $derived(waitingNotes === 0 && !moved);
+	let refusedEmpty = $state(false);
+	$effect(() => {
+		if (!nothingToAct) refusedEmpty = false;
+	});
 	const report = $derived(doc.kind === 'report');
 	const decision = $derived(standing.state === 'decided' || standing.state === 'handed' ? standing.decision : null);
 
@@ -164,6 +181,10 @@
 
 	function decide(action: Action) {
 		if (action === 'approve' && unanswered.length) return;
+		if (action === 'sendback' && nothingToAct) {
+			refusedEmpty = true;
+			return;
+		}
 		const given = Object.entries($state.snapshot(picks)).filter((e): e is [string, number] => e[1] !== undefined);
 		return act({ op: 'decide', action, answers: Object.fromEntries(given) });
 	}
@@ -276,7 +297,7 @@
 	{/key}
 {/snippet}
 
-<Annotated>
+<Annotated id={doc.id} version={doc.version} threads={notes} relayout={[showChanges, decision, shown]} onthreads={(t) => (notes = t)}>
 	<article bind:this={articleEl} class:changes-off={!showChanges}>
 		<header>
 			<p class="doc-meta" data-no-notes>{DOC.sent(doc.tool, doc.sent)}</p>
@@ -320,7 +341,7 @@
 				{:else if seg.type === 'question'}
 					{@const lost = answerShown(seg.id)}
 					<fieldset class="question" data-question={seg.id} aria-describedby={lost ? `${doc.id}-${seg.id}-failure-what ${doc.id}-${seg.id}-failure-why` : undefined}>
-						<legend class="sr-only">{seg.label}</legend>
+						<legend class="sr-only" data-no-notes>{seg.label}</legend>
 						{#each seg.options as o, i (i)}
 							<label class="question-option">
 								<input
@@ -459,9 +480,21 @@
 										{#if doc.approve}<p class="ui-code mt-2">{@html doc.approve}</p>{/if}
 									</div>
 									<div>
-										<button type="button" class="btn" aria-disabled={busy || undefined} onclick={() => decide('sendback')}>{DOC.sendBack}</button>
+										<button
+											type="button"
+											class="btn"
+											aria-disabled={busy || nothingToAct || undefined}
+											aria-describedby={refusedEmpty ? `${doc.id}-nothing` : undefined}
+											style:pointer-events={nothingToAct ? 'auto' : undefined}
+											onclick={() => decide('sendback')}
+										>
+											{DOC.sendBack}
+										</button>
+										{#if refusedEmpty}
+											<p class="mt-1 text-error" id="{doc.id}-nothing" role="alert">{DOC.nothingToSendBack}</p>
+										{/if}
 										{#if doc.sendback}<p class="ui-code mt-2">{@html doc.sendback}</p>{/if}
-										<p class="mt-1 muted">{DOC.noNotesWaiting}</p>
+										<p class="mt-1 muted">{waitingNotes ? DOC.notesWaiting(waitingNotes) : DOC.noNotesWaiting}</p>
 									</div>
 								</div>
 							{/if}

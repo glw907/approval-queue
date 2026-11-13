@@ -8,5 +8,5 @@
 <svelte:head><title>{DOC.pageTitle(data.doc.title)}</title></svelte:head>
 
 {#key data.doc.id}
-	<Document doc={data.doc} standing={data.standing} answers={data.answers} />
+	<Document doc={data.doc} standing={data.standing} answers={data.answers} threads={data.threads} />
 {/key}
