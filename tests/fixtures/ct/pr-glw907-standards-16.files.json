@@ -1,1 +1,0 @@
-[{"filename":"agents/plan-reviewer.md","status":"modified","patch":"@@ -30,2 +30,3 @@\n - Every task names its class.\n+- A task that publishes never cuts a release candidate for a test.\n - Every stop has a standing answer."}]
