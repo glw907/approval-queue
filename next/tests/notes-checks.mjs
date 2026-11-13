@@ -291,25 +291,26 @@ async function check1(/** @type {Browser} */ browser) {
 	await open(page, id);
 	const wrote = await writeFromPage(page, 'check 1', 1, 'Why say it twice?');
 	const records = readRecords(root, id, 'note');
+	const first = /** @type {any} */ (records[0]?.value);
 	check(
-		records.length === 1 && records[0].op === 'open' && records[0].who === 'geoff' && records[0].quote === 'same phrase',
-		`check 1: note-1.json is ${JSON.stringify(records[0] ?? null)}`
+		records.length === 1 && first?.op === 'open' && first?.who === 'geoff' && first?.quote === 'same phrase',
+		`check 1: note-1.json is ${JSON.stringify(first ?? null)}`
 	);
 	if (!wrote) return void (await page.close());
 	await shots(page, '1-saved');
 	await page.reload();
 	await settle(page);
-	const [first, second] = await tops(page, 'same phrase');
+	const [one, second] = await tops(page, 'same phrase');
 	const card = await topOf(marginCards(page));
 	check(card !== null, 'check 1: after a reload, the margin holds the card');
 	check(
-		card !== null && second !== undefined && Math.abs(card - second) < 24 && Math.abs(card - first) > 100,
-		`check 1: the card's top is ${card?.toFixed(0)} px, beside the second phrase at ${second?.toFixed(0)}, away from the first at ${first?.toFixed(0)}`
+		card !== null && second !== undefined && Math.abs(card - second) < 24 && Math.abs(card - one) > 100,
+		`check 1: the card's top is ${card?.toFixed(0)} px, beside the second phrase at ${second?.toFixed(0)}, away from the first at ${one?.toFixed(0)}`
 	);
 	const marks = await highlighted(page);
 	check(
 		marks.length === 1 && marks[0].text === 'same phrase' && Math.abs(marks[0].top - second) < 2,
-		`check 1: the highlight covers the second phrase only: ${JSON.stringify(marks.map((m) => Math.round(m.top)))}`
+		`check 1: the highlight covers the second phrase only: ${JSON.stringify(marks.map((/** @type {{ top: number }} */ m) => Math.round(m.top)))}`
 	);
 	await shots(page, '1-reloaded');
 	await page.close();
@@ -344,9 +345,13 @@ async function check2(/** @type {Browser} */ browser) {
 	);
 	const [passage] = await tops(page, SESSION_QUOTE);
 	const card = await topOf(opened);
+	// A card can't overlap the one above it, so it sits beside its passage or just below that card.
+	const above = await marginCards(page).filter({ hasText: 'Because the fixture needs two.' }).first()
+		.evaluate((/** @type {Element} */ el) => el.getBoundingClientRect().bottom + scrollY).catch(() => null);
 	check(
-		card !== null && passage !== undefined && Math.abs(card - passage) < 24,
-		`check 2: the new card's top is ${card?.toFixed(0)} px, beside its passage at ${passage?.toFixed(0)}`
+		card !== null && passage !== undefined && card >= passage - 24 &&
+			(card - passage < 24 || (above !== null && card - above >= 0 && card - above < 16)),
+		`check 2: the new card's top is ${card?.toFixed(0)} px, beside its passage at ${passage?.toFixed(0)} or just below the card above, which ends at ${above?.toFixed(0)}`
 	);
 	await shots(page, '2-replies');
 	await page.close();
@@ -445,7 +450,8 @@ async function check5(/** @type {Browser} */ browser) {
 	const decide = page.locator('section.decide');
 	const sendBack = decide.getByRole('button', { name: DOC.sendBack });
 	check((await sendBack.getAttribute('aria-disabled').catch(() => null)) === 'true', 'check 5: Send back is aria-disabled with no note and every pick recommended');
-	await sendBack.click().catch(() => {});
+	// A reader can click a button marked aria-disabled, so the click skips Playwright's enabled wait.
+	await sendBack.click({ force: true }).catch(() => {});
 	check(await visible(decide.getByText(DOC.nothingToSendBack)), 'check 5: a click shows nothingToSendBack');
 	await pause(500);
 	check(readDecisions(root, id).length === 0, `check 5: ${readDecisions(root, id).length} decision records after the click`);
@@ -506,6 +512,7 @@ async function check7(/** @type {Browser} */ browser, /** @type {string} */ id) 
 	check(await visible(sheet), 'check 7: the button opens the sheet');
 	const inSheet = await texts(sheet.locator('.note-card[data-card]'));
 	check(inSheet.length > 0 && JSON.stringify(inSheet) === JSON.stringify(inMargin), `check 7: the sheet holds the margin's ${inMargin.length} entries`);
+	await pause(600);
 	await page.screenshot({ path: join(SHOTS, '7-sheet-390.png') }).catch(() => {});
 	await page.close();
 }
