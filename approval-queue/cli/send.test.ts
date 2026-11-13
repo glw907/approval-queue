@@ -1,10 +1,9 @@
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { createServer, type Server } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { parse } from '#lib/doc/parse.ts';
 import { createDocument, listDocuments, readDecisions, readDocument, readNamed, writeDecision, writeNamed } from '#lib/store/store.ts';
 
@@ -40,7 +39,7 @@ let dir: string;
 let state: string;
 let root: string;
 const children: ChildProcess[] = [];
-let page: Server;
+let page: ChildProcess;
 let port: number;
 
 const env = () => ({ ...process.env, APPROVAL_QUEUE_STATE: state, APPROVAL_QUEUE_PORT: String(port), PATH: `${dir}:${process.env.PATH}` });
@@ -95,11 +94,20 @@ function stored(path: string, kind: string) {
 	return createDocument(root, source, { kind, title: parse(source).doc.title }).id;
 }
 
-beforeEach(async () => {
-	// A stand-in page server, so `send` finds one answering and never starts the real build.
-	page = createServer((_req, res) => res.end('ok'));
-	await new Promise<void>((resolve) => page.listen(0, '127.0.0.1', resolve));
-	port = (page.address() as { port: number }).port;
+// A stand-in page server, so `send` finds one answering and never starts the real build. It runs in
+// a separate process because `run` blocks this one.
+beforeAll(async () => {
+	const script = `const s = require('node:http').createServer((q, r) => r.end('ok'));
+s.listen(0, '127.0.0.1', () => console.log(s.address().port));`;
+	page = spawn(process.execPath, ['-e', script], { stdio: ['ignore', 'pipe', 'inherit'] });
+	port = await new Promise<number>((resolve) => page.stdout!.once('data', (d) => resolve(Number(String(d).trim()))));
+});
+
+afterAll(() => {
+	page.kill();
+});
+
+beforeEach(() => {
 	dir = mkdtempSync(join(tmpdir(), 'aq-send-'));
 	state = join(dir, 'state');
 	root = join(state, 'store');
@@ -112,7 +120,6 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
-	page.close();
 	for (const child of children.splice(0)) child.kill('SIGKILL');
 	rmSync(dir, { recursive: true, force: true });
 });
@@ -128,11 +135,23 @@ describe('send', () => {
 		expect(readDocument(root, id).source).toBe(readFileSync(REPORT, 'utf8'));
 	});
 
+	it('names the page when xdg-open is missing, and still stores the document', () => {
+		rmSync(join(dir, 'xdg-open'));
+		const result = spawnSync(process.execPath, [CLI, 'send', REPORT], {
+			encoding: 'utf8',
+			env: { ...env(), PATH: dir }
+		});
+		expect(result.status).toBe(0);
+		const id = result.stdout.trim();
+		expect(result.stderr).toContain(`xdg-open isn't available; open http://127.0.0.1:${port}/d/${id}`);
+		expect(result.stderr).not.toContain('opened ');
+		expect(readDocument(root, id).meta.kind).toBe('report');
+	});
+
 	it('opens the stored document on the page server', async () => {
-		// Run without blocking, so the stand-in server in this process can answer.
-		const sent = start('send', REPORT);
-		expect(await sent.done).toBe(0);
-		const id = sent.seen.out.trim();
+		const { out, err } = run('send', REPORT);
+		const id = out.trim();
+		expect(err).toContain(`opened http://127.0.0.1:${port}/d/${id}`);
 		expect(await until(() => opened().length > 0, 5000)).toBe(true);
 		expect(opened()).toEqual([`http://127.0.0.1:${port}/d/${id}`]);
 	});

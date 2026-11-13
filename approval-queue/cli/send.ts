@@ -1,8 +1,8 @@
 import type { PrView, ViewResult } from '#lib/doc/pr.ts';
 import { addVersion, createDocument, readDocument, storeRoot, writeDecision, writeNamed } from '#lib/store/store.ts';
 import { check } from './check.ts';
-import { showDocument } from './show.ts';
 import { ghView } from './pr.ts';
+import { showDocument } from './show.ts';
 import type { State } from './state.ts';
 import { readState, storeFailure, waitForDecision } from './wait.ts';
 

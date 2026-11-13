@@ -51,6 +51,7 @@ export function lock(file: string, wait: boolean): number | null {
 	return null;
 }
 
+/** Whether `url` answers with a status below 500 within three seconds. */
 export async function answers(url: string): Promise<boolean> {
 	try {
 		const res = await fetch(url, { signal: AbortSignal.timeout(3000) });
