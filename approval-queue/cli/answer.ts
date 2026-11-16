@@ -133,7 +133,7 @@ function answerExisting(args: Args): number {
 		if (typeof picks === 'string') return refuse(picks);
 		const extra = { via: 'chat', message: found.message, session: found.session };
 		if (args.action === 'sendback') {
-			if (meta.kind === 'report') return refuse(DOC.badAction);
+			if (doc.kind === 'report') return refuse(DOC.badAction);
 			const refused = writeChatNote(root, id, args, found.outside, meta.versions, source, doc.title);
 			if (refused) return refuse(refused);
 		}

@@ -544,6 +544,7 @@ async function check8(browser, name) {
 	check(panel.includes(message), 'check 8: the decided panel shows the whole message');
 	const desk = fileURLToPath(new URL('../../.playwright-mcp/desk/', import.meta.url));
 	mkdirSync(desk, { recursive: true });
+	await decide(page).scrollIntoViewIfNeeded();
 	await page.screenshot({ path: join(desk, 'check-8-chat.png') }).catch(() => {});
 	await page.close();
 }
