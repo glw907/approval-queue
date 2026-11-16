@@ -25,6 +25,16 @@ function edited(text: string, edit: (e: Record<string, unknown>) => void): strin
 }
 
 describe('findInRecord', () => {
+	it('refuses a message whose timestamp is missing or malformed, whatever the arrival time', () => {
+		for (const stamp of [undefined, 'soon']) {
+			const raw = edited('Early words approve', (e) => {
+				e.timestamp = stamp;
+			});
+			expect(findInRecord(raw, 'Early words approve', ARRIVED).ok).toBe(false);
+			expect(findInRecord(raw, 'Early words approve', null).ok).toBe(false);
+		}
+	});
+
 	it.each([
 		['the launch prompt', 'Launch words approve'],
 		['a tool result', 'Tool words approve'],
