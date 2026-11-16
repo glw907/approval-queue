@@ -65,6 +65,10 @@ export interface Decision {
 	type: 'approve' | 'sendback' | 'read';
 	at: string;
 	answers: Record<string, number>;
+	/** Set to `chat` when the decision was recorded from Geoff's words in the desk session. */
+	via?: 'chat';
+	/** The whole chat message the decision came from, shown as text. */
+	message?: string;
 }
 
 export interface DocState {
