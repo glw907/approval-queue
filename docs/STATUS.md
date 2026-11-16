@@ -31,26 +31,25 @@ Geoff and return his decision as JSON. `README.md` holds the interfaces and the 
 
 ## Current state
 
-- `main` still serves the old queue: the old SvelteKit app and the bash command. Passes A1 to A5
-  (PRs #19 to #23) put the new app under `next/`, and the switch to it waits on PR #24.
-- Pass A6 is on `aq-a6` as PR #24. It deletes the old app, the old bash command, and their shell
-  tests, and moves `next/` to `approval-queue/`. The command is a launcher with nine commands, and
-  seven old subcommands print that they are gone.
-- `restart` carries the switch. The first restart on a state directory that holds the old queue's
-  files refuses while an old item is undecided, then moves the old files into
-  `archive-2026-11.tar.gz` once the new server answers.
-- The switch and its undo were rehearsed against a copy of the real state directory under
-  `unshare -rnpf --mount-proc --kill-child` (`npm run rehearse --prefix approval-queue`). The
-  rehearsal's output is in the PR body.
-- The reminder hook says a pull request goes to Geoff in a document sent with `approval-queue send`.
-- pavilion and thinkpad-x1 both run the old queue until the switch.
+- `main` serves the new queue. PR #26 (`desk-queue`) added `approval-queue list` and
+  `approval-queue answer`, so Geoff's decision can be recorded from his words in the chat session
+  named `desk`.
+- `answer` reads the session's record under `~/.claude/projects`, confirms through
+  `claude agents --json` that the session is named `desk`, and refuses unless the `--words` text sits
+  in a message Geoff typed after the document's latest arrival. A chat decision stores `via: "chat"`,
+  the whole message, and the session id. The decided page shows the message under "Recorded from chat."
+- `list` prints each waiting document, oldest first. `list --wait` exits on the first new one.
+- The checks catch a session's mistake. They don't stop a session set on writing a false record.
+- `decide-checks.mjs` has an eighth check: a decision recorded from chat shows on the decided page.
+- Backlog #74 stays open on all five points. The PR lists two review findings left open: a document
+  whose decision file fails to read for one poll can wake `list --wait` falsely, and a store error that
+  isn't a `StoreError` prints a stack trace.
+- On thinkpad-x1, `~/.dotfiles` and `~/Projects/approval-queue` need a pull and an
+  `approval-queue restart` if the switch to the new queue hasn't reached it.
 
 ## Next action
 
-The workstation round's conductor sends the close packet that carries PR #24, and runs the
-switch after Geoff's approve (workstation design, "The switch"): merge, pull the checkout, and run
-`approval-queue restart` on pavilion. On thinkpad-x1, after the switch: pull `~/.dotfiles` and
-`~/Projects/approval-queue`, run `approval-queue restart`, and run
-`systemctl --user disable --now decision-review.timer` if it still runs.
-
-The PR body's "Undo the switch" lists the steps back. Open items are in `BACKLOG.md`.
+The planner `workstation-desk-ws-plan` writes the workstation half of the desk: the desk session's
+launch and its use of `list --wait` and `answer`. Its launch prompt is
+`~/Projects/initiatives/.claude/worktrees/unattended-rounds/unattended-rounds/plans/desk-ws-planning-prompt.txt`.
+Open items are in `BACKLOG.md`.

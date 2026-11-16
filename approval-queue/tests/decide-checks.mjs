@@ -17,6 +17,8 @@ import { chromium, seed, serve } from '../scripts/page-checks.mjs';
 import { parse } from '../src/lib/doc/parse.ts';
 import { createDocument, readDecisions, readNamed, writeDecision, writeNamed } from '../src/lib/store/store.ts';
 import { DOC, FRONT, LAYOUT } from '../src/lib/strings.ts';
+import { spawnSync } from 'node:child_process';
+import { chmodSync, copyFileSync, writeFileSync } from 'node:fs';
 
 /** The one port the decision checks use. */
 const PORT = 7955;
@@ -500,6 +502,53 @@ async function check7(/** @type {Browser} */ browser, /** @type {string} */ name
 	await page.close();
 }
 
+/**
+ * Check 8: a decision recorded by `answer` from the desk session's words shows as recorded from
+ * chat, with the whole message. The session record is the committed fixture, in a scratch config
+ * folder, with a stub `claude` that names the session `desk`; the real `claude` never runs.
+ *
+ * @param {Browser} browser @param {string} name the mockup document that asks two or more questions
+ */
+async function check8(browser, name) {
+	const session = '00000000-0000-4000-8000-0000000000de';
+	const message = 'Read it through, looks right. approve it';
+	const dir = mkdtempSync(join(state, 'desk-'));
+	mkdirSync(join(dir, 'bin'));
+	mkdirSync(join(dir, 'projects', '-fixture'), { recursive: true });
+	copyFileSync(fileURLToPath(new URL('../cli/fixtures/desk-record.jsonl', import.meta.url)), join(dir, 'projects', '-fixture', `${session}.jsonl`));
+	writeFileSync(join(dir, 'bin', 'claude'), `#!/bin/sh\necho '[{"sessionId":"${session}","name":"desk"}]'\n`);
+	chmodSync(join(dir, 'bin', 'claude'), 0o755);
+
+	const id = fresh(name);
+	const meta = join(root, id, 'meta.json');
+	writeFileSync(meta, JSON.stringify({ ...JSON.parse(readFileSync(meta, 'utf8')), created: '2026-01-01T10:05:00.000Z' }));
+	const { doc } = parse(readFileSync(join(MOCKUP, 'content', `${name}.md`), 'utf8'));
+	const picks = doc.segments.filter((s) => s.type === 'question').flatMap((q) => ['--pick', `${q.label}=1`]);
+	const answered = spawnSync(process.execPath, [CLI, 'answer', id, 'approve', '--words', 'approve it', ...picks], {
+		encoding: 'utf8',
+		env: {
+			...process.env,
+			PATH: `${join(dir, 'bin')}:${process.env.PATH}`,
+			APPROVAL_QUEUE_STATE: state,
+			CLAUDE_CONFIG_DIR: dir,
+			CLAUDE_CODE_SESSION_ID: session
+		}
+	});
+	check(answered.status === 0, `check 8: answer exited ${answered.status}: ${answered.stderr.trim()}`);
+	check(records(id).at(0)?.via === 'chat', 'check 8: decision-1.json carries via chat');
+
+	const page = await newPage(browser);
+	await open(page, id);
+	const panel = (await decide(page).innerText()).replace(/\s+/g, ' ');
+	check(panel.includes(DOC.fromChat), `check 8: the decided panel shows "${DOC.fromChat}"`);
+	check(panel.includes(message), 'check 8: the decided panel shows the whole message');
+	const desk = fileURLToPath(new URL('../../.playwright-mcp/desk/', import.meta.url));
+	mkdirSync(desk, { recursive: true });
+	await decide(page).scrollIntoViewIfNeeded();
+	await page.screenshot({ path: join(desk, 'check-8-chat.png') }).catch(() => {});
+	await page.close();
+}
+
 /** The seeded mockup document with the most questions, two or more. */
 function questioned() {
 	const content = join(MOCKUP, 'content');
@@ -531,6 +580,7 @@ async function main() {
 		await run('check 5', () => check5(browser, seeded.ids['30-round-report']));
 		await run('check 6', () => check6(browser, questioned()));
 		await run('check 7', () => check7(browser, questioned()));
+		await run('check 8', () => check8(browser, questioned()));
 	} finally {
 		await browser?.close();
 		await stop();
@@ -538,5 +588,41 @@ async function main() {
 	}
 	process.exit(failed ? 1 : 0);
 }
+
+/**
+ * `mockup <dir>` mode: serves the mockup copy in `dir` on port 7959, opens its seeded
+ * chat-decided document, prints one `ok:` or `FAIL:` line, and screenshots it to
+ * `.playwright-mcp/desk/mockup-chat.png`. The copy holds `.state/state.json` with that decision.
+ *
+ * @param {string} dir
+ */
+async function mockupMode(dir) {
+	const base = 'http://127.0.0.1:7959';
+	const shots = fileURLToPath(new URL('../../.playwright-mcp/desk/', import.meta.url));
+	mkdirSync(shots, { recursive: true });
+	const vite = join(dir, 'node_modules', '.bin', 'vite');
+	const child = await serve(vite, ['dev', '--host', '127.0.0.1', '--port', '7959', '--strictPort'], { cwd: dir }, base);
+	const browser = await chromium();
+	try {
+		const page = await newPage(browser);
+		await page.goto(`${base}/d/50-backlog`);
+		await page.waitForLoadState('networkidle').catch(() => {});
+		const text = (await page.locator('section.decide').innerText()).replace(/\s+/g, ' ');
+		check(
+			text.includes('Recorded from chat') && text.includes('Read it through, looks right. approve it'),
+			'mockup: the decided panel shows Recorded from chat and the whole message'
+		);
+		await page.locator('section.decide').scrollIntoViewIfNeeded();
+		await page.screenshot({ path: join(shots, 'mockup-chat.png') });
+	} finally {
+		await browser.close();
+		const exited = once(child, 'exit');
+		child.kill();
+		await exited;
+	}
+	process.exit(failed ? 1 : 0);
+}
+
+if (process.argv[2] === 'mockup') await mockupMode(process.argv[3]);
 
 await main();

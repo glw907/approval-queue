@@ -198,6 +198,10 @@ confirmed it. When the server does not answer, the page says the choice was not 
 								{/if}
 							</h2>
 							<p class="mt-1 muted">The queue has recorded it.</p>
+							{#if decision.via === 'chat' && decision.message}
+								<p class="mt-3 muted">Recorded from chat</p>
+								<p class="mt-1 whitespace-pre-line">{decision.message}</p>
+							{/if}
 							{#if decision.type === 'approve' && questions.length}
 								<ul class="answers mt-3">
 									{#each questions as q (q.id)}

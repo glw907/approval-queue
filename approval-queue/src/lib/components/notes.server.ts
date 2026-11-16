@@ -21,7 +21,7 @@ export type { Entry, Thread, Who };
 
 /** A note operation as it is stored. */
 export type NoteRecord =
-	| { op: 'open'; who: Who; quote: string; start?: number; version: number; text: string; at: string }
+	| { op: 'open'; who: Who; via?: 'chat'; quote: string; start?: number; version: number; text: string; at: string }
 	| { op: 'reply'; thread: number; who: Who; text: string; at: string }
 	| { op: 'resolve'; thread: number; resolved: boolean; who: Who; at: string }
 	| { op: 'delete'; thread: number; at: string };
@@ -105,7 +105,7 @@ function moved(thread: Thread, older: string, newest: string): Thread {
 export const inlineText = (markdown: string) => plain(curly(renderInline(markdown)));
 
 /** Every piece of text a document draws, joined by spaces. */
-function documentText(source: string): string {
+export function documentText(source: string): string {
 	const { doc } = parse(source);
 	const parts = [doc.titleHtml];
 	for (const seg of doc.segments) {

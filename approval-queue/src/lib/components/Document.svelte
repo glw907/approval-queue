@@ -393,6 +393,10 @@
 											: DOC.markedRead(decision.at)}
 								</h2>
 								<p class="mt-1 muted">{DOC.recorded}</p>
+								{#if decision.via === 'chat' && decision.message}
+									<p class="mt-3 muted">{DOC.fromChat}</p>
+									<p class="mt-1 whitespace-pre-line">{decision.message}</p>
+								{/if}
 								{#if decision.action !== 'read'}
 									<p class="mt-3 muted">{standing.state === 'handed' ? DOC.handoffAfter : DOC.handoffBefore}</p>
 								{/if}

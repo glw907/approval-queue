@@ -57,18 +57,22 @@ type Body =
 	| NoteBody;
 
 /** Thrown inside a handler to answer with `status` and the page's sentence. */
-class Refusal {
-	constructor(
-		readonly status: number,
-		readonly message: string,
-		readonly standing: DocStanding | null = null
-	) {}
+export class Refusal {
+	readonly status: number;
+	readonly message: string;
+	readonly standing: DocStanding | null;
+
+	constructor(status: number, message: string, standing: DocStanding | null = null) {
+		this.status = status;
+		this.message = message;
+		this.standing = standing;
+	}
 }
 
 const DECISIONS = new Set(['approve', 'sendback', 'read']);
 
 /** A folded state with the number of records it was folded from. */
-type Folded = State & { seq: number };
+export type Folded = State & { seq: number };
 
 /** Reads document `id`'s records and folds them. */
 function read(root: string, id: string): Folded {
@@ -85,6 +89,10 @@ function toStanding(state: Folded): DocStanding {
 function view(record: Decision): DecisionView {
 	const out: DecisionView = { action: record.action as DecisionView['action'], at: record.at };
 	if (record.answers && typeof record.answers === 'object') out.answers = record.answers as Record<string, RecordedAnswer>;
+	if (record.via === 'chat' && typeof record.message === 'string') {
+		out.via = 'chat';
+		out.message = record.message;
+	}
 	return out;
 }
 
@@ -167,12 +175,29 @@ function answer(root: string, id: string, doc: Doc, body: Extract<Body, { op: 'a
 	return ok(read(root, id));
 }
 
-function decide(root: string, id: string, doc: Doc, source: string, body: Extract<Body, { op: 'decide' }>): Reply {
+/**
+ * Records a decision on document `id` and returns whether a record was written, with the state
+ * the records fold to. The page's route and the `answer` command both record through it, so the
+ * two apply one set of refusals.
+ *
+ * @param extra - Fields stored on the decision record beside the ones the page writes.
+ * @remarks Throws a {@link Refusal} with the page's sentence. An action the document already
+ * holds returns `wrote: false` with no write.
+ */
+export function record(
+	root: string,
+	id: string,
+	action: 'approve' | 'sendback' | 'read',
+	picks: Picks,
+	extra: Record<string, unknown> = {}
+): { wrote: boolean; state: Folded } {
+	const { source } = readDocument(root, id);
+	const { doc } = parse(source);
 	const report = doc.kind === 'report';
-	if (report !== (body.action === 'read')) throw new Refusal(400, DOC.badAction);
+	if (report !== (action === 'read')) throw new Refusal(400, DOC.badAction);
 	const questions = questionsOf(doc);
 	const answers: Record<string, RecordedAnswer> = {};
-	for (const [qid, pick] of Object.entries(body.answers)) {
+	for (const [qid, pick] of Object.entries(picks)) {
 		const q = checkPick(questions, qid, pick);
 		answers[qid] = { pick, label: q.options[pick].label };
 	}
@@ -180,36 +205,36 @@ function decide(root: string, id: string, doc: Doc, source: string, body: Extrac
 	const before = read(root, id);
 	if (before.state === 'withdrawn') throw new Refusal(409, DOC.withdrawn, toStanding(before));
 	if (before.state !== 'waiting') {
-		if (before.decision.action === body.action) return ok(before);
+		if (before.decision.action === action) return { wrote: false, state: before };
 		const why = before.state === 'handed' ? DOC.handoffAfter : DOC.alreadyDecided;
 		throw new Refusal(409, why, toStanding(before));
 	}
 
-	if (body.action === 'sendback' && !notesWaiting(root, id) && !questions.some((q) => moved(q, body.answers[q.id]))) {
+	if (action === 'sendback' && !notesWaiting(root, id) && !questions.some((q) => moved(q, picks[q.id]))) {
 		throw new Refusal(400, DOC.nothingToSendBack, toStanding(before));
 	}
-	if (body.action === 'approve') {
+	if (action === 'approve') {
 		const missing = questions.filter((q) => !(q.id in answers));
 		if (missing.length) throw new Refusal(400, DOC.unanswered(missing.map((q) => q.label)));
 	}
-	const record: Decision = { action: body.action, at: new Date().toISOString() };
-	if (questions.length) record.answers = answers;
-	if (body.action === 'approve' && doc.kind === 'merge') {
+	const decision: Decision = { ...extra, action, at: new Date().toISOString() };
+	if (questions.length) decision.answers = answers;
+	if (action === 'approve' && doc.kind === 'merge') {
 		const heads = readNamed(root, id, 'heads.json');
 		if (!Array.isArray(heads) || !heads.length) throw new Refusal(409, DOC.headsMissing, toStanding(before));
-		record.heads = heads;
+		decision.heads = heads;
 	}
-	if (body.action === 'approve' && doc.kind === 'design') {
-		record.hash = createHash('sha256').update(source).digest('hex');
+	if (action === 'approve' && doc.kind === 'design') {
+		decision.hash = createHash('sha256').update(source).digest('hex');
 	}
-	writeDecision(root, id, record);
+	writeDecision(root, id, decision);
 
 	const after = read(root, id);
 	if (after.state === 'withdrawn') throw new Refusal(409, DOC.withdrawn, toStanding(after));
-	if (after.state === 'waiting' || after.decision.action !== body.action) {
+	if (after.state === 'waiting' || after.decision.action !== action) {
 		throw new Refusal(409, DOC.alreadyDecided, toStanding(after));
 	}
-	return ok(after);
+	return { wrote: true, state: after };
 }
 
 /**
@@ -288,7 +313,7 @@ export function post(root: string, id: string, req: PostRequest): Reply {
 		if (!body) throw new Refusal(400, DOC.badRequest);
 		const { doc } = parse(source);
 		if (body.op === 'answer') return answer(root, id, doc, body);
-		if (body.op === 'decide') return decide(root, id, doc, source, body);
+		if (body.op === 'decide') return ok(record(root, id, body.action, body.answers).state);
 		if (body.op === 'undo') return undo(root, id);
 		return noteOp(root, id, meta.versions, body);
 	} catch (e) {
