@@ -27,6 +27,9 @@
 
 ## Medium
 
+- [ ] **#79** Two small edges in `list --wait` and `answer`: a false wake, and a stack trace `#improvement` `#approval-queue` *(2026-11-15)*
+  Found by the whole-branch read of PR #26 and left open. In `approval-queue/cli/list.ts`, a waiting document whose decision file can't be read for one poll leaves the baseline, then counts as new when it reads again, so `list --wait` wakes with no new document. In `approval-queue/cli/answer.ts`, an error that isn't a `StoreError`, thrown inside `answerExisting`'s `try`, reaches `storeFailure`, which rethrows it, so the command ends with a stack trace instead of an `approval-queue: ` line. Neither writes a record. Fix the first by keeping a document in the baseline when its read fails, and the second by printing the message for any error.
+
 - [ ] **#78** No browser check of where focus lands after Escape or Cancel in the note box `#improvement` `#approval-queue` *(2026-11-13)* *(swept 2026-11-15)*
   No page check covers the focus hand-back after Escape or Cancel in the note box (PR #23). The poll half of the old item is fixed: the 2-second poll in `Document.svelte` reloads only when the GET shows the standing changed.
   Add the focus check to `approval-queue/tests/notes-checks.mjs`.
