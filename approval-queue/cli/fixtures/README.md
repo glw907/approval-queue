@@ -10,7 +10,8 @@ each entry's envelope and its marks (`type`, `promptSource`, `turnOrigin`, the `
 - `origin` keeps only `kind`, `producer`, and `handback`. A real `origin` from another session
   carries that message's whole text in `body`.
 - `uuid`, `parentUuid`, `promptId`, and `sessionId` are fixture ids, and `parentUuid` chains the
-  lines in order.
+  lines in order. The first line's parent is a fixture id too, because no real record's first
+  prompt has a null parent: a command that spots the launch prompt by its null parent fails here.
 - Timestamps run from `2026-01-01T10:00:00.000Z` in minutes. A test shifts them all by one offset
   so the document arrives at 10:05.
 - `_fixture` says what each line stands for. Claude Code writes no such key.
