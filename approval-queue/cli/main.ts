@@ -42,6 +42,10 @@ async function dispatch(): Promise<number> {
 			const { reply } = await import('./reply.ts');
 			return rest[1] === undefined ? reply(arg, undefined, rest[0] ?? '') : reply(arg, rest[0], rest[1]);
 		}
+		case 'answer': {
+			const { answer } = await import('./answer.ts');
+			return answer(process.argv.slice(3));
+		}
 		case 'restart':
 			return (await import('./restart.ts')).restart();
 		default:
@@ -55,6 +59,9 @@ if (command && RETIRED.includes(command)) {
 	);
 	process.exit(1);
 }
+
+// `answer` parses its own flags, which the count check below would refuse.
+if (command === 'answer') process.exit(await dispatch());
 
 const returns = command === 'send' && arg === '--returns';
 const wanted = command === 'restart' ? 0 : command === 'land' ? 2 : command === 'reply' || returns ? 3 : 1;
