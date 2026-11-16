@@ -104,6 +104,7 @@ export const DOC = {
 	sentBack: (at: string) => `You sent this back ${when(at)}.`,
 	markedRead: (at: string) => `You marked this read ${when(at)}.`,
 	recorded: 'The queue has recorded it.',
+	fromChat: 'Recorded from chat',
 	undoApprove: 'Undo the approval',
 	undoSendback: 'Undo the send-back',
 	markUnread: 'Mark as unread',

@@ -539,4 +539,40 @@ async function main() {
 	process.exit(failed ? 1 : 0);
 }
 
+/**
+ * `mockup <dir>` mode: serves the mockup copy in `dir` on port 7959, opens its seeded
+ * chat-decided document, prints one `ok:` or `FAIL:` line, and screenshots it to
+ * `.playwright-mcp/desk/mockup-chat.png`. The copy holds `.state/state.json` with that decision.
+ *
+ * @param {string} dir
+ */
+async function mockupMode(dir) {
+	const base = 'http://127.0.0.1:7959';
+	const shots = fileURLToPath(new URL('../../.playwright-mcp/desk/', import.meta.url));
+	mkdirSync(shots, { recursive: true });
+	const vite = join(dir, 'node_modules', '.bin', 'vite');
+	const child = await serve(vite, ['dev', '--host', '127.0.0.1', '--port', '7959', '--strictPort'], { cwd: dir }, base);
+	const browser = await chromium();
+	try {
+		const page = await newPage(browser);
+		await page.goto(`${base}/d/50-backlog`);
+		await page.waitForLoadState('networkidle').catch(() => {});
+		const text = (await page.locator('section.decide').innerText()).replace(/\s+/g, ' ');
+		check(
+			text.includes('Recorded from chat') && text.includes('Read it through, looks right. approve it'),
+			'mockup: the decided panel shows Recorded from chat and the whole message'
+		);
+		await page.locator('section.decide').scrollIntoViewIfNeeded();
+		await page.screenshot({ path: join(shots, 'mockup-chat.png') });
+	} finally {
+		await browser.close();
+		const exited = once(child, 'exit');
+		child.kill();
+		await exited;
+	}
+	process.exit(failed ? 1 : 0);
+}
+
+if (process.argv[2] === 'mockup') await mockupMode(process.argv[3]);
+
 await main();

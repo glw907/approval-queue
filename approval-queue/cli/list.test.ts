@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -14,6 +14,11 @@ let root: string;
 
 const now = () => new Date().toISOString();
 const add = (title: string, kind = 'decide'): string => createDocument(root, `# ${title}\n`, { kind, title }).id;
+/** Moves a document's creation time, so two made in one second still sort as the test says. */
+function createdAt(id: string, created: string): void {
+	const file = join(root, id, 'meta.json');
+	writeFileSync(file, JSON.stringify({ ...JSON.parse(readFileSync(file, 'utf8')), created }));
+}
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 function run(args: string[]) {
@@ -72,6 +77,8 @@ describe('list', () => {
 	it('prints an unread report with the kind report, oldest first', () => {
 		const first = add('Round report', 'report');
 		const second = add('Next question');
+		createdAt(first, '2026-01-01T10:00:00.000Z');
+		createdAt(second, '2026-01-01T10:01:00.000Z');
 		expect(run([]).out).toBe(`${first}\treport\tRound report\n${second}\tdecide\tNext question\n`);
 	});
 

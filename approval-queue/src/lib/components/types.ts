@@ -81,6 +81,10 @@ export interface DecisionView {
 	action: 'approve' | 'sendback' | 'read';
 	at: string;
 	answers?: Record<string, RecordedAnswer>;
+	/** Set to `chat` when Geoff's words in the desk session recorded the decision. */
+	via?: 'chat';
+	/** The whole chat message the decision came from, shown as text. */
+	message?: string;
 }
 
 /**

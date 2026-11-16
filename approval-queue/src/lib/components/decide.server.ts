@@ -89,6 +89,10 @@ function toStanding(state: Folded): DocStanding {
 function view(record: Decision): DecisionView {
 	const out: DecisionView = { action: record.action as DecisionView['action'], at: record.at };
 	if (record.answers && typeof record.answers === 'object') out.answers = record.answers as Record<string, RecordedAnswer>;
+	if (record.via === 'chat' && typeof record.message === 'string') {
+		out.via = 'chat';
+		out.message = record.message;
+	}
 	return out;
 }
 
