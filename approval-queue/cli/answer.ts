@@ -50,7 +50,7 @@ function parseArgs(argv: string[]): Args | null {
 		const value = rest.shift();
 		if (value === undefined) return null;
 		if (flag === '--words' && words === null) words = value;
-		else if (flag === '--pick') {
+		else if (flag === '--pick' && action === 'approve') {
 			const at = value.lastIndexOf('=');
 			if (at < 1) return null;
 			args.picks.push({ label: value.slice(0, at), n: value.slice(at + 1) });
@@ -125,12 +125,15 @@ function answerExisting(args: Args): number {
 		const root = storeRoot();
 		const { meta, source } = readDocument(root, id);
 		const { doc } = parse(source);
-		const found = findWords(args.words, arrivedAt(root, id));
+		const arrived = arrivedAt(root, id);
+		if (!Number.isFinite(arrived)) return refuse(`${id} has no readable arrival time.`);
+		const found = findWords(args.words, arrived);
 		if (!found.ok) return refuse(found.reason);
 		const picks = resolvePicks(doc.segments.filter((s): s is Question => s.type === 'question'), args.picks);
 		if (typeof picks === 'string') return refuse(picks);
 		const extra = { via: 'chat', message: found.message, session: found.session };
 		if (args.action === 'sendback') {
+			if (meta.kind === 'report') return refuse(DOC.badAction);
 			const refused = writeChatNote(root, id, args, found.outside, meta.versions, source, doc.title);
 			if (refused) return refuse(refused);
 		}
@@ -149,6 +152,7 @@ function writeChatNote(root: string, id: string, args: Args, outside: string, ve
 	if (!text || !outside.includes(text)) return 'the note is not in the message that holds the words.';
 	const state = fold(readDecisions(root, id));
 	if (state.state === 'withdrawn') return DOC.withdrawn;
+	if (state.state === 'handed') return DOC.handoffAfter;
 	if (state.state !== 'waiting') return DOC.alreadyDecided;
 	if (noteLength(text) > NOTE_LIMIT) return NOTES.tooLong(noteLength(text));
 	const passage = args.passage?.trim();
@@ -160,8 +164,9 @@ function writeChatNote(root: string, id: string, args: Args, outside: string, ve
 function answerNew(args: Args, file: string): number {
 	const checked = check(file, () => ({ ok: false, error: 'no pull request is read for an answer' }));
 	if (checked.code !== 0 || !checked.doc || checked.source === null) {
-		process.stderr.write(checked.lines.map((l) => `${l}\n`).join(''));
-		return 1;
+		const [first = 'the document did not pass its check.'] = checked.lines;
+		const more = checked.lines.length > 1 ? ` (${checked.lines.length} lines in all)` : '';
+		return refuse(`${file} fails check: ${first}${more}`);
 	}
 	if (checked.doc.kind !== 'decide') return refuse('--new stores a decide document only.');
 	const questions = checked.doc.segments.filter((s): s is Question => s.type === 'question');

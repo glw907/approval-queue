@@ -157,6 +157,34 @@ describe('answer approve', () => {
 describe('answer sendback', () => {
 	const WORDS = 'Send the theme design back. The palette question is the wrong question.';
 
+	it('refuses a report before it writes a note or a decision', () => {
+		const { id } = createDocument(root, '---\nkind: report\n---\n\n# A report\n\nText.\n', { kind: 'report', title: 'A report' });
+		const meta = join(root, id, 'meta.json');
+		const parsed = JSON.parse(readFileSync(meta, 'utf8')) as Record<string, unknown>;
+		writeFileSync(meta, JSON.stringify({ ...parsed, created: '2026-01-01T10:05:00.000Z' }));
+		const r = answer(id, 'sendback', '--words', 'Send the theme design back', '--note', 'The palette question is the wrong question.');
+		expect(r.code).toBe(1);
+		expect(r.err).toBe("approval-queue: The page asked for a decision this document can't take.\n");
+		expect(notes(id)).toEqual([]);
+		expect(decisions(id)).toEqual([]);
+	});
+
+	it('refuses a document whose arrival time is unreadable, recording nothing', () => {
+		const id = store();
+		const meta = join(root, id, 'meta.json');
+		const parsed = JSON.parse(readFileSync(meta, 'utf8')) as Record<string, unknown>;
+		writeFileSync(meta, JSON.stringify({ ...parsed, created: 'soon' }));
+		const r = answer(id, 'approve', '--words', 'Early words approve', '--pick', 'Direction=1');
+		expect(r.code).toBe(1);
+		expect(r.err).toMatch(/^approval-queue: /);
+		expect(decisions(id)).toEqual([]);
+	});
+
+	it('takes no --pick on a send-back, as usage', () => {
+		const id = store();
+		expect(answer(id, 'sendback', '--words', 'Send the theme design back', '--note', 'The palette question is the wrong question.', '--pick', 'Direction=1').code).toBe(2);
+	});
+
 	it("stores the note as Geoff's from chat, then records the send-back", () => {
 		const id = store();
 		const r = answer(id, 'sendback', '--words', 'Send the theme design back', '--note', 'The palette question is the wrong question.');
@@ -228,9 +256,17 @@ describe('answer --new', () => {
 		expect(stored()).toHaveLength(1);
 	});
 
-	it('refuses a merge document, storing nothing', () => {
+	it('refuses a document that fails its check with one prefixed line, storing nothing', () => {
 		const r = run(['answer', '--new', MERGE, 'approve', '--words', 'approve it']);
 		expect(r.code).toBe(1);
+		expect(r.err).toMatch(/^approval-queue: [^\n]+\n$/);
+		expect(stored()).toEqual([]);
+	});
+
+	it('refuses a document that passes its check but is not a decide document, storing nothing', () => {
+		const r = run(['answer', '--new', doc('---\nkind: report\n---\n\n# A report\n\nText.\n'), 'approve', '--words', 'approve it']);
+		expect(r.code).toBe(1);
+		expect(r.err).toBe('approval-queue: --new stores a decide document only.\n');
 		expect(stored()).toEqual([]);
 	});
 

@@ -106,8 +106,12 @@ describe('findInRecord', () => {
 });
 
 describe('outsidePastes', () => {
+	it('does not join the typed text on each side of a paste', () => {
+		expect(outsidePastes('appr<pasted_content id="1">x</pasted_content id="1">ove it')).not.toContain('approve it');
+	});
+
 	it('removes a paste by its id and keeps the rest', () => {
-		expect(outsidePastes('a <pasted_content id="2">x</pasted_content id="2"> b')).toBe('a  b');
+		expect(outsidePastes('a <pasted_content id="2">x</pasted_content id="2"> b')).toBe('a \n b');
 	});
 });
 

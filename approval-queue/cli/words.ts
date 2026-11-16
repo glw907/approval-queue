@@ -53,7 +53,7 @@ export interface NotFound {
 
 /** Removes each `<pasted_content>` block from `text`. */
 export function outsidePastes(text: string): string {
-	return text.replace(PASTE, '');
+	return text.replace(PASTE, '\n');
 }
 
 type Entry = Record<string, unknown>;
@@ -144,8 +144,9 @@ function sessionRecord(env: NodeJS.ProcessEnv): { id: string; file: string } | N
 	} catch {
 		return { ok: false, reason: WORDS.notNamed };
 	}
-	const row = Array.isArray(rows) ? rows.find((r) => isRecord(r) && r.sessionId === id) : undefined;
-	if (!isRecord(row) || row.name !== DESK) return { ok: false, reason: WORDS.notNamed };
+	const matches = Array.isArray(rows) ? rows.filter((r) => isRecord(r) && r.sessionId === id) : [];
+	const row = matches[0];
+	if (matches.length !== 1 || !isRecord(row) || row.name !== DESK) return { ok: false, reason: WORDS.notNamed };
 	const projects = join(env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude'), 'projects');
 	const files: string[] = [];
 	if (existsSync(projects)) {
