@@ -27,9 +27,9 @@
 
 ## Medium
 
-- [ ] **#78** Two page edges: a poll's `invalidateAll` after a GET that succeeded, and no browser check of focus after Escape or Cancel `#improvement` `#approval-queue` *(2026-11-13)*
-  The 2-second poll calls `invalidateAll` after a GET that already succeeded, and no browser check covers where focus lands after Escape or Cancel in the note box (PR #22, PR #23).
-  Skip the reload when the GET changed nothing, and add the focus check to the page checks.
+- [ ] **#78** No browser check of where focus lands after Escape or Cancel in the note box `#improvement` `#approval-queue` *(2026-11-13)* *(swept 2026-11-15)*
+  No page check covers the focus hand-back after Escape or Cancel in the note box (PR #23). The poll half of the old item is fixed: the 2-second poll in `Document.svelte` reloads only when the GET shows the standing changed.
+  Add the focus check to `approval-queue/tests/notes-checks.mjs`.
 
 - [ ] **#77** Three small command edges: `reply` reads "01" as thread 1, `send` writes `heads.json` after `createDocument`, and `restart`'s spare-port wait carries on after 10 seconds `#improvement` `#approval-queue` *(2026-11-13)*
   Found in PR #20, PR #22, and PR #23. `reply 01` answers thread 1 where it should refuse the spelling. `send` writes `heads.json` after `createDocument`, so a crash between the two leaves a document with no heads. `restart` keeps waiting for the spare port after 10 seconds when the trial allows 20.
@@ -43,9 +43,9 @@
   The mockup shows a plain `btn` with no edge on the decide panel. The app's aria-disabled Approve is faint, the busy button has no spinner, and Send back does not darken on hover while it is refused (PR #22, PR #23). Per `.claude/rules/pages.md`, the mockup changes first and Geoff approves it.
   Draw each in `docs/mockup/`, get his approval, then change the app.
 
-- [ ] **#74** The answer-refusal path's four accessibility points S1 to S4, and S6's missing margin `#improvement` `#approval-queue` *(2026-11-13)*
-  The `standards:daisyui-a11y-reviewer` read of pass A4 left four Minor findings on the answer-refusal path (S1 to S4), and pass A5's read found S6, a page with no notes margin (PR #22, PR #23).
-  Fix S1 to S4 together, then give S6's page the margin.
+- [ ] **#74** The answer-refusal path's accessibility points S1 to S4 and S6 `#improvement` `#approval-queue` *(2026-11-13)* *(swept 2026-11-15)*
+  The `standards:daisyui-a11y-reviewer` read of pass A4 left these points on the answer-refusal path (PR #22, PR #23). S1: after a lost answer, an approve, and an Undo, the radio can still show a pick `answers.json` never stored, since `picks` resets only from a decision's answers. S2: an answer post in flight gives the radios no busy state. S3: check 7 in `approval-queue/tests/decide-checks.mjs` doesn't drive the moved-decision, retry-button, or first-radio focus branches. S4: each failure block is an inserted `role="alert"`, which may be read twice. S6: an answer's failure block has no bottom margin; the mockup draws the same `mt-4`, so the mockup changes first.
+  Fix S1 to S4 together, then draw S6 in the mockup for Geoff's approval.
 
 - [ ] **#73** `merge` has no answer for a `## Before merge` section in a pull request body `#improvement` `#approval-queue` *(2026-11-13)*
   The old `merge` stopped with exit 2 at a pull request whose body had `## Before merge` and printed the section. The new `merge` runs no such step and says nothing, and neither the queue design nor the workstation design gives that work to a pass (PR #22). The README claims none.
